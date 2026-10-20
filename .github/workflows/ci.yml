@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: lint and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache-dependency-path: engine/go.sum
+      - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+      - name: check the workflow files
+        run: |
+          python -m pip install --quiet pyyaml
+          python -c "import glob, yaml; [yaml.safe_load(open(f)) for f in glob.glob('.github/workflows/*.yml')]"
+      - name: ruff
+        run: ruff check .
+      - name: pytest
+        run: python -m pytest -q
+      - name: the engine tests
+        working-directory: engine
+        run: go test -race ./...
+      - name: the engine builds
+        working-directory: engine
+        run: go build ./...
+
+  image:
+    name: docker image
+    needs: test
+    # The image is built on every push. It is published to Docker Hub when the
+    # repository has the variable DOCKERHUB_PUSH set to "true" and the secrets
+    # DOCKERHUB_USERNAME and DOCKERHUB_TOKEN. The name of the image comes
+    # from the variable DOCKERHUB_REPO.
+    if: github.event_name == 'push' && vars.DOCKERHUB_REPO != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: log in to Docker Hub
+        if: vars.DOCKERHUB_PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: publish the image
+        if: vars.DOCKERHUB_PUSH == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ vars.DOCKERHUB_REPO }}:latest
+            ${{ vars.DOCKERHUB_REPO }}:${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: build the image without publishing it
+        if: vars.DOCKERHUB_PUSH != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    name: github release
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - run: python -m pip install --upgrade pip build
+      - name: build the panel
+        run: python -m build --sdist --wheel --outdir dist
+      - name: build the engine
+        run: bash engine/build.sh dist
+      - name: checksums
+        # the panel looks for SHA256SUMS next to the engine files
+        run: |
+          cd dist
+          sha256sum bulltunn-[0-9]*.whl bulltunn-[0-9]*.tar.gz >> SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*
+          generate_release_notes: true

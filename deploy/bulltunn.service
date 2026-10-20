@@ -1,0 +1,37 @@
+[Unit]
+Description=Bull-Tunn - reverse tunnel control panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bulltunn
+Group=bulltunn
+WorkingDirectory=/opt/bulltunn
+EnvironmentFile=-/etc/default/bulltunn
+ExecStart=/opt/bulltunn/venv/bin/python -m bulltunn --data /var/lib/bulltunn serve
+Restart=always
+RestartSec=3
+
+# The panel shares servers with live tunnels: it must never compete with them.
+Nice=10
+IOSchedulingClass=idle
+CPUQuota=50%
+MemoryMax=400M
+
+# It only ever writes into its own data directory.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+ReadWritePaths=/var/lib/bulltunn
+
+[Install]
+WantedBy=multi-user.target
