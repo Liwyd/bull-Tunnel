@@ -35,12 +35,12 @@ async def test_observe_mode_reports_but_changes_nothing(world):
     assert FakeDNS.calls == []  # no DNS change
     assert w.net.calls == calls_before  # no deploy, no restart, no rewrite
     assert w.dom.iran_id == w.i1.id
-    proposals = [n for n in w.notes if "حالت نظارت" in n]
-    assert len(proposals) == 1 and "تغییر می‌کرد" in proposals[0]
+    proposals = [n for n in w.notes if "observe mode" in n]
+    assert len(proposals) == 1 and "would have" in proposals[0]
     # it heals by itself: reported once more, still nothing changed
     w.net.blocked.clear()
     await w.settle(2)
-    assert a.status == L_UP and w.said("دوباره سالم است")
+    assert a.status == L_UP and w.said("is healthy again")
     assert FakeDNS.calls == [] and w.net.calls == calls_before
 
 
@@ -54,7 +54,7 @@ async def test_observe_mode_never_points_a_record_somewhere_new(world):
         w.net.deployed[x.id] = "tcpmux"
     await w.settle(2)
     assert FakeDNS.calls == []
-    assert w.said("رکورد دست نخورد") and w.dom.iran_id == ""
+    assert w.said("the record was left untouched") and w.dom.iran_id == ""
 
 
 
@@ -73,10 +73,10 @@ async def test_unreadable_record_is_retried_and_never_written(world):
     w.orch.dns_factory = Refusing
     w.dom.current_ip = ""
     await w.orch.read_record(w.dom)
-    assert w.dom.error.startswith("DNS read") and w.said("خوانده نشد")
+    assert w.dom.error.startswith("DNS read") and w.said("could not be read")
     await w.settle(2)
     assert len(reads) == 1  # not hammered every check
-    assert not w.said("هیچ‌کدام از سرورهای داخل")  # the panel does not know where it points
+    assert not w.said("not one of the registered Iran servers")  # the panel does not know where it points
     w.orch.last_read[w.dom.id] -= 301
     w.orch.dns_factory = FakeDNS
     FakeDNS.records[w.dom.fqdn] = w.i1.ip
@@ -103,7 +103,7 @@ async def test_new_tunnel_is_not_built_on_a_port_already_in_use(world):
     assert not ok and link.status == L_PENDING
     assert "443" in link.error
     assert not any(c[0] == "deploy" and c[1] == link.id for c in w.net.calls)
-    assert w.said("ساخته نشد")
+    assert w.said("was not built")
 
 
 async def test_bulk_build_never_touches_working_or_wobbling_tunnels(world):

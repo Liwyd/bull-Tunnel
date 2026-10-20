@@ -1,102 +1,144 @@
-<div dir="rtl">
-
 # Bull-Tunn
 
-**پنل مدیریت تانل‌های معکوس بین سرورهای ایران و خارج.** Bull-Tunn تانل‌ها را می‌سازد، سلامتشان را از سر تا سر می‌سنجد، در قطعی رکورد دامنه را به سرور سالم می‌برد و همه‌چیز را در **تلگرام** گزارش می‌کند.
+**The control panel for reverse tunnels between Iranian and foreign servers.**
+Bull-Tunn builds the tunnels, measures their health end to end, moves the
+domain record to a healthy server when one dies, and reports everything to
+**Telegram**.
 
-Bull-Tunn یک ابزار مستقل است: موتور تانل، پنل و قرارداد بینشان همه در همین مخزن تعریف شده‌اند و به هیچ پروژه بیرونی وابسته نیستند.
+Bull-Tunn is an independent tool: the tunnel engine, the panel and the
+contract between them are all defined in this repository, and it depends on
+no outside project.
 
-![داشبورد](docs/dashboard-dark.png)
+![Dashboard](docs/dashboard-dark.png)
 
-## فهرست
+## Contents
 
-- [چه چیزی هست](#چه-چیزی-هست)
-- [معماری](#معماری)
-- [امکانات](#امکانات)
-- [نصب](#نصب)
-- [نصب با Docker](#نصب-با-docker)
-- [پنل روی دامنه با HTTPS](#پنل-روی-دامنه-با-https)
-- [مهاجرت از نسخه قبلی](#مهاجرت-از-نسخه-قبلی)
-- [شروع کار روی سرورهای لایو](#شروع-کار-روی-سرورهای-لایو)
-- [کلید API آروان و کلادفلر](#کلید-api-آروان-و-کلادفلر)
-- [منطق جابه‌جایی](#منطق-جابهجایی)
-- [خروجی نهایی پورت‌ها](#خروجی-نهایی-پورتها)
-- [موتور تانل](#موتور-تانل)
-- [بکاپ و بازگردانی](#بکاپ-و-بازگردانی)
-- [ربات تلگرام](#ربات-تلگرام)
-- [به‌روزرسانی](#بهروزرسانی)
-- [جزئیات فنی](#جزئیات-فنی)
-- [نقشه راه](#نقشه-راه)
-- [English summary](#english-summary)
+- [What it is](#what-it-is)
+- [Architecture](#architecture)
+- [Features](#features)
+- [Installation](#installation)
+- [Installation with Docker](#installation-with-docker)
+- [The panel on a domain with HTTPS](#the-panel-on-a-domain-with-https)
+- [Migrating from the previous version](#migrating-from-the-previous-version)
+- [Going live on real servers](#going-live-on-real-servers)
+- [ArvanCloud and Cloudflare API keys](#arvancloud-and-cloudflare-api-keys)
+- [The failover logic](#the-failover-logic)
+- [The final exit of a port](#the-final-exit-of-a-port)
+- [The tunnel engine](#the-tunnel-engine)
+- [The command channel (DNS)](#the-command-channel-dns)
+- [Backups and restore](#backups-and-restore)
+- [The Telegram bot](#the-telegram-bot)
+- [Updating](#updating)
+- [Technical details](#technical-details)
+- [Roadmap](#roadmap)
 
-## چه چیزی هست
+## What it is
 
-Bull-Tunn دو چیز را از هم جدا نگه می‌دارد:
+Bull-Tunn keeps two things apart:
 
-| | چیست | کجا اجرا می‌شود | اگر خراب شود |
+| | What it is | Where it runs | If it breaks |
 |---|---|---|---|
-| **لایه داده** | موتور تانل: خود تانل و ترافیک کاربر | روی هر دو سرورِ تانل | فقط همان تانل می‌افتد |
-| **لایه کنترل** | همین پنل: ساخت، سنجش، جابه‌جایی، DNS، گزارش | روی یک سرور خارج از ایران | هیچ تانلی نمی‌افتد |
+| **The data plane** | The tunnel engine: the tunnel itself and the user traffic | On both servers of the tunnel | Only that tunnel goes down |
+| **The control plane** | This panel: building, measuring, failing over, DNS, reporting | On one server outside Iran | No tunnel goes down |
 
-پنل هیچ‌وقت در مسیر ترافیک نیست. اگر پنل خاموش شود، تانل‌ها دقیقاً مثل قبل کار می‌کنند.
+The panel is never in the traffic path. If it is switched off, the tunnels
+keep working exactly as before.
 
-## معماری
+## Architecture
 
 ```
-   کاربر ──► سرور داخل ──► تانل ──► سرور خارج ──► سرویس اصلی
-              (IP عمومی)
+   user ──► Iran server ──► tunnel ──► foreign server ──► the real service
+              (public IP)
 
-   پنل ──SSH──► سرور داخل          پنل ──HTTPS──► Cloudflare / Arvan
-   پنل ──SSH──► سرور خارج          پنل ──HTTPS──► تلگرام
+   panel ──SSH──► Iran server        panel ──HTTPS──► Cloudflare / Arvan
+   panel ──SSH──► foreign server     panel ──HTTPS──► Telegram
 ```
 
-پنل برای هر سرور **یک اتصال SSH** باز نگه می‌دارد و همه کارها (نوشتن کانفیگ، بالا/پایین کردن سرویس، سنجش سلامت، خواندن قوانین NAT) را با همان یک اتصال انجام می‌دهد. توضیح کامل: [docs/architecture.md](docs/architecture.md).
+The panel keeps **one SSH connection** open per server and does all of its
+work (writing the config, starting and stopping the service, measuring the
+health, reading the NAT rules) over that same connection. The full
+explanation: [docs/architecture.md](docs/architecture.md).
 
-## امکانات
+## Features
 
-- **میز کار گرافیکی:** سرورهای خارج چپ، داخل وسط و دامنه‌ها راست. زوم و جابه‌جایی آزاد است، چیدمان ذخیره می‌شود و حالت تاریک و روشن دارد. رنگ هر خط وضعیت تانل است و پروتکل و تأخیر روی آن نوشته می‌شود.
-- **پیدا کردن تانل‌های موجود:** سرورها را با آی‌پی و SSH اضافه کنید. پنل `/etc/bulltunn` را می‌خواند و تانل‌های فعال را با همان اسم، پروتکل و پورت‌ها اضافه می‌کند.
-- **دامنه = سرور داخل + پورت‌ها:** هر پورت دامنه می‌تواند از تانل جدا به خارج متفاوتی برود. دامنه فقط وقتی سالم است که همه پورت‌هایش سالم باشند.
-- **جابه‌جایی خودکار:** در قطعی یا ناپایداری، اول تانل دیگری روی همان سرور داخل امتحان می‌شود. بعد رکورد به سرور داخلی می‌رود که همه پورت‌ها را سالم دارد. بعد از ۱۰ دقیقه پایداری، ترافیک به سرور اصلی برمی‌گردد.
-- **تغییر پروتکل با یک کلیک:** مثلاً tcpmux به wsmux. همه پروتکل‌ها تست می‌شوند و نتیجه و تأخیرشان کنار هم دیده می‌شود.
-- **تست اتصال ⚡:** در کشوی هر سرور، دکمه ⚡ مسیر بین آن سرور و یک سرور از طرف دیگر را **روی همه پروتکل‌ها** می‌سنجد: زمان برقراری اتصال، زمان دست‌دهی و **رفت‌وبرگشت واقعی** روی همان مسیری که تانل از آن رد می‌شود. بهترین پروتکل همان لحظه پیشنهاد می‌شود و با یک کلیک روی تانل اعمال می‌شود.
-- **خروجی نهایی:** اگر پورتی از خارج به سرور دیگری فوروارد شود (iptables، socat، gost، رله و…)، در پنل دیده می‌شود.
-- **حالت نظارت:** روشن است تا وقتی خودتان خاموشش کنید. در این حالت پنل فقط می‌بیند و گزارش می‌دهد.
-- **بکاپ شبانه:** ساعت ۳ بامداد، رمزدار، به تلگرام فرستاده می‌شود. بازگردانی از داخل پنل یا خط فرمان انجام می‌شود.
-- **Docker:** یک ایمیج آماده برای اجرای پنل روی هر میزبانی که Docker دارد.
+- **A graphical workbench:** the foreign servers on the left, the Iran
+  servers in the middle and the domains on the right. Free zoom and
+  dragging, the layout is saved, and there is a dark and a light mode. The
+  colour of a line is the state of the tunnel, and the protocol and the
+  latency are written on it.
+- **Finding the tunnels that already exist:** add the servers with their IP
+  address and SSH access. The panel reads `/etc/bulltunn` and adds the
+  running tunnels with the same name, protocol and ports.
+- **A domain is an Iran server plus ports:** every port of a domain can go
+  through its own tunnel to a different foreign server. The domain is only
+  healthy when all of its ports are healthy.
+- **Automatic failover:** on a failure or an instability, another tunnel on
+  the same Iran server is tried first. Then the record moves to an Iran
+  server that has all the ports healthy. After 10 minutes of stability the
+  traffic returns to the primary server.
+- **Switching the protocol with one click:** for example `tcpmux` to
+  `wsmux`. Every protocol is tested, and the result and its latency are
+  shown side by side.
+- **Connection test ⚡:** in the drawer of each server, the ⚡ button
+  measures the path between that server and one on the other side **on
+  every protocol**: the time to connect, the handshake time and the **real
+  round trip** over the very path the tunnel goes through. The best
+  protocol is proposed right away and can be applied to the tunnel with one
+  click.
+- **The final exit:** if a port is forwarded from a foreign server to
+  another server (iptables, socat, gost, a relay and so on), the panel
+  shows it.
+- **Observe mode:** on until you switch it off yourself. In this mode the
+  panel only watches and reports.
+- **Nightly backup:** at 3 a.m., encrypted, sent to Telegram. The restore
+  is done from inside the panel or from the command line.
+- **Docker:** a ready-made image to run the panel on any host that has
+  Docker.
 
-| مسیر پورت‌های یک دامنه | تانل و پروتکل‌ها |
+| The path of the ports of a domain | Tunnels and protocols |
 |---|---|
-| ![دامنه](docs/domain.png) | ![تانل](docs/tunnel.png) |
+| ![Domain](docs/domain.png) | ![Tunnel](docs/tunnel.png) |
 
-## تست اتصال ⚡
+## Connection test ⚡
 
-پنل از بیرون نمی‌تواند بداند مسیر بین دو سرور چقدر خوب است؛ این سنجش باید **روی خود سرورها** و **روی همان مسیری که تانل از آن رد می‌شود** انجام شود. برای همین:
+From the outside, the panel cannot know how good the path between two
+servers is: the measurement has to be made **on the servers themselves**
+and **over the very path the tunnel goes through**. That is why:
 
-- پنل یک کانفیگ موقت روی سرور خارجی می‌گذارد و موتور تانل را با `probe` صدا می‌زند.
-- موتور روی **همه پروتکل‌ها** به‌ترتیب موازی وصل می‌شود و برای هرکدام می‌گوید: زمان برقراری اتصال، زمان دست‌دهی (رمزنگاری) و **رفت‌وبرگشت واقعی** (سه بار پینگ، میانه گرفته می‌شود).
-- پنل نتیجه را مرتب می‌کند: سریع‌ترین پروتکلی که کار می‌کند «بهترین» است.
+- The panel writes a temporary config on the foreign server and calls the
+  tunnel engine with `probe`.
+- The engine connects on **every protocol** in parallel and reports for
+  each of them: the time to connect, the handshake time (the encryption)
+  and the **real round trip** (three pings, the median is kept).
+- The panel sorts the results: the fastest protocol that works is the
+  "best" one.
 
-دکمه ⚡ در کشوی هر سرور این کار را می‌کند: سرور طرف دیگر را انتخاب کنید، ⚡ را بزنید، و جدول را ببینید. با «اعمال» روی تانل، همان پروتکل روی تانل قفل می‌شود.
+The ⚡ button in the drawer of each server does this: pick the server on
+the other side, press ⚡, and look at the table. With "Apply" on the
+tunnel, that protocol is pinned to the tunnel.
 
-اگر سرور داخل هنوز تانلی ندارد، سنجش ممکن نیست (پورتی برای اندازه‌گیری نیست) و پنل همان را می‌گوید.
+If the Iran server does not have a tunnel yet, the measurement is not
+possible (there is no port to measure) and the panel says so.
 
-<p align="center"><img src="docs/server.png" width="720" alt="تست اتصال"></p>
+<p align="center"><img src="docs/server.png" width="720" alt="Connection test"></p>
 
-## نصب
+## Installation
 
-پنل را روی یک سرور **خارج از ایران** نصب کنید، یکی از سرورهای خارج یا یک سرور جدا. پنل باید به API تلگرام، آروان و کلادفلر، سورس موتور تانل و SSH همه سرورها دسترسی داشته باشد. اوبونتو ۲۲.۰۴ به بالا، با پایتون ۳.۱۰ به بالا.
+Install the panel on a server **outside Iran**: one of the foreign servers,
+or a separate one. The panel must be able to reach the Telegram API, the
+ArvanCloud and Cloudflare APIs, the source of the tunnel engine and every
+server over SSH. Ubuntu 22.04 or later, with Python 3.10 or later.
 
-مخزن **پرایوت** است، پس برای کلون کردن یک توکن لازم دارید:
+The repository is **private**, so a token is needed to clone it:
 
 ```bash
-# با توکن (دامنه: repo، دسترسی: contents)
+# with a token (scope: repo, access: contents)
 git clone https://<user>:<token>@github.com/Liwyd/Bull-Tunn.git
 cd Bull-Tunn
 sudo bash deploy/install.sh
 ```
 
-یا با کلید SSH (بهتر):
+Or with an SSH key (better):
 
 ```bash
 git clone git@github.com:Liwyd/Bull-Tunn.git
@@ -104,28 +146,34 @@ cd Bull-Tunn
 sudo bash deploy/install.sh
 ```
 
-اسکریپت آدرس پنل و یک رمز تصادفی برای کاربر `admin` را چاپ می‌کند. پورت پیش‌فرض 8080 است. اگر پورت اشغال باشد، اسکریپت قبل از هر تغییری متوقف می‌شود. برای انتخاب پورت دیگر:
+The script prints the address of the panel and a random password for the
+`admin` user. The default port is 8080. If the port is taken, the script
+stops before it changes anything. To choose another port:
 
 ```bash
 sudo BT_PORT=9090 bash deploy/install.sh
 ```
 
-تغییر رمز:
+To change the password:
 
 ```bash
 sudo -u bulltunn /opt/bulltunn/venv/bin/python -m bulltunn --data /var/lib/bulltunn passwd
 ```
 
-نصب با pip هم ممکن است (اگر می‌خواهید پنل را داخل یک venv یا کانتینر خودتان اجرا کنید):
+Installing with pip works as well (if you want to run the panel inside
+your own venv or container):
 
 ```bash
 pip install "bulltunn @ git+https://github.com/Liwyd/Bull-Tunn.git@main"
 bulltunn --data /var/lib/bulltunn serve
 ```
 
-> نصب روی سروری که خودش تانل دارد مشکلی ندارد. پنل سرویس جدا با سهم محدود CPU و RAM است و در مسیر ترافیک نیست. همان سرور را هم می‌شود در پنل به‌عنوان سرور خارج اضافه کرد.
+> Installing on a server that has tunnels of its own is not a problem. The
+> panel is a separate service with a limited share of the CPU and the RAM,
+> and it is not in the traffic path. That same server can also be added to
+> the panel as a foreign server.
 
-## نصب با Docker
+## Installation with Docker
 
 ```bash
 docker run -d --name bulltunn \
@@ -135,222 +183,344 @@ docker run -d --name bulltunn \
   liwyd/bulltunn:latest
 ```
 
-ایمیج را CI می‌سازد و روی Docker Hub منتشر می‌کند (`liwyd/bulltunn`، چند معماری: amd64 و arm64). برای نسخه‌های دیگر: `liwyd/bulltunn:v1.0.0`. داده‌ها داخل volume به نام `bulltunn-data` می‌مانند؛ برای دیدن و تغییر تنظیمات:
+The image is built by the CI and published on Docker Hub (`liwyd/bulltunn`,
+several architectures: amd64 and arm64). For the other versions:
+`liwyd/bulltunn:v1.0.0`. The data stays in the volume named
+`bulltunn-data`; to look at and change the settings:
 
 ```bash
 docker exec -it bulltunn bulltunn --data /data passwd
 ```
 
-> اگر ایمیج روی Docker Hub نیست (ریپازیتوری پرایوت است و توکن‌ها باید در تنظیمات ریپو اضافه شوند)، خودتان بسازید:
-> `docker build -t bulltunn:local .` — یا پنل را مستقیم روی سرور نصب کنید.
+> If the image is not on Docker Hub (the repository is private and the
+> tokens have to be added to the repository settings), build it yourself:
+> `docker build -t bulltunn:local .` — or install the panel directly on a
+> server.
 
-## پنل روی دامنه با HTTPS
+## The panel on a domain with HTTPS
 
-1. یک رکورد A بسازید که به آی‌پی سرور پنل اشاره کند، مثلاً `panel.example.com`. **پروکسی/ابر را برای این رکورد خاموش کنید.**
-2. در فایروال سرور (و پنل دیتاسنتر) پورت‌های 80 و 443 را باز کنید.
-3. اجرا کنید:
+1. Create an A record that points at the IP address of the panel server,
+   for example `panel.example.com`. **Turn the proxy/CDN off for this
+   record.**
+2. Open ports 80 and 443 in the firewall of the server (and of the
+   provider's panel).
+3. Run:
 
 ```bash
 cd ~/Bull-Tunn
 sudo bash deploy/https.sh panel.example.com you@example.com
 ```
 
-اسکریپت این کارها را می‌کند:
-- چک می‌کند پورت 443 و 80 آزاد باشند و دامنه واقعاً به همین سرور اشاره کند. اگر نه، **بدون هیچ تغییری** متوقف می‌شود و می‌گوید چه چیزی مانع است.
-- از Let's Encrypt گواهی رایگان می‌گیرد. پورت 80 فقط چند ثانیه موقع صدور و تمدید استفاده می‌شود.
-- پنل را روی 443 با HTTPS بالا می‌آورد و تمدید خودکار گواهی را تنظیم می‌کند.
-- اگر پنل روی 443 بالا نیاید، تنظیمات قبلی را برمی‌گرداند.
+The script does the following:
 
-## مهاجرت از نسخه قبلی
+- It checks that ports 443 and 80 are free and that the domain really
+  points at this server. If not, it stops **without changing anything** and
+  says what is in the way.
+- It gets a free certificate from Let's Encrypt. Port 80 is only used for a
+  few seconds while the certificate is issued and renewed.
+- It brings the panel up on 443 with HTTPS and sets the automatic renewal
+  of the certificate up.
+- If the panel does not come up on 443, it puts the previous settings back.
 
-اگر پنل قبلی روی سرورتان نصب است، این دو مرحله را انجام دهید. هیچ‌چیز پاک نمی‌شود و همه‌چیز برگشت‌پذیر است.
+## Migrating from the previous version
 
-**۱) روی سرور پنل** (از چک‌اوت جدید):
+If the previous panel is installed on your server, do these two steps.
+Nothing is deleted and everything can be undone.
+
+**1) On the panel server** (from the new checkout):
 
 ```bash
 git clone https://<user>:<token>@github.com/Liwyd/Bull-Tunn.git && cd Bull-Tunn
 sudo bash deploy/migrate.sh
 ```
 
-داده‌ها (سرورها، تانل‌ها، دامنه‌ها، حساب‌های DNS، رمز ورود) منتقل می‌شوند، اسم متغیرها از `TM_` به `BT_` عوض می‌شود و سرویس `bulltunn` بالا می‌آید. سرویس قبلی غیرفعال می‌ماند تا مطمئن شوید.
+The data (servers, tunnels, domains, DNS accounts, the login) is moved, the
+name of the variables changes from `TM_` to `BT_` and the `bulltunn`
+service is started. The previous service stays disabled until you are sure.
 
-**۲) روی هر سرور تانل** (سرورهای داخل و خارج):
+**2) On each tunnel server** (the Iran and the foreign servers):
 
 ```bash
 scp deploy/remote-migrate.sh root@<server>:/tmp/
 ssh root@<server> 'sudo bash /tmp/remote-migrate.sh'
 ```
 
-این اسکریپت فقط جابه‌جایی و بازنویسی فایل می‌کند و چیزی را حذف نمی‌کند:
+This script only moves and rewrites files; it does not delete anything:
 
-| قبل | بعد |
+| Before | After |
 |---|---|
 | `/etc/backpack/` | `/etc/bulltunn/` |
 | `backpack-<name>.service` | `bulltunn-<name>.service` |
 | `/usr/local/bin/backpack` | `/usr/local/bin/bulltunn-engine` |
 
-بعد از این کار، در پنل «جستجوی تانل‌ها» را بزنید: تانل‌های موجود با همان اسم‌ها و تنظیمات قبلی پذیرفته و اداره می‌شوند.
+After this, press "Find tunnels" in the panel: the existing tunnels are
+accepted and managed with the same names and settings as before.
 
-## شروع کار روی سرورهای لایو
+## Going live on real servers
 
-پنل در مسیر ترافیک نیست. ترافیک کاربران مستقیم از تانل‌ها می‌گذرد. اگر پنل خاموش یا خراب شود، تانل‌ها مثل قبل کار می‌کنند.
+The panel is not in the traffic path. The user traffic goes straight
+through the tunnels. If the panel is switched off or breaks, the tunnels
+keep working as before.
 
-1. **سرورها را اضافه کنید:** آی‌پی و SSH. تانل‌های فعال خودکار پیدا می‌شوند. فقط تانل‌هایی اضافه می‌شوند که سرویسشان در حال اجراست.
-2. **موتور تانل را نصب کنید:** روی هر سروری که تانل دارد، دکمه «نصب موتور تانل» (یا `deploy/remote-migrate.sh`).
-3. **حساب DNS اضافه کنید** (تنظیمات ← حساب‌های DNS) و دکمه «تست» را بزنید.
-4. **دامنه‌ها را اضافه کنید.** پنل رکورد فعلی را می‌خواند و همان سرور داخل را «اصلی» می‌گیرد. رکورد دست نمی‌خورد.
-5. در پنل هر دامنه، **پورت‌هایی را که دامنه استفاده می‌کند تیک بزنید.**
-6. **چند روز در حالت نظارت بمانید.** پنل در تلگرام می‌گوید «اگر فعال بود چه می‌کرد». وقتی به پیشنهادها اعتماد کردید، حالت نظارت را از تنظیمات خاموش کنید.
+1. **Add the servers:** the IP address and SSH. The running tunnels are
+   found automatically. Only the tunnels whose service is actually running
+   are added.
+2. **Install the tunnel engine:** on every server that has a tunnel, press
+   "Install the tunnel engine" (or use `deploy/remote-migrate.sh`).
+3. **Add a DNS account** (Settings → DNS accounts) and press "Test".
+4. **Add the domains.** The panel reads the current record and takes that
+   Iran server as the "primary". The record is not touched.
+5. In the panel of each domain, **tick the ports the domain uses.**
+6. **Stay in observe mode for a few days.** The panel says on Telegram
+   "what it would have done". Once you trust its proposals, switch observe
+   mode off in the settings.
 
-محافظ‌هایی که همیشه فعال‌اند:
-- اولین بازنویسی کانفیگ یک تانل موجود، نسخه اصلی را در `/etc/bulltunn/<name>.toml.bt-orig` نگه می‌دارد.
-- روی پورتی که در حال استفاده است تانل ساخته نمی‌شود.
-- «تست و اتصال» فقط تانل‌های ساخته‌نشده یا کاملاً قطع را می‌سازد و به تانل سالم یا ناپایدار دست نمی‌زند.
-- جابه‌جایی فقط با دلیل انجام می‌شود: چند خطای پشت‌سرهم، نه یک خطای گذرا.
+The guards that are always on:
 
-## کلید API آروان و کلادفلر
+- The first rewrite of the config of an existing tunnel keeps the original
+  in `/etc/bulltunn/<name>.toml.bt-orig`.
+- No tunnel is built on a port that is in use.
+- "Test & connect" only builds the tunnels that are not built yet or are
+  completely down; it never touches a healthy or an unstable tunnel.
+- A failover only happens for a reason: several errors in a row, not a
+  single transient one.
 
-**Cloudflare:** پروفایل ← API Tokens ← Create Token ← قالب **Edit zone DNS**. در Zone Resources دامنه‌ها (یا All zones) را انتخاب کنید و توکن را در پنل وارد کنید.
+## ArvanCloud and Cloudflare API keys
 
-**ArvanCloud:** دسترسی در آروان روی **منبع** داده می‌شود، نه روی خود کاربر:
-1. پروفایل ← IAM ← فهرست ماشین یوزرها: یک ماشین یوزر بسازید. از منوی «کلیدهای دسترسی» یک کلید بگیرید.
-2. IAM ← **مدیریت منابع و دسترسی‌ها**: دامنه را از بخش CDN انتخاب کنید. یک قانون دسترسی با نقشی که DNS را **می‌خواند و می‌نویسد** بسازید و ماشین یوزر را عضوش کنید.
-3. در پنل، Zone را دامنه اصلی بگذارید (مثل `example.com`، نه `panel.example.com`).
+**Cloudflare:** Profile → API Tokens → Create Token → the **Edit zone DNS**
+template. Pick the domains in Zone Resources (or All zones) and enter the
+token in the panel.
 
-> خطای `HTTP 403: Your access to this section is restricted` یعنی مرحله ۲ انجام نشده، یا حساب آروان به خاطر بدهی محدود شده است. پنل هر ۵ دقیقه دوباره امتحان می‌کند و تا وقتی رکورد خوانده نشود، به آن دست نمی‌زند.
+**ArvanCloud:** the access is granted on a **resource** in ArvanCloud, not
+on the user itself:
 
-## منطق جابه‌جایی
+1. Profile → IAM → the list of machine users: create a machine user. Get a
+   key from the "access keys" menu.
+2. IAM → **resource and access management**: pick the domain in the CDN
+   section. Create an access rule with a role that **reads and writes**
+   DNS, and make the machine user a member of it.
+3. In the panel, set the Zone to the root domain (for example `example.com`,
+   not `panel.example.com`).
 
-همه تانل‌ها همیشه وصل و آماده‌اند. رکورد A دامنه به سرور داخلی اشاره می‌کند که الان استفاده می‌شود.
+> The error `HTTP 403: Your access to this section is restricted` means
+> that step 2 has not been done, or that the ArvanCloud account is limited
+> (an unpaid bill, for instance). The panel tries again every 5 minutes and
+> does not touch the record until it can read it.
 
-| اتفاق | واکنش پنل |
+## The failover logic
+
+All the tunnels are always connected and ready. The A record of a domain
+points at the Iran server of the tunnel that is in use.
+
+| What happens | What the panel does |
 |---|---|
-| تانل یکی از پورت‌ها قطع شد ولی سرور داخل سالم است | همان پورت روی همان سرور داخل به تانل دیگری منتقل می‌شود (مثلاً یک خارج دیگر). DNS دست نمی‌خورد. |
-| سرور داخل به مشکل خورد، یا مدام قطع و وصل می‌شود (پیش‌فرض: ۳ قطعی در ۱۰ دقیقه) | رکورد به اولین سرور داخلی می‌رود که **همه پورت‌های دامنه** را سالم دارد. |
-| رکورد عوض شد | پنل DNSهای عمومی را چک می‌کند و می‌گوید بعد از چند دقیقه سرور جدید پشت دامنه قرار گرفت. |
-| تانل قطع است ولی هر دو سرورش سالم‌اند | تانل با پروتکل‌های دیگر دوباره ساخته می‌شود. این کار با «بازسازی خودکار» در تنظیمات قابل خاموش کردن است. |
-| سرور اصلی درست شد | بعد از **۱۰ دقیقه پایداری کامل** ترافیک برمی‌گردد. هر قطعی در این مدت شمارش را از اول شروع می‌کند. |
+| One of the tunnels of a port goes down but the Iran server is healthy | That port is handed over to another tunnel on the same Iran server (for example another foreign server). The DNS is not touched. |
+| The Iran server has a problem, or it keeps dropping (by default: 3 drops in 10 minutes) | The record moves to the first Iran server that has **all the ports of the domain** healthy. |
+| The record was changed | The panel checks the public resolvers and says after how many minutes the new server is behind the domain. |
+| The tunnel is down but both of its servers are healthy | The tunnel is rebuilt with other protocols. This can be switched off with "automatic repair" in the settings. |
+| The primary server is fixed | After **10 minutes of complete stability** the traffic goes back. Any drop in that window starts the count again. |
 
-هر قدم در تلگرام گزارش می‌شود: «سرور اول به مشکل خورد»، «رکورد تغییر کرد»، «بعد از X دقیقه سرور دوم پشت دامنه است» و «برگشت به سرور اصلی».
+Every step is reported on Telegram: "the first server has a problem", "the
+record was changed", "after X minutes the second server is behind the
+domain" and "back to the primary server".
 
-> **سلامت چطور سنجیده می‌شود؟** هر تانلی که پنل می‌سازد یا بازنویسی می‌کند، یک پورت پروب فقط-لوکال روی سرور داخل دارد که به SSH سرور خارج می‌رسد. پنل از داخل تانل بنر SSH را می‌خواند، یعنی کل مسیر واقعاً کار می‌کند. تانل‌های موجود تا اولین بازنویسی از گزارش خود موتور و اتصال‌های برقرار سنجیده می‌شوند.
+> **How is the health measured?** Every tunnel the panel builds or rewrites
+> gets a loopback-only probe port on the Iran server that reaches the SSH
+> of the foreign server. The panel reads the SSH banner from inside the
+> tunnel, which means the whole real path works. The existing tunnels are
+> measured from the report of their own engine and their established
+> connections until the first rewrite.
 
-## خروجی نهایی پورت‌ها
+## The final exit of a port
 
-بعضی پورت‌ها بعد از رسیدن به سرور خارج به سرور دیگری فرستاده می‌شوند تا آی‌پی خروجی فرق کند. پنل هر دقیقه روی هر خارج **فقط می‌خواند** که با هر پورت چه می‌شود:
+Some ports are sent to another server after they reach the foreign server,
+so that the exit IP address is different. Every minute the panel **only
+reads** on each foreign server what happens to each port:
 
-- قانون‌های DNAT در iptables یا nftables.
-- برنامه‌ای که روی پورت گوش می‌دهد: socat، gost و realm از خط فرمانشان خوانده می‌شوند. haproxy، nginx، رله xray و بقیه از روی اتصال‌های خودشان.
-- مقصدی که در خود کانفیگ موتور آمده، مثل `443=1.2.3.4:443`.
+- The DNAT rules in iptables or nftables.
+- The program that listens on the port: socat, gost and realm are read
+  from their command lines. haproxy, nginx, an xray relay and the rest are
+  read from their own connections.
+- The destination that is in the config of the engine itself, for example
+  `443=1.2.3.4:443`.
 
-نتیجه روی بوم با خط‌چین بنفش، و در دامنه به شکل `443→DehAds↪USA` دیده می‌شود. اگر مقصد جواب ندهد، در تلگرام خبر داده می‌شود. **هیچ تصمیم یا تغییری بر اساس این مرحله گرفته نمی‌شود.**
+The result is shown on the canvas with a dashed purple line, and in the
+domain as `443→DehAds↪USA`. If the destination does not answer, it is
+reported on Telegram. **No decision and no change is made on the basis of
+this step.**
 
-<p align="center"><img src="docs/kharej-exit.png" width="720" alt="خروجی نهایی"></p>
+<p align="center"><img src="docs/kharej-exit.png" width="720" alt="The final exit"></p>
 
-## موتور تانل
+## The tunnel engine
 
-پنل خودش تانل نمی‌سازد؛ یک برنامه جدا به نام **موتور تانل** روی هر دو سرور اجرا می‌شود و خود تانل را می‌آورد. پنل برایش کانفیگ می‌نویسد، سرویس systemd می‌سازد و از روی فایل معیارهایش سلامتش را می‌خواند.
+The panel does not build the tunnels itself: a separate program, the
+**tunnel engine**, runs on both servers and brings the tunnel up. The panel
+writes its config, creates the systemd service and reads its health from
+its metrics file.
 
-موتور تانل **بخشی از همین پروژه است**: با Go نوشته شده، فقط از کتابخانه استاندارد استفاده می‌کند و یک باینری static است (هیچ پایتون، هیچ pip، هیچ وابستگی‌ای روی سرور تانل). برای amd64، arm64، 386 و armv7 ساخته می‌شود.
+The tunnel engine **is part of this project**: it is written in Go, it uses
+nothing but the standard library and it is one static binary (no Python,
+no pip, no dependency at all on the tunnel servers). It is built for amd64,
+arm64, 386 and armv7.
 
-- **نشست رمز‌شده روی همه پروتکل‌ها:** هر دو طرف با توکن مشترک یکدیگر را احراز می‌کنند (HMAC-SHA256 روی کل دست‌دهی)، کلیدهای ترافیک از یک تبادل X25519 و HKDF-SHA256 می‌آید (پس ضبط ترافیک بعداً قابل خواندن نیست) و همه فریم‌ها با AES-256-GCM رمز می‌شوند.
-- **چند جریان روی یک اتصال:** هر پورت بازشده یک جریان مستقل است با پنجره ۲۵۶ کیلوبایت، تا یک خواننده کند باعث نشود حافظه بی‌حد رشد کند.
-- **سنجش مسیر (`probe`):** موتور می‌تواند خودش مسیر را روی همه پروتکل‌ها بسنجد و بگوید کدام سریع‌تر است — دقیقاً همان چیزی که دکمه ⚡ در پنل نشان می‌دهد.
-- **پروتکل‌ها:** `tcp`، `ws` (وب‌سوکت روی HTTP)، `wss` (وب‌سوکت روی TLS) و `stealth` (تونل HTTP CONNECT که شبیه ترافیک عادی پروکسی است). نام‌های `mux` همان حامل‌اند: نشست همیشه چندجریانی است.
-- **موتور می‌گوید چه بلد است:** فایل metrics فهرست پروتکل‌های موجود را دارد و پنل هیچ‌وقت پروتکلی را که موتور ندارد امتحان نمی‌کند.
+- **An encrypted session on every protocol:** the two ends authenticate
+  each other with a shared token (HMAC-SHA256 over the whole handshake),
+  the traffic keys come from an X25519 exchange stretched with
+  HKDF-SHA256 (so a recording of the traffic cannot be read later), and
+  every frame is sealed with AES-256-GCM.
+- **Several streams over one connection:** every opened port is an
+  independent stream with a window of 256 KiB, so that one slow reader
+  cannot make the memory grow without a bound.
+- **Path measurement (`probe`):** the engine can measure the path itself on
+  every protocol and say which one is the fastest — exactly what the ⚡
+  button in the panel shows.
+- **The protocols:** `tcp`, `ws` (a websocket over HTTP), `wss` (a
+  websocket over TLS) and `stealth` (an HTTP `CONNECT` tunnel that looks
+  like ordinary proxy traffic). The `mux` names are the same carriers: the
+  session is always multiplexed.
+- **The engine says what it speaks:** the metrics file lists the
+  protocols that are available, and the panel never tests a protocol the
+  engine does not have.
 
-قرارداد کامل موتور (کانفیگ، یونیت، فایل metrics، پروب سلامت، نشست و لیست پروتکل‌ها): [docs/engine-schema.md](docs/engine-schema.md).
+The full contract of the engine (config, unit, metrics file, health probe,
+session and the list of protocols): [docs/engine-schema.md](docs/engine-schema.md).
 
-نصب موتور روی یک سرور:
+Installing the engine on a server:
 
-- از داخل پنل: سرور ← «نصب موتور تانل». پنل فایل را دانلود می‌کند، **SHA-256 آن را چک می‌کند** و با SSH روی سرور می‌گذارد (سرورهای داخل ایران معمولاً به گیت‌هاب دسترسی ندارند).
-- سورس سورس موتور در تنظیمات قابل تغییر است (مثلاً یک آینه یا یک هاست خصوصی). برای مخزن پرایوت، توکن همان‌جا وارد می‌شود.
-- اگر سورس در دسترس نبود، فایل `bulltunn-engine_linux_<arch>.tar.gz` را دستی در `<data>/cache/<version>/` بگذارید؛ پنل همان را برمی‌دارد.
-- ساخت از روی سورس: `bash engine/build.sh` (بدون اینترنت، چون وابستگی‌ها داخل `engine/vendor` هستند).
+- From inside the panel: server → "Install the tunnel engine". The panel
+  downloads the file, **checks its SHA-256** and puts it on the server
+  over SSH (the servers inside Iran usually have no access to GitHub).
+- The source of the engine is configurable (a mirror or a private host,
+  for example). For a private repository, the token goes in the same
+  place.
+- If the source is not reachable, put the file
+  `bulltunn-engine_linux_<arch>.tar.gz` by hand in
+  `<data>/cache/<version>/`; the panel picks it up.
+- Building from the source: `bash engine/build.sh` (without internet,
+  because the dependencies are inside `engine/vendor`).
 
-## کانال فرمان (DNS)
+## The command channel (DNS)
 
-وقتی حتی یک دست‌دهی TCP هم ممکن نیست، SSH بی‌فایده است و پنل هیچ کاری نمی‌تواند با آن سرور بکند. **کانال فرمان** راه‌دور است:
+When not even a TCP handshake is possible, SSH is useless and the panel
+cannot do anything with that server. The **command channel** is the way
+around it:
 
 ```
-پنل ──HTTPS──► حساب DNS ──► رکورد TXT ──DNS──► عامل روی سرور
-پنل ◄──HTTPS── حساب DNS ◄── رکورد TXT ◄──DNS── عامل
+panel ──HTTPS──► DNS account ──► TXT record ──DNS──► agent on the server
+panel ◄──HTTPS── DNS account ◄── TXT record ◄──DNS── agent
 ```
 
-- پنل فرمان را در یک رکورد TXT می‌گذارد و **با کلیدی که فقط پنل و عامل دارند امضا می‌کند** (HMAC-SHA256). پس حسابی که بتواند در آن Zone بنویسد، نمی‌تواند فرمان جعلی بسازد.
-- «عامل» روی سرور (`bulltunn-engine agent`) هر ۳۰ ثانیه آن رکورد را با یک درخواست DNS معمولی می‌خواند، امضا را چک می‌کند و فرمان را اجا می‌کند.
-- تنها دو فرمان وجود دارد: `status` (وضعیت تانل‌ها و سیستم) و `restart` (ری‌استارت یک تانل). **هیچ شلی در کار نیست** و نام تانل هم دو بار بررسی می‌شود: باید شکل درست داشته باشد و روی همان سرور وجود داشته باشد.
-- جواب فرمان در یک رکورد TXT دیگر نوشته می‌شود و پنل آن را می‌خواند.
+- The panel writes the command into a TXT record and **signs it with a key
+  that only the panel and the agent know** (HMAC-SHA256). An account that
+  can write in that zone still cannot forge a command.
+- The "agent" on the server (`bulltunn-engine agent`) reads that record
+  every 30 seconds with an ordinary DNS request, checks the signature and
+  runs the command.
+- There are only two commands: `status` (the state of the tunnels and the
+  system) and `restart` (the restart of one tunnel). **There is no shell
+  anywhere near it**, and the name of the tunnel is checked twice: it must
+  have the right shape and it must exist on that server.
+- The answer to the command is written into another TXT record, and the
+  panel reads it.
 
-**پیش‌نیاز:** یک Zone جدا با یک حساب جدا (مثلاً `bt.example.ir`). دلیلش ساده است: سروری که خراب شده نباید بتواند رکوردهای دامنه‌های اصلی را دست بزند.
+**Requirement:** a separate zone with a separate account (for example
+`bt.example.ir`). The reason is simple: a server that has failed must not
+be able to touch the records of the main domains.
 
-راه‌اندازی: در تنظیمات، «کانال فرمان» را روشن کنید و حساب DNS آن را انتخاب کنید. بعد در کشوی هر سرور خارجی، «نصب کانال فرمان» را بزنید.
+Setting it up: in the settings, switch the "command channel" on and pick
+its DNS account. Then, in the drawer of each foreign server, press
+"Install the command channel".
 
-## بکاپ و بازگردانی
+## Backups and restore
 
-هر شب ساعت **۳ بامداد به وقت تهران** یک بکاپ کامل به چت‌های تلگرام فرستاده می‌شود. ۱۴ نسخه آخر هم در `/var/lib/bulltunn/backups` می‌ماند. ساعت، منطقه زمانی و تعداد نسخه‌ها در تنظیمات ← بکاپ قابل تغییر است.
+Every night at **3 a.m. Tehran time** a full backup is sent to the
+Telegram chats. The last 14 copies also stay in
+`/var/lib/bulltunn/backups`. The time, the time zone and the number of
+copies are configurable in Settings → Backups.
 
-بکاپ همه‌چیز را دارد: سرورها با رمزهای SSH، تانل‌ها، دامنه‌ها، حساب‌های DNS، تنظیمات، رمز ورود پنل و تنظیمات سرویس. پس **حتماً «رمز بکاپ» بگذارید.** فایل با AES-256 رمز می‌شود و بدون آن رمز باز نمی‌شود. رمز را جای دیگری هم نگه دارید.
+The backup holds everything: the servers with their SSH passwords, the
+tunnels, the domains, the DNS accounts, the settings, the panel login and
+the service settings. So **always set a "backup password"**. The file is
+encrypted with AES-256 and cannot be opened without that password. Keep a
+copy of the password somewhere else as well.
 
-<p align="center"><img src="docs/backup.png" width="720" alt="بکاپ"></p>
+<p align="center"><img src="docs/backup.png" width="720" alt="Backup"></p>
 
-- **بکاپ همین حالا:** دکمه «ارسال بکاپ همین حالا»، دستور `/backup` در ربات، یا «دانلود بکاپ».
-- **بازگردانی از پنل:** تنظیمات ← بکاپ ← «بازگردانی بکاپ…». فایل را از تلگرام بدهید یا یکی از نسخه‌های روی سرور را انتخاب کنید.
-  - قبل از جایگزینی، وضعیت فعلی هم بکاپ گرفته می‌شود.
-  - روی سرورها و رکوردهای DNS هیچ تغییری داده نمی‌شود.
-  - پنل در حالت نظارت بالا می‌آید و همه‌چیز را از نو بررسی می‌کند.
-- **بازگردانی روی سرور جدید** (مثلاً اگر سرور پنل از دست رفت):
+- **A backup right now:** the "Send a backup now" button, the `/backup`
+  command in the bot, or "Download the backup".
+- **Restoring from the panel:** Settings → Backups → "Restore a backup…".
+  Give it the file from Telegram or pick one of the copies on the server.
+  - The current state is backed up before it is replaced.
+  - Nothing is changed on the servers or in the DNS records.
+  - The panel comes up in observe mode and checks everything again.
+- **Restoring on a new server** (for example if the panel server was
+  lost):
 
 ```bash
 git clone https://<user>:<token>@github.com/Liwyd/Bull-Tunn.git && cd Bull-Tunn
 sudo bash deploy/install.sh
 sudo systemctl stop bulltunn
 sudo -u bulltunn /opt/bulltunn/venv/bin/python -m bulltunn --data /var/lib/bulltunn \
-     restore bt-backup-XXXXXXXX-XXXX.tmbk --password 'رمز بکاپ'
+     restore bt-backup-XXXXXXXX-XXXX.tmbk --password 'the backup password'
 sudo systemctl start bulltunn
 ```
 
-با `--with-env` تنظیمات پورت و HTTPS هم برمی‌گردد. اگر دامنه پنل عوض شده، به‌جایش `https.sh` را دوباره اجرا کنید.
+With `--with-env` the port and the HTTPS settings come back as well. If
+the domain of the panel has changed, run `https.sh` again instead.
 
-## ربات تلگرام
+## The Telegram bot
 
-در تنظیمات، توکن ربات (از [@BotFather](https://t.me/BotFather)) و Chat ID را وارد کنید. اگر Chat ID را نمی‌دانید، به ربات `/start` بدهید. اگر تلگرام از سرور پنل در دسترس نیست، آدرس ریورس‌پروکسی یا پروکسی SOCKS را هم می‌شود داد.
+In the settings, enter the bot token (from
+[@BotFather](https://t.me/BotFather)) and the Chat ID. If you do not know
+the Chat ID, send `/start` to the bot. If Telegram is not reachable from
+the panel server, the address of a reverse proxy or a SOCKS proxy can be
+given as well.
 
-| دستور | کار |
+| Command | What it does |
 |---|---|
-| `/status` | وضعیت همه سرورها و دامنه‌ها |
-| `/domains` | هر دامنه الان کجاست و پورت‌هایش از کدام مسیر می‌روند |
-| `/links` | وضعیت تانل‌ها |
-| `/check` | بررسی فوری همه‌چیز |
-| `/scan` | جستجوی دوباره تانل‌ها روی سرورها |
-| `/backup` | بکاپ همین حالا |
+| `/status` | The state of every server and domain |
+| `/domains` | Where each domain is right now and which path its ports take |
+| `/links` | The state of the tunnels |
+| `/check` | Check everything right now |
+| `/scan` | Look for the tunnels on the servers again |
+| `/backup` | A backup right now |
 
-## به‌روزرسانی
+## Updating
 
 ```bash
 cd ~/Bull-Tunn && git pull && sudo bash deploy/install.sh
 ```
 
-فقط سرویس پنل ری‌استارت می‌شود. تانل‌ها، کاربرها و تنظیمات دست نمی‌خورند.
+Only the panel service is restarted. The tunnels, the users and the
+settings are not touched.
 
-## جزئیات فنی
+## Technical details
 
-| مسیر | محتوا |
+| Path | What it holds |
 |---|---|
-| `/opt/bulltunn` | برنامه و محیط پایتون |
-| `/var/lib/bulltunn/state.json` | همه اطلاعات پنل (دسترسی 600) |
-| `/var/lib/bulltunn/backups/` | نسخه‌های بکاپ |
-| `/etc/default/bulltunn` | پورت، آدرس و مسیر گواهی HTTPS |
-| `journalctl -u bulltunn` | لاگ پنل |
+| `/opt/bulltunn` | The program and the python environment |
+| `/var/lib/bulltunn/state.json` | All the information of the panel (mode 600) |
+| `/var/lib/bulltunn/backups/` | The copies of the backups |
+| `/etc/default/bulltunn` | The port, the address and the path of the HTTPS certificate |
+| `journalctl -u bulltunn` | The log of the panel |
 
-- تانل‌هایی که پنل می‌سازد `bt-<id>` نام دارند و تانل‌های موجود اسم خودشان را نگه می‌دارند. ساختار فایل‌ها روی سرورها: کانفیگ در `/etc/bulltunn/<name>.toml` و سرویس `bulltunn-<name>.service`.
-- در بازنویسی یک تانل موجود فقط پروتکل، توکن، پورت‌ها و پورت پروب عوض می‌شوند. بقیه کلیدها مثل `mux_*` و `bind_addr` اختصاصی دست نمی‌خورند.
-- «فراموش کردن» یک تانل فقط آن را از پنل حذف می‌کند و تانل روی سرور می‌ماند.
-- متغیرهای محیطی: `BT_HOST`، `BT_PORT`، `BT_DATA_DIR`، `BT_SSL_CERT`، `BT_SSL_KEY`، `BT_NO_MONITOR`، `BT_DNS_PROXY`.
+- The tunnels the panel builds are named `bt-<id>`, and the existing
+  tunnels keep their own name. The layout of the files on the servers: the
+  config in `/etc/bulltunn/<name>.toml` and the service
+  `bulltunn-<name>.service`.
+- When an existing tunnel is rewritten, only the protocol, the token, the
+  ports and the probe port are changed. The other keys, such as `mux_*` and
+  `bind_addr`, are left alone.
+- "Forgetting" a tunnel only removes it from the panel; the tunnel stays on
+  the server.
+- The environment variables: `BT_HOST`, `BT_PORT`, `BT_DATA_DIR`,
+  `BT_SSL_CERT`, `BT_SSL_KEY`, `BT_NO_MONITOR`, `BT_DNS_PROXY`.
 
-### دمو و توسعه
+### Demo and development
 
-حالت دمو به هیچ سروری وصل نمی‌شود. شبکه‌ای شبیه‌سازی‌شده می‌سازد و هر یک دقیقه چیزی را خراب می‌کند تا جابه‌جایی‌ها را زنده ببینید:
+The demo mode does not connect to any server. It builds a simulated
+network and breaks something every minute so that the failovers can be
+watched live:
 
 ```bash
 python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
@@ -358,76 +528,36 @@ python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
 ./venv/bin/pip install pytest pytest-asyncio && ./venv/bin/python -m pytest
 ```
 
-![حالت روشن](docs/dashboard-light.png)
+![Light mode](docs/dashboard-light.png)
 
-## نقشه راه
+## Roadmap
 
-کارهایی که Bull-Tunn را از یک پنلِ خوب به یک ابزارِ کاملاً مستقل تبدیل می‌کنند. تصمیم‌های گرفته‌شده: موتور با **Go** نوشته می‌شود، **کانال فرمان روی DNS** در این دور ساخته می‌شود (بدون کارور داده روی DNS)، ایمیج Docker روی **Docker Hub** منتشر می‌شود و ریلیزها **پرایوت** می‌مانند.
+The work that turns Bull-Tunn from a good panel into a completely
+independent tool. The decisions that were taken: the engine is written in
+**Go**, the **command channel over DNS** is built in this round (without
+carrying the data over DNS), the Docker image is published on **Docker
+Hub** and the releases stay **private**.
 
-| # | کار | چرا | وضعیت |
+| # | Work | Why | State |
 |---|---|---|---|
-| 1 | **موتور تانل اختصاصی** (Go، باینری static) با نشست رمز‌شده روی همه پروتکل‌ها | امروز روی `tcp`/`tcpmux` محموله بین دو سرور **رمز ندارد**؛ هر کسی روی مسیر می‌تواند ترافیک را بخواند یا عوض کند. با این کار آخرین وابستگی بیرونی هم می‌رود | ✅ انجام شد |
-| 2 | **کانال فرمان روی DNS** | وقتی حتی TCP هم ممکن نیست، پنل باید بتواند به سرور دستور بدهد. با حساب DNS که همین حالا در پنل داریم (TXT) و بدون زیرساخت جدید | ✅ انجام شد |
-| 3 | **پین کردن host key در SSH** | الان `known_hosts=None` است؛ یک دستگاه وسط راه می‌تواند سرور را بدزدد | ✅ انجام شد |
-| 4 | **محدودیت نرخ روی ورود** و هدرهای امنیتی | دفاع لایه‌ای در برابر حمله‌ی فراوانی روی فرم ورود | ✅ انجام شد |
-| 5 | **تست یکپارچه واقعی** موتور روی لوپ‌بک | امروز تست زنده فقط وقتی یک باینری خارجی داشته باشیم اجرا می‌شود | ✅ انجام شد (`engine/internal/tunnel`) |
-| 6 | **ریلیز و ایمیج خودکار** | ریلیز پرایوت با باینری‌ها و `SHA256SUMS`، ایمیج چندمعماری روی Docker Hub، نصب/به‌روزرسانی با یک دستور | ✅ انجام شد (CI) |
+| 1 | **A dedicated tunnel engine** (Go, static binary) with an encrypted session on every protocol | Today the payload between the two servers on `tcp`/`tcpmux` is **not encrypted**: anyone on the path can read and change the traffic. This work removes the last outside dependency as well | ✅ Done |
+| 2 | **The command channel over DNS** | When not even TCP is possible, the panel must be able to give orders to a server. With the DNS account the panel already has (TXT) and without any new infrastructure | ✅ Done |
+| 3 | **Pinning the host key in SSH** | `known_hosts=None` is used today; a device in the middle could steal the server | ✅ Done |
+| 4 | **Rate limiting on the login** and the security headers | Layered defence against a flood attack on the login form | ✅ Done |
+| 5 | **A real integration test** of the engine on the loopback | Today the live test only runs when there is an outside binary | ✅ Done (`engine/internal/tunnel`) |
+| 6 | **Automatic releases and images** | Private releases with the binaries and `SHA256SUMS`, a multi-architecture image on Docker Hub, installation and updating with one command | ✅ Done (CI) |
 
-جزئیات فنی هر مورد در [docs/architecture.md](docs/architecture.md). فهرست تغییرات هر نسخه: [CHANGELOG.md](CHANGELOG.md).
+The technical details of each item are in
+[docs/architecture.md](docs/architecture.md). The list of the changes of
+every version: [CHANGELOG.md](CHANGELOG.md).
 
-</div>
+## Documentation
 
----
-
-### English
-
-**Bull-Tunn** is a self-contained control panel for reverse tunnels between
-Iranian and foreign servers. It builds tunnels, measures them end to end,
-moves DNS records to a healthy server when a path dies, and reports
-everything to Telegram.
-
-The panel is only the control plane. The tunnels are carried by a tunnel
-engine running on both ends, so the panel can be restarted or replaced
-without touching a single tunnel — and if the panel is down, nothing about
-the traffic changes.
-
-**What it does**
-
-- **Discovery** — adopts the tunnels that are already running on your servers.
-- **Health** — every tunnel the panel creates gets a loopback-only probe that
-  reaches the SSH daemon of the far end, so "healthy" means the whole path
-  works, not that a process is alive.
-- **Failover** — when a tunnel breaks or flaps, the port moves to another
-  tunnel on the same Iran server; failing that, the domain's A record
-  (ArvanCloud or Cloudflare) moves to an Iran server that serves all of the
-  domain's ports. Traffic fails back after 10 minutes of stability.
-- **Exits** — shows, read-only, where a port finally leaves when a foreign
-  server forwards it on.
-- **Backups** — an encrypted full backup to Telegram every night, restorable
-  from the panel or the CLI.
-- **Safety** — it starts in observe-only mode: it reports what it would have
-  done and changes nothing until you switch that off.
-
-**Install**
-
-```bash
-git clone https://<user>:<token>@github.com/Liwyd/Bull-Tunn.git
-cd Bull-Tunn && sudo bash deploy/install.sh
-```
-
-or `docker run -d -p 8080:8080 -v bulltunn-data:/data liwyd/bulltunn:latest`.
-
-Needs Python 3.10+ on the panel server, which must reach the Telegram API,
-the DNS providers, the artifact host and every managed server over SSH.
-
-**Documentation**
-
-- [docs/architecture.md](docs/architecture.md) — how the control plane and the
-  data plane fit together, how the transports behave under filtering, the
-  security findings and the scale limits.
-- [docs/engine-schema.md](docs/engine-schema.md) — the tunnel engine contract
-  (config, unit, metrics, health probe, transports).
+- [docs/architecture.md](docs/architecture.md) — how the control plane and
+  the data plane fit together, how the transports behave under filtering,
+  the security findings and the scale limits.
+- [docs/engine-schema.md](docs/engine-schema.md) — the tunnel engine
+  contract (config, unit, metrics, health probe, transports).
 - [CHANGELOG.md](CHANGELOG.md) — what changed in every version.
 
 MIT licensed.
-

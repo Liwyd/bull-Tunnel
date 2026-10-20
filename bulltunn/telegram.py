@@ -76,7 +76,7 @@ class TelegramBot:
         """Send a file to every chat; returns how many got it."""
         cfg = cfg or self.get_cfg()
         if not cfg.bot_token or not cfg.chat_ids:
-            raise RuntimeError("ربات تلگرام یا Chat ID تنظیم نشده")
+            raise RuntimeError("the Telegram bot or the Chat ID is not configured")
         sent, last = 0, None
         for chat in cfg.chat_ids:
             for attempt in range(3):
@@ -143,21 +143,21 @@ class TelegramBot:
             if cmd == "/start":
                 await self.send_to(
                     chat,
-                    f"این چت هنوز به پنل اضافه نشده.\nChat ID: <code>{esc(chat)}</code>\n"
-                    "این شناسه را در تنظیمات تلگرام پنل وارد کنید.",
+                    f"This chat is not linked to the panel yet.\nChat ID: <code>{esc(chat)}</code>\n"
+                    "Enter this identifier in the Telegram settings of the panel.",
                     cfg,
                 )
             return
         try:
             reply = await self.handler(cmd, args) if self.handler else "no handler"
         except Exception as e:
-            reply = f"خطا: {esc(e)}"
+            reply = f"error: {esc(e)}"
         await self.send_to(chat, reply, cfg)
 
     async def test(self, cfg: Telegram) -> None:
         me = await self.call("getMe", cfg)
         for chat in cfg.chat_ids:
-            await self.send_to(chat, f"🔌 اتصال پنل Bull-Tunn به ربات <b>@{esc(me.get('username'))}</b> برقرار است.", cfg)
+            await self.send_to(chat, f"🔌 The Bull-Tunn panel is connected to the bot <b>@{esc(me.get('username'))}</b>.", cfg)
 
     def start(self) -> None:
         self._tasks = [asyncio.create_task(self._sender()), asyncio.create_task(self._poller())]

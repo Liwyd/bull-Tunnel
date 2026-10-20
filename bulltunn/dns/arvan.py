@@ -8,10 +8,11 @@ API = "https://napi.arvancloud.ir/cdn/4.0"
 
 # what the usual refusals mean, in the panel's language
 HINTS = {
-    401: "کلید API نامعتبر یا منقضی است",
-    403: "این کلید به بخش DNS این دامنه دسترسی ندارد؛ در IAM آروان به کاربر ماشینیِ کلید، "
-    "روی این دامنه دسترسی DNS (خواندن و نوشتن) بدهید. اگر دسترسی کامل است، حساب محدود شده (مثلاً بدهی)",
-    404: "این Zone در حساب صاحب کلید پیدا نشد (Zone باید دامنه اصلی باشد، مثل example.com)",
+    401: "the API key is invalid or has expired",
+    403: "this key has no access to the DNS section of this domain; in ArvanCloud IAM, grant the machine user "
+    "that owns the key DNS access (read and write) on this domain. If the access is complete, the account itself is "
+    "limited (an unpaid bill, for instance)",
+    404: "this zone was not found in the account that owns the key (the zone must be the root domain, e.g. example.com)",
 }
 
 

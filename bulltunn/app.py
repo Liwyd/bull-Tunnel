@@ -298,10 +298,10 @@ def create_app(
         path = backups.write(blob, bool(pw), "" if kind == "nightly" else kind)
         backups.prune(store.settings.backup_keep)
         store.meta["last_backup"] = time.time()
-        title = {"nightly": "بکاپ شبانه", "manual": "بکاپ دستی", "pre": "بکاپ پیش از بازگردانی"}.get(kind, "بکاپ")
+        title = {"nightly": "Nightly backup", "manual": "Manual backup", "pre": "Pre-restore backup"}.get(kind, "Backup")
         caption = (
-            f"🗄 <b>{title} Bull-Tunn</b>\n{bk.summary(data_)}\n"
-            + ("🔒 رمزدار" if pw else "⚠️ بدون رمز: شامل رمزهای SSH و توکن‌هاست. در تنظیمات برایش رمز بگذارید.")
+            f"🗄 <b>{title} — Bull-Tunn</b>\n{bk.summary(data_)}\n"
+            + ("🔒 Encrypted" if pw else "⚠️ Not encrypted: it holds SSH passwords and tokens. Set a backup password in the settings.")
         )
         result = {"name": path.name, "size": len(blob), "encrypted": bool(pw), "sent": 0, "error": ""}
         if kind != "pre":
@@ -309,9 +309,9 @@ def create_app(
                 result["sent"] = await bot.send_file(path.name, blob, caption)
             except Exception as e:
                 result["error"] = str(e)
-                await orch.emit("error", "backup", f"{title} ساخته شد ({path.name}) ولی به تلگرام نرسید: {e}")
+                await orch.emit("error", "backup", f"{title} was created ({path.name}) but did not reach Telegram: {e}")
             else:
-                await orch.emit("success", "backup", f"{title} ساخته و به تلگرام فرستاده شد ({path.name})", notify=False)
+                await orch.emit("success", "backup", f"{title} was created and sent to Telegram ({path.name})", notify=False)
         await orch.changed()
         return result
 
@@ -329,7 +329,7 @@ def create_app(
     async def bot_command(cmd: str, args: list[str]) -> str:
         if cmd == "/backup":
             r = await make_backup("manual")
-            return "🗄 بکاپ فرستاده شد." if r["sent"] else f"بکاپ ساخته شد ولی ارسال نشد: {r['error']}"
+            return "🗄 Backup sent." if r["sent"] else f"Backup created but not sent: {r['error']}"
         return await orch.bot_command(cmd, args)
 
     bot.handler = bot_command
@@ -344,7 +344,7 @@ def create_app(
             from .demo import chaos
 
             tasks.append(asyncio.create_task(chaos(orch, driver)))
-        await orch.emit("info", "panel", f"پنل Bull-Tunn {__version__} راه‌اندازی شد" + (" (حالت دمو)" if demo else ""))
+        await orch.emit("info", "panel", f"Bull-Tunn panel {__version__} started" + (" (demo mode)" if demo else ""))
         yield
         for task in tasks:
             task.cancel()
@@ -383,7 +383,7 @@ def create_app(
 
     def busy_guard(lid: str) -> None:
         if lid in orch.busy:
-            raise HTTPException(409, "عملیات دیگری روی این تانل در جریان است")
+            raise HTTPException(409, "another operation is already running on this tunnel")
 
     # ---- auth --------------------------------------------------------
     def client_ip(request: Request) -> str:
@@ -424,7 +424,7 @@ def create_app(
         if not auth.check(body.username, body.password):
             limiter.fail(who)
             await asyncio.sleep(1)
-            raise HTTPException(401, "نام کاربری یا رمز عبور اشتباه است")
+            raise HTTPException(401, "wrong username or password")
         limiter.success(who)
         set_cookie(response, request)
         return {"ok": True}
@@ -517,11 +517,13 @@ def create_app(
     @app.post("/api/servers", dependencies=A)
     async def add_server(body: ServerIn):
         if any(s.ip == body.ip and s.role == body.role for s in store.servers.values()):
-            raise HTTPException(409, "این آی‌پی قبلا اضافه شده")
+            raise HTTPException(409, "this IP address has already been added")
         srv = Server(**{**body.model_dump(), "ssh_password": body.ssh_password or "", "ssh_key": body.ssh_key or ""})
         store.servers[srv.id] = srv
         store.ensure_links()
-        await orch.emit("info", "server", f"سرور {'داخل' if srv.role == IRAN else 'خارج'} {srv.name} ({srv.ip}) اضافه شد", server=srv.id)
+        await orch.emit(
+            "info", "server", f"{'Iran' if srv.role == IRAN else 'Foreign'} server {srv.name} ({srv.ip}) added", server=srv.id
+        )
         orch.spawn(probe_server(srv))  # also looks for tunnels already running
         return {"server": srv.public()}
 
@@ -554,9 +556,9 @@ def create_app(
             return d.kharej_id == sid or d.iran_id == sid or in_group
 
         if any(uses(d) for d in store.domains.values()):
-            raise HTTPException(409, "اول دامنه‌های متصل به این سرور را حذف یا ویرایش کنید")
+            raise HTTPException(409, "first remove or edit the domains that use this server")
         links = store.remove_server(sid)
-        await orch.emit("warning", "server", f"سرور {srv.name} از پنل حذف شد", notify=False)
+        await orch.emit("warning", "server", f"Server {srv.name} removed from the panel", notify=False)
         orch.spawn(orch.remove_links(links))
         pool.drop(sid)
         return {"ok": True}
@@ -582,7 +584,7 @@ def create_app(
     async def scan():
         n = await orch.scan_all()
         if not n:
-            await orch.emit("info", "adopt", "جستجوی تانل‌های موجود روی سرورها انجام شد؛ تانل جدیدی پیدا نشد", notify=False)
+            await orch.emit("info", "adopt", "searched the servers for existing tunnels; no new tunnel was found", notify=False)
         orch.wake()
         return {"added": n}
 
@@ -599,8 +601,8 @@ def create_app(
         await orch.emit(
             "info",
             "probe",
-            f"تست اتصال {iran.name} ⇄ {kharej.name}: "
-            + (f"بهترین پروتکل {out['best']}" if out.get("ok") and out.get("best") else out.get("error", "نتیجه‌ای نبود")),
+            f"Connection test {iran.name} ⇄ {kharej.name}: "
+            + (f"best protocol {out['best']}" if out.get("ok") and out.get("best") else out.get("error", "no result")),
             notify=False,
             server=iran.id,
         )
@@ -611,7 +613,7 @@ def create_app(
         pid = store.settings.command_provider_id
         p = store.providers.get(pid)
         if not p:
-            raise HTTPException(400, "حساب DNS کانال فرمان انتخاب نشده است (تنظیمات ← کانال فرمان)")
+            raise HTTPException(400, "no DNS account is selected for the command channel (Settings → Command channel)")
         return p
 
     def agent_config(srv: Server, p: DNSProvider) -> str:
@@ -684,7 +686,7 @@ WantedBy=multi-user.target
             await dns_factory(p).set_txt(cm.command_record(srv.id, p.zone), text, ttl=60)
         except Exception as e:
             raise HTTPException(502, str(e)) from None
-        await orch.emit("info", "command", f"فرمان «{cmd.action}» برای {srv.name} از راه DNS فرستاده شد", notify=False, server=srv.id)
+        await orch.emit("info", "command", f"command «{cmd.action}» sent to {srv.name} over DNS", notify=False, server=srv.id)
         return {"id": cmd.id, "record": cm.command_record(srv.id, p.zone)}
 
     @app.get("/api/servers/{sid}/command", dependencies=A)
@@ -750,7 +752,12 @@ WantedBy=multi-user.target
         if remove_files:
             link.managed = True  # the user asked for the files to go too
             orch.spawn(orch.remove_links([link]))
-        await orch.emit("warning", "link", f"تانل {orch.link_label(link)} از پنل حذف شد" + (" و از روی سرورها پاک شد" if remove_files else ""), notify=False)
+        await orch.emit(
+            "warning",
+            "link",
+            f"Tunnel {orch.link_label(link)} removed from the panel" + (" and deleted from the servers" if remove_files else ""),
+            notify=False,
+        )
         return {"ok": True}
 
     @app.post("/api/discover", dependencies=A)
@@ -782,7 +789,7 @@ WantedBy=multi-user.target
         dst = store.links[store.handover.pop(lid)]
         await orch.redeploy_iran_side(dst)
         await orch.redeploy_iran_side(link)
-        await orch.emit("info", "handover", f"پورت‌های {orch.link_label(link)} به صورت دستی به خودش برگشت")
+        await orch.emit("info", "handover", f"the ports of {orch.link_label(link)} were handed back to it by hand")
         return {"ok": True}
 
     @app.post("/api/check", dependencies=A)
@@ -810,7 +817,7 @@ WantedBy=multi-user.target
     async def del_provider(pid: str):
         get(store.providers, pid)
         if any(d.provider_id == pid for d in store.domains.values()):
-            raise HTTPException(409, "دامنه‌هایی از این حساب استفاده می‌کنند")
+            raise HTTPException(409, "some domains use this account")
         del store.providers[pid]
         await orch.changed()
         return {"ok": True}
@@ -844,7 +851,7 @@ WantedBy=multi-user.target
         d = Domain(**body.model_dump())
         d.fqdn = d.fqdn.strip().rstrip(".").lower()
         store.domains[d.id] = d
-        await orch.emit("info", "domain", f"دامنه {d.fqdn} اضافه شد", notify=False, domain=d.id)
+        await orch.emit("info", "domain", f"Domain {d.fqdn} added", notify=False, domain=d.id)
         orch.spawn(adopt_record(d))
         return {"domain": d.to_dict()}
 
@@ -873,7 +880,7 @@ WantedBy=multi-user.target
         iran = get(store.servers, body.iran_id)
         if iran.role != IRAN:
             raise HTTPException(400, "not an Iran server")
-        ok = await orch.move_domain(d, iran.id, "انتقال دستی از پنل")
+        ok = await orch.move_domain(d, iran.id, "manual switch from the panel")
         if not ok:
             raise HTTPException(502, d.error or "switch failed")
         await orch.changed()
@@ -887,7 +894,7 @@ WantedBy=multi-user.target
         if iran.role != IRAN:
             raise HTTPException(400, "not an Iran server")
         d.primary_iran = iran.id
-        await orch.emit("info", "domain", f"سرور اصلی دامنه {d.fqdn}: {iran.name}", notify=False, domain=d.id)
+        await orch.emit("info", "domain", f"Primary server for {d.fqdn}: {iran.name}", notify=False, domain=d.id)
         return {"ok": True}
 
     @app.post("/api/domains/{did}/sync", dependencies=A)
@@ -922,10 +929,10 @@ WantedBy=multi-user.target
         new.engine_token = keep_secret(body.get("engine_token"), store.settings.engine_token)
         new.engine_source = str(new.engine_source or "").strip().rstrip("/")
         if new.engine_source and not new.engine_source.startswith(("https://", "http://")):
-            raise HTTPException(400, "آدرس سورس موتور تانل باید با http:// یا https:// شروع شود")
+            raise HTTPException(400, "the tunnel engine source URL must start with http:// or https://")
         new.engine_release = str(new.engine_release or "latest").strip() or "latest"
         if not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", str(new.backup_time).strip()):
-            raise HTTPException(400, "ساعت بکاپ باید به شکل 03:00 باشد")
+            raise HTTPException(400, "the backup time must look like 03:00")
         new.backup_time = str(new.backup_time).strip().zfill(5)
         try:
             from zoneinfo import ZoneInfo
@@ -933,7 +940,7 @@ WantedBy=multi-user.target
             ZoneInfo(new.backup_tz)
         except Exception:
             if new.backup_tz != "Asia/Tehran":
-                raise HTTPException(400, f"منطقه زمانی نامعتبر: {new.backup_tz}") from None
+                raise HTTPException(400, f"invalid time zone: {new.backup_tz}") from None
         if tg_in is not None:
             old = store.settings.tg()
             tg = Telegram.from_dict({**old.to_dict(), **tg_in})
@@ -985,15 +992,15 @@ WantedBy=multi-user.target
                 blob = backups.read(body.name)
             else:
                 if len(body.data) > 70_000_000:
-                    raise bk.BackupError("فایل خیلی بزرگ است")
+                    raise bk.BackupError("the file is too large")
                 blob = base64.b64decode(body.data, validate=False)
             data_ = await asyncio.to_thread(bk.unpack, blob, body.password or store.settings.backup_password)
         except bk.BackupError as e:
             raise HTTPException(400, str(e)) from None
         except ValueError:
-            raise HTTPException(400, "فایل خوانده نشد") from None
+            raise HTTPException(400, "the file could not be read") from None
         if orch.busy:
-            raise HTTPException(409, "عملیاتی روی تانل‌ها در جریان است؛ چند لحظه بعد دوباره امتحان کنید")
+            raise HTTPException(409, "operations on tunnels are in progress; try again in a moment")
         async with orch._check_lock:
             await make_backup("pre")  # the state being replaced, in case this was a mistake
             store.apply(data_["state"])
@@ -1010,7 +1017,7 @@ WantedBy=multi-user.target
         await orch.emit(
             "warning",
             "backup",
-            f"بکاپ {when} بازگردانی شد ({bk.summary(data_)})" + ("؛ پنل در حالت نظارت است" if store.settings.observe_only else ""),
+            f"Backup from {when} restored ({bk.summary(data_)})" + ("; the panel is in observe mode" if store.settings.observe_only else ""),
         )
         return {"ok": True, "summary": bk.summary(data_), "created": data_.get("created", 0), "relogin": relogin}
 

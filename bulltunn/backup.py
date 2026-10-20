@@ -70,20 +70,20 @@ def is_encrypted(blob: bytes) -> bool:
 def unpack(blob: bytes, password: str = "") -> dict[str, Any]:
     if blob.startswith(MAGIC):
         if not password:
-            raise BackupError("این بکاپ رمز دارد؛ رمز بکاپ را وارد کنید")
+            raise BackupError("this backup is encrypted; enter the backup password")
         salt, nonce, ct = blob[5:21], blob[21:33], blob[33:]
         try:
             blob = AESGCM(_key(password, salt)).decrypt(nonce, ct, MAGIC)
         except InvalidTag:
-            raise BackupError("رمز بکاپ اشتباه است (یا فایل خراب شده)") from None
+            raise BackupError("wrong backup password (or the file is corrupted)") from None
     try:
         if blob[:2] == b"\x1f\x8b":
             blob = gzip.decompress(blob)
         data = json.loads(blob)
     except (OSError, ValueError):
-        raise BackupError("این فایل بکاپ Bull-Tunn نیست") from None
+        raise BackupError("this is not a Bull-Tunn backup file") from None
     if not isinstance(data, dict) or data.get("format") != FORMAT or not isinstance(data.get("state"), dict):
-        raise BackupError("این فایل بکاپ Bull-Tunn نیست")
+        raise BackupError("this is not a Bull-Tunn backup file")
     return data
 
 
@@ -91,8 +91,8 @@ def summary(data: dict[str, Any]) -> str:
     st = data["state"]
     roles = [s.get("role") for s in st.get("servers", [])]
     return (
-        f"{roles.count('kharej')} خارج، {roles.count('iran')} داخل، {len(st.get('links', []))} تانل، "
-        f"{len(st.get('domains', []))} دامنه، {len(st.get('providers', []))} حساب DNS"
+        f"{roles.count('kharej')} foreign, {roles.count('iran')} Iran, {len(st.get('links', []))} tunnels, "
+        f"{len(st.get('domains', []))} domains, {len(st.get('providers', []))} DNS accounts"
     )
 
 
@@ -164,8 +164,8 @@ class Backups:
 
     def read(self, name: str) -> bytes:
         if not NAME_RE.match(name):
-            raise BackupError("نام فایل نامعتبر است")
+            raise BackupError("invalid file name")
         try:
             return (self.dir / name).read_bytes()
         except OSError:
-            raise BackupError("این بکاپ پیدا نشد") from None
+            raise BackupError("this backup was not found") from None

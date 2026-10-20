@@ -93,7 +93,7 @@ def main() -> None:
     except OSError:
         raise SystemExit(
             f"port {port} is already in use on {host} - pick another one with --port, e.g. --port {port + 1010}\n"
-            f"پورت {port} اشغال است؛ با --port یک پورت دیگر بدهید، مثلا --port {port + 1010}"
+            f"Port {port} is busy; choose another one with --port, e.g. --port {port + 1010}"
         ) from None
     finally:
         probe.close()
@@ -138,7 +138,7 @@ def backup_cli(args) -> None:
         if running:
             raise SystemExit(
                 "the panel is running; stop it first:  systemctl stop bulltunn\n"
-                "پنل در حال اجراست؛ اول متوقفش کنید: systemctl stop bulltunn"
+                "The panel is running; stop it first: systemctl stop bulltunn"
             )
     try:
         d = bk.unpack(Path(args.file).read_bytes(), args.password or store.settings.backup_password)

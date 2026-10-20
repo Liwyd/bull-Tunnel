@@ -21,9 +21,9 @@ def test_pack_roundtrip_and_password():
     sealed = bk.pack(data, "s3cret")
     assert bk.is_encrypted(sealed) and b"10.0.0.1" not in sealed
     assert bk.unpack(sealed, "s3cret")["env"] == "BT_PORT=443\n"
-    with pytest.raises(bk.BackupError, match="رمز"):
+    with pytest.raises(bk.BackupError, match="password"):
         bk.unpack(sealed, "nope")
-    with pytest.raises(bk.BackupError, match="رمز"):
+    with pytest.raises(bk.BackupError, match="password"):
         bk.unpack(sealed)
     with pytest.raises(bk.BackupError):
         bk.unpack(b"PK\x03\x04 not a backup")
@@ -77,7 +77,7 @@ def test_backup_and_restore_through_the_api(tmp_path):
         assert c.post("/api/backups/restore", json={"data": base64.b64encode(blob).decode(), "password": "wrong"}).status_code == 400
         # ...and come back; the panel restarts in observe mode
         r = c.post("/api/backups/restore", json={"data": base64.b64encode(blob).decode()}).json()  # current password
-        assert r["ok"] and "1 خارج" in r["summary"] and not r["relogin"]
+        assert r["ok"] and "1 foreign" in r["summary"] and not r["relogin"]
         assert sid in store.servers and store.servers[sid].ssh_password == "pw"
         assert store.settings.observe_only is True
         names = [f["name"] for f in c.get("/api/backups").json()["files"]]

@@ -10,11 +10,11 @@ const TNAME = {
   kcp: "KCP", quic: "QUIC", wssmux: "WSS Mux", wss: "WSS", udp: "UDP",
 };
 const FA = {
-  up: "وصل", degraded: "ناپایدار", down: "قطع", testing: "در حال تست", pending: "ساخته نشده",
-  online: "آنلاین", offline: "آفلاین", unknown: "نامشخص", ok: "سالم", broken: "قطع",
+  up: "Up", degraded: "Unstable", down: "Down", testing: "Testing", pending: "Not built",
+  online: "Online", offline: "Offline", unknown: "Unknown", ok: "Healthy", broken: "Broken",
 };
 const COL_X = { kharej: 0, iran: 440, domain: 880 };
-const COL_TITLE = { kharej: "سرورهای خارج", iran: "سرورهای داخل", domain: "دامنه‌ها" };
+const COL_TITLE = { kharej: "Foreign servers", iran: "Iran servers", domain: "Domains" };
 const NODE_W = 250;
 
 let S = null;          // last state from the server
@@ -73,7 +73,7 @@ const linkName = (l) => (l ? `${nm(l.kharej_id)} ⇄ ${nm(l.iran_id)}` : "—");
 const linkTag = (l) => (l && l.label ? ` (${l.label})` : "");
 // where a port finally leaves from, when the kharej sends it on (only shown)
 const exitName = (t) => (t.server_id ? nm(t.server_id) : t.addr);
-const exitText = (e) => (e ? e.targets.map(exitName).join("، ") : "");
+const exitText = (e) => (e ? e.targets.map(exitName).join(", ") : "");
 const exitBad = (e) => !!e && e.targets.some((t) => t.ok === false);
 function serverExits(id) {
   const out = {};
@@ -93,15 +93,17 @@ function activeLinkIds() {
 function ago(ts) {
   if (!ts) return "—";
   const s = Math.max(0, Math.round(nowS() - ts));
-  if (s < 60) return `${s} ثانیه پیش`;
-  if (s < 3600) return `${Math.floor(s / 60)} دقیقه پیش`;
-  if (s < 86400) return `${Math.floor(s / 3600)} ساعت پیش`;
-  return `${Math.floor(s / 86400)} روز پیش`;
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
 }
 function dur(s) {
   s = Math.max(0, Math.round(s));
-  if (s < 60) return `${s} ثانیه`;
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")} دقیقه`;
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${String(s % 60).padStart(2, "0")}s`;
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 }
 function clock(ts) {
   const d = new Date(ts * 1000);
@@ -137,8 +139,8 @@ function showAuth(configured = true) {
   $("#app").classList.add("hidden");
   $("#auth").classList.remove("hidden");
   const setup = !configured;
-  $("#auth-sub").textContent = setup ? "اولین اجرا: یک نام کاربری و رمز عبور برای مدیر بسازید" : "ورود به پنل مدیریت تانل‌ها";
-  $("#auth-btn").textContent = setup ? "ساخت حساب و ورود" : "ورود";
+  $("#auth-sub").textContent = setup ? "First run: create an administrator username and password" : "Sign in to the tunnel panel";
+  $("#auth-btn").textContent = setup ? "Create the account and sign in" : "Sign in";
   $("#auth-form").onsubmit = async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
@@ -212,17 +214,17 @@ function renderStats() {
   const flap = S.flapping.length;
   const hand = Object.keys(S.handover).length;
   $("#stats").innerHTML =
-    pill("سرورها", on, S.servers.length) + pill("تانل‌ها", up, live.length) + pill("دامنه‌ها", dok, S.domains.length) +
-    (hand ? `<span class="stat" style="color:var(--handover)">${hand} انتقال پورت</span>` : "") +
-    (flap ? `<span class="stat" style="color:var(--degraded)">${flap} تانل ناپایدار</span>` : "") +
-    (prop ? `<span class="stat" style="color:var(--degraded)">${prop} در انتظار DNS</span>` : "") +
-    (S.busy.length ? `<span class="stat" style="color:var(--testing)">${S.busy.length} عملیات در جریان</span>` : "") +
-    (S.demo ? `<span class="stat">حالت دمو</span>` : "") +
-    (S.settings.observe_only ? `<span class="stat observe" id="observe-pill" title="پنل فقط نظارت و گزارش می‌کند؛ هیچ تغییری خودکار انجام نمی‌شود">● حالت نظارت</span>` : "");
+    pill("Servers", on, S.servers.length) + pill("Tunnels", up, live.length) + pill("Domains", dok, S.domains.length) +
+    (hand ? `<span class="stat" style="color:var(--handover)">${hand} port handover</span>` : "") +
+    (flap ? `<span class="stat" style="color:var(--degraded)">${flap} unstable tunnels</span>` : "") +
+    (prop ? `<span class="stat" style="color:var(--degraded)">${prop} awaiting DNS</span>` : "") +
+    (S.busy.length ? `<span class="stat" style="color:var(--testing)">${S.busy.length} operations running</span>` : "") +
+    (S.demo ? `<span class="stat">Demo mode</span>` : "") +
+    (S.settings.observe_only ? `<span class="stat observe" id="observe-pill" title="The panel only observes and reports; nothing is changed automatically">● Observe mode</span>` : "");
 }
 setInterval(() => {
   if (!S) return;
-  $("#last-check").textContent = S.last_check ? `بررسی: ${ago(S.last_check)}` : "در انتظار اولین بررسی";
+  $("#last-check").textContent = S.last_check ? `Checked: ${ago(S.last_check)}` : "Waiting for the first check";
   if (drawer && drawer.type === "domain") {
     const el = $("#failback-timer");
     if (el) el.textContent = failbackText(S.domains.find((x) => x.id === drawer.id)) || "";
@@ -284,17 +286,17 @@ function serverCard(s) {
   const st = s.status;
   const links = S.links.filter((l) => l.status !== "pending" && (l.iran_id === s.id || l.kharej_id === s.id));
   const up = links.filter((l) => l.status === "up").length;
-  const meta = [`<span class="chip">${up}/${links.length} تانل</span>`];
-  if (s.ssh_latency_ms != null) meta.push(`<span class="chip mono" title="تأخیر SSH از پنل">ssh ${ms(s.ssh_latency_ms)}</span>`);
+  const meta = [`<span class="chip">${up}/${links.length} tunnels</span>`];
+  if (s.ssh_latency_ms != null) meta.push(`<span class="chip mono" title="SSH latency from the panel">ssh ${ms(s.ssh_latency_ms)}</span>`);
   const ex = s.role === "kharej" ? serverExits(s.id) : [];
-  if (ex.length) meta.push(`<span class="chip ${ex.some(exitBad) ? "bad" : ""}" title="${esc(ex.map((e) => `${e.port} → ${exitText(e)} (${e.method})`).join("\n"))}">↪ ${ex.length} پورت به بیرون</span>`);
+  if (ex.length) meta.push(`<span class="chip ${ex.some(exitBad) ? "bad" : ""}" title="${esc(ex.map((e) => `${e.port} → ${exitText(e)} (${e.method})`).join("\n"))}">↪ ${ex.length} port${ex.length > 1 ? "s" : ""} forwarded</span>`);
   if (s.role === "iran") {
     const doms = S.domains.filter((d) => d.iran_id === s.id).length;
-    if (doms) meta.push(`<span class="chip info">${doms} دامنه</span>`);
+    if (doms) meta.push(`<span class="chip info">${doms} domain${doms > 1 ? "s" : ""}</span>`);
   }
   return {
     cls: ["node", st === "offline" ? "offline" : "", s.enabled ? "" : "disabled"].join(" "),
-    html: `<div class="row1"><span class="dot ${st}"></span><span class="title">${esc(s.name)}</span><span class="role">${s.role === "iran" ? "داخل" : "خارج"}${s.priority !== 100 ? ` · P${s.priority}` : ""}</span></div>
+    html: `<div class="row1"><span class="dot ${st}"></span><span class="title">${esc(s.name)}</span><span class="role">${s.role === "iran" ? "Iran" : "Foreign"}${s.priority !== 100 ? ` · P${s.priority}` : ""}</span></div>
       <div class="ip">${esc(s.ip)}</div><div class="meta">${meta.join("")}</div>`,
   };
 }
@@ -307,14 +309,14 @@ function domainCard(d) {
   for (const r of routes.slice(0, 4)) {
     const l = linkById(r.link_id);
     const ex = r.exit ? `↪${exitText(r.exit)}` : "";
-    meta.push(`<span class="chip mono ${r.healthy ? (exitBad(r.exit) ? "warn" : "") : "bad"}" title="${esc(l ? linkName(l) : "بدون تانل")}${r.exit ? esc(` · خروجی نهایی: ${exitText(r.exit)} (${r.exit.method})`) : ""}">${esc(r.spec)}→${esc(l ? nm(l.kharej_id) : "؟")}${esc(ex)}</span>`);
+    meta.push(`<span class="chip mono ${r.healthy ? (exitBad(r.exit) ? "warn" : "") : "bad"}" title="${esc(l ? linkName(l) : "no tunnel")}${r.exit ? esc(` · final exit: ${exitText(r.exit)} (${r.exit.method})`) : ""}">${esc(r.spec)}→${esc(l ? nm(l.kharej_id) : "?")}${esc(ex)}</span>`);
   }
   if (routes.length > 4) meta.push(`<span class="chip">+${routes.length - 4}</span>`);
-  if (!routes.length && d.iran_id) meta.push(`<span class="chip warn">پورت مشخص نشده</span>`);
-  if (d.iran_id && d.primary_iran && d.iran_id !== d.primary_iran) meta.push(`<span class="chip warn">جایگزین</span>`);
-  if (d.pending_ip) meta.push(`<span class="chip warn">در انتظار DNS</span>`);
-  if (!d.auto_failover) meta.push(`<span class="chip">دستی</span>`);
-  if (d.error) meta.push(`<span class="chip bad" title="${esc(d.error)}">خطا</span>`);
+  if (!routes.length && d.iran_id) meta.push(`<span class="chip warn">no port set</span>`);
+  if (d.iran_id && d.primary_iran && d.iran_id !== d.primary_iran) meta.push(`<span class="chip warn">standby</span>`);
+  if (d.pending_ip) meta.push(`<span class="chip warn">awaiting DNS</span>`);
+  if (!d.auto_failover) meta.push(`<span class="chip">manual</span>`);
+  if (d.error) meta.push(`<span class="chip bad" title="${esc(d.error)}">error</span>`);
   return {
     cls: "node domain",
     html: `<div class="row1"><span class="dot ${d.status}"></span><span class="title">${esc(d.fqdn)}</span>${p ? `<span class="prov ${p.kind}">${p.kind === "cloudflare" ? "CF" : "ARVAN"}</span>` : ""}</div>
@@ -605,7 +607,7 @@ $("#tools").addEventListener("click", async (e) => {
   else if (z === "out") zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1 / 1.2);
   else if (z === "fit") fit();
   else if (z === "reset") {
-    if (!confirm("چیدمان سرورها به حالت پیش‌فرض برگردد؟")) return;
+    if (!confirm("Reset the server layout to the default?")) return;
     await api("DELETE", "/api/layout");
     for (const id of Object.keys(pos)) delete pos[id];
     S.layout = {};
@@ -657,11 +659,11 @@ function applyFocus() {
 }
 function linkTip(l) {
   const best = Object.values(l.tests || {}).filter((t) => t.ok).sort((a, b) => a.latency_ms - b.latency_ms).slice(0, 3)
-    .map((t) => `${t.transport} ${ms(t.latency_ms)}`).join("، ");
-  return `<b>${esc(linkName(l))}</b>${esc(linkTag(l))}<br>وضعیت: ${FA[lstatus(l)] || l.status}${isFlapping(l) ? " — <span style='color:var(--degraded)'>مدام قطع و وصل</span>" : ""}<br>
-    پروتکل: <span class="mono">${esc(l.transport || "—")}</span>${l.pinned ? " (قفل)" : ""} · تأخیر: <span class="mono">${ms(l.latency_ms)}</span><br>
-    پورت‌ها: <span class="mono">${esc((l.exposed || []).join(", ") || "—")}</span>
-    ${l.error ? `<br><span style="color:var(--down)">${esc(l.error)}</span>` : ""}${best ? `<br><span class="muted">بهترین‌ها: ${esc(best)}</span>` : ""}`;
+    .map((t) => `${t.transport} ${ms(t.latency_ms)}`).join(", ");
+  return `<b>${esc(linkName(l))}</b>${esc(linkTag(l))}<br>Status: ${FA[lstatus(l)] || l.status}${isFlapping(l) ? " — <span style='color:var(--degraded)'>keeps flapping</span>" : ""}<br>
+    Protocol: <span class="mono">${esc(l.transport || "—")}</span>${l.pinned ? " (pinned)" : ""} · Latency: <span class="mono">${ms(l.latency_ms)}</span><br>
+    Ports: <span class="mono">${esc((l.exposed || []).join(", ") || "—")}</span>
+    ${l.error ? `<br><span style="color:var(--down)">${esc(l.error)}</span>` : ""}${best ? `<br><span class="muted">best: ${esc(best)}</span>` : ""}`;
 }
 
 /* --------------------------------------------------------- tunnels table */
@@ -671,23 +673,23 @@ function renderTable() {
   const rows = S.links.filter((l) => showPending || l.status !== "pending")
     .sort((a, b) => nm(a.kharej_id).localeCompare(nm(b.kharej_id)) || nm(a.iran_id).localeCompare(nm(b.iran_id)) || a.priority - b.priority);
   if (!rows.length) {
-    $("#links-table").innerHTML = `<tr><td class="muted">هنوز تانلی نیست. سرورها را اضافه کنید؛ تانل‌های فعال روی آن‌ها خودکار پیدا می‌شوند.</td></tr>`;
+    $("#links-table").innerHTML = `<tr><td class="muted">No tunnel yet. Add the servers; the tunnels that already run on them are found automatically.</td></tr>`;
     return;
   }
-  $("#links-table").innerHTML = `<tr><th></th><th>مسیر</th><th>نام</th><th>پروتکل</th><th>تأخیر</th><th>پورت‌ها (سمت داخل)</th><th>نوع</th><th>تاریخچه</th></tr>` +
+  $("#links-table").innerHTML = `<tr><th></th><th>Path</th><th>Name</th><th>Protocol</th><th>Latency</th><th>Ports (Iran side)</th><th>Kind</th><th>History</th></tr>` +
     rows.map((l) => {
       const st = lstatus(l);
       const tags = [];
-      if (active.has(l.id)) tags.push(`<span class="act">● ترافیک</span>`);
-      if (handedOver(l)) tags.push(`<span class="chip purple">پورت‌ها روی ${esc(linkName(linkById(S.handover[l.id])))}</span>`);
-      if (isFlapping(l)) tags.push(`<span class="chip warn">ناپایدار</span>`);
+      if (active.has(l.id)) tags.push(`<span class="act">● traffic</span>`);
+      if (handedOver(l)) tags.push(`<span class="chip purple">ports on ${esc(linkName(linkById(S.handover[l.id])))}</span>`);
+      if (isFlapping(l)) tags.push(`<span class="chip warn">unstable</span>`);
       return `<tr data-link="${l.id}"><td><span class="dot ${st}"></span></td>
         <td class="pair">${esc(linkName(l))} ${tags.join(" ")}</td>
         <td class="muted">${esc(l.label || "")}</td>
         <td class="mono">${esc(st === "testing" ? "…" : l.transport || "—")}${l.pinned ? " 🔒" : ""}</td>
         <td class="mono">${st === "up" ? ms(l.latency_ms) : `<span class="muted">${FA[st] || st}</span>`}</td>
         <td class="mono small">${esc((l.ports || []).join(", ") || "—")}</td>
-        <td>${l.managed ? `<span class="chip">پنل</span>` : `<span class="chip info" title="از قبل روی سرور بود">موجود</span>`}</td>
+        <td>${l.managed ? `<span class="chip">panel</span>` : `<span class="chip info" title="It was already on the server">existing</span>`}</td>
         <td>${spark(l.history, 90, 18)}</td></tr>`;
     }).join("");
 }
@@ -698,7 +700,7 @@ function renderEvents(newId) {
   const list = events.filter((e) => evFilter === "all" || e.level === evFilter).slice(-200).reverse();
   $("#events").innerHTML = list.map((e) => `<li class="${e.level} ${e.id === newId ? "new" : ""}">
     <span class="lv"></span><span class="msg">${esc(e.message)}</span><time>${clock(e.ts)}</time></li>`).join("")
-    || `<li class="muted"><span></span><span>هنوز رویدادی ثبت نشده</span></li>`;
+    || `<li class="muted"><span></span><span>No event yet</span></li>`;
 }
 $$("#ev-filter button").forEach((b) => (b.onclick = () => {
   evFilter = b.dataset.f;
@@ -710,16 +712,16 @@ $$("#ev-filter button").forEach((b) => (b.onclick = () => {
 function renderEmpty() {
   const kh = byRole("kharej"), ir = byRole("iran");
   const steps = [
-    ["سرورهای خارج و داخل را اضافه کنید (فقط آی‌پی و SSH)", kh.length > 0 && ir.length > 0],
-    ["تانل‌هایی که از قبل فعال‌اند خودکار پیدا می‌شوند؛ بقیه را با «تست و اتصال» بسازید", S.links.some((l) => l.status === "up")],
-    ["حساب DNS (آروان/کلادفلر) و دامنه‌ها را اضافه کنید", S.domains.length > 0],
+    ["Add the foreign and the Iran servers (only the IP and SSH)", kh.length > 0 && ir.length > 0],
+    ["The tunnels that already run are found automatically; build the rest with “Test & connect”", S.links.some((l) => l.status === "up")],
+    ["Add a DNS account (ArvanCloud/Cloudflare) and the domains", S.domains.length > 0],
   ];
   const el = $("#empty-hint");
   const show = S.servers.length < 2 || (!S.domains.length && S.servers.length < 3);
   el.classList.toggle("hidden", !show);
   if (!show) return;
-  el.innerHTML = `<div class="empty-card"><h3>شروع کار</h3><ol>${steps.map(([t, ok]) => `<li class="${ok ? "done" : ""}">${ok ? "✓ " : ""}${t}</li>`).join("")}</ol>
-    <div class="btns"><button class="btn primary sm" data-add="kharej">＋ سرور خارج</button><button class="btn sm" data-add="iran">＋ سرور داخل</button><button class="btn sm" data-add="domain">＋ دامنه</button></div></div>`;
+  el.innerHTML = `<div class="empty-card"><h3>Getting started</h3><ol>${steps.map(([t, ok]) => `<li class="${ok ? "done" : ""}">${ok ? "✓ " : ""}${t}</li>`).join("")}</ol>
+    <div class="btns"><button class="btn primary sm" data-add="kharej">＋ Foreign server</button><button class="btn sm" data-add="iran">＋ Iran server</button><button class="btn sm" data-add="domain">＋ Domain</button></div></div>`;
 }
 
 /* ---------------------------------------------------------------- drawer */
@@ -748,7 +750,7 @@ function renderDrawer(force) {
   $("#drawer").scrollTop = keep;
 }
 const head = (title, sub, status) => `<div class="d-head"><div style="flex:1;min-width:0"><h2>${title}</h2><div class="d-sub">${sub}</div></div>
-  ${status ? `<span class="chip"><span class="dot ${status}"></span>${FA[status] || status}</span>` : ""}<button class="btn icon" data-close aria-label="بستن">✕</button></div>`;
+  ${status ? `<span class="chip"><span class="dot ${status}"></span>${FA[status] || status}</span>` : ""}<button class="btn icon" data-close aria-label="Close">✕</button></div>`;
 
 function linkDrawer() {
   const l = linkById(drawer.id);
@@ -764,51 +766,51 @@ function linkDrawer() {
     // as unavailable, so nobody pins a tunnel to it
     const has = !l.engine_transports || !l.engine_transports.length || l.engine_transports.includes(t);
     const cls = ["topt", t === l.transport ? "cur" : "", t === sel ? "sel" : "", r ? (r.ok ? "ok" : "bad") : "", has ? "" : "off"].join(" ");
-    const res = !has ? "موتور ندارد" : r ? (r.ok ? `${ms(r.latency_ms)} · ${r.connect_s ?? "?"}s` : "ناموفق") : "تست نشده";
+    const res = !has ? "not in the engine" : r ? (r.ok ? `${ms(r.latency_ms)} · ${r.connect_s ?? "?"}s` : "failed") : "not tested";
     return `<div class="${cls}" data-pick="${t}" title="${esc(r && r.error ? r.error : "")}"><span class="n">${esc(TNAME[t] || t)}</span><span class="r">${res}</span></div>`;
   }).join("");
   const carriedFrom = Object.entries(S.handover).filter(([, v]) => v === l.id).map(([k]) => linkById(k)).filter(Boolean);
   const minutes = Math.round(S.settings.failback_after / 60);
   const handBox = handedOver(l)
-    ? `<div class="box"><h4>انتقال پورت</h4><p class="note">پورت‌های این تانل الان روی <b>${esc(linkName(linkById(S.handover[l.id])))}</b> (همین سرور داخل) باز است، چون این تانل مشکل داشت. وقتی ${minutes} دقیقه بدون قطعی پایدار بماند خودکار برمی‌گردد.</p>
-       <div class="btns"><button class="btn sm" data-release="${l.id}">برگرداندن همین حالا</button></div></div>`
-    : carriedFrom.length ? `<div class="box"><h4>انتقال پورت</h4><p class="note">این تانل پورت‌های ${carriedFrom.map((x) => `<b>${esc(linkName(x))}</b>`).join("، ")} را هم حمل می‌کند.</p></div>` : "";
+    ? `<div class="box"><h4>Port handover</h4><p class="note">The ports of this tunnel are open on <b>${esc(linkName(linkById(S.handover[l.id])))}</b> (the same Iran server) right now, because this tunnel had a problem. They come back on their own once it stays up for ${minutes} minutes without a drop.</p>
+       <div class="btns"><button class="btn sm" data-release="${l.id}">Bring them back now</button></div></div>`
+    : carriedFrom.length ? `<div class="box"><h4>Port handover</h4><p class="note">This tunnel also carries the ports of ${carriedFrom.map((x) => `<b>${esc(linkName(x))}</b>`).join(", ")}.</p></div>` : "";
   const allowed = l.allowed && l.allowed.length ? l.allowed : cand;
-  return `${head(esc(linkName(l)), `${l.managed ? "ساخته‌شده توسط پنل" : "تانل موجود روی سرور"} · <span class="mono">${esc(l.iran_name)}</span>${l.label && l.label !== l.iran_name ? ` · ${esc(l.label)}` : ""}`, st)}
-  <div class="box"><h4>وضعیت</h4><dl class="kv">
-    <dt>پروتکل</dt><dd><span class="mono">${esc(l.transport || "—")}</span> ${l.pinned ? "🔒 قفل" : "<span class='muted'>(خودکار)</span>"}</dd>
-    <dt>تأخیر</dt><dd class="mono">${ms(l.latency_ms)}</dd>
-    <dt>پایداری</dt><dd>${isFlapping(l) ? "<span class='chip warn'>مدام قطع و وصل می‌شود</span>" : l.status === "up" && l.up_since ? `وصل از ${ago(l.up_since)}` : "—"}${l.last_fail ? ` <span class="muted small">· آخرین قطعی ${ago(l.last_fail)}</span>` : ""}</dd>
-    <dt>پورت تانل</dt><dd class="mono">${l.tunnel_port}</dd>
-    <dt>سنجش سلامت</dt><dd>${l.probe_port ? `پروب کامل مسیر <span class="mono muted">127.0.0.1:${l.probe_port}</span>` : "از روی اتصال تانل (پروب کامل با اولین بازنویسی کانفیگ اضافه می‌شود)"}</dd>
-    <dt>دامنه‌ها</dt><dd>${doms.map((d) => `<span class="chip">${esc(d.fqdn)}</span>`).join(" ") || "<span class='muted'>— رزرو</span>"}</dd>
-    ${l.error ? `<dt>خطا</dt><dd style="color:var(--down)">${esc(l.error)}</dd>` : ""}
+  return `${head(esc(linkName(l)), `${l.managed ? "built by the panel" : "existing tunnel on the server"} · <span class="mono">${esc(l.iran_name)}</span>${l.label && l.label !== l.iran_name ? ` · ${esc(l.label)}` : ""}`, st)}
+  <div class="box"><h4>Status</h4><dl class="kv">
+    <dt>Protocol</dt><dd><span class="mono">${esc(l.transport || "—")}</span> ${l.pinned ? "🔒 pinned" : "<span class='muted'>(automatic)</span>"}</dd>
+    <dt>Latency</dt><dd class="mono">${ms(l.latency_ms)}</dd>
+    <dt>Stability</dt><dd>${isFlapping(l) ? "<span class='chip warn'>keeps flapping</span>" : l.status === "up" && l.up_since ? `up for ${ago(l.up_since)}` : "—"}${l.last_fail ? ` <span class="muted small">· last drop ${ago(l.last_fail)}</span>` : ""}</dd>
+    <dt>Tunnel port</dt><dd class="mono">${l.tunnel_port}</dd>
+    <dt>Health check</dt><dd>${l.probe_port ? `full-path probe <span class="mono muted">127.0.0.1:${l.probe_port}</span>` : "from the tunnel connection (the full probe is added with the first config rewrite)"}</dd>
+    <dt>Domains</dt><dd>${doms.map((d) => `<span class="chip">${esc(d.fqdn)}</span>`).join(" ") || "<span class='muted'>— standby</span>"}</dd>
+    ${l.error ? `<dt>Error</dt><dd style="color:var(--down)">${esc(l.error)}</dd>` : ""}
   </dl>${spark(l.history, 430, 40)}</div>
   ${handBox}
-  <div class="box"><h4>پورت‌های فورواردی — سمت سرور داخل (${esc(nm(l.iran_id))})</h4>
+  <div class="box"><h4>Forwarded ports — Iran server side (${esc(nm(l.iran_id))})</h4>
     <textarea id="lp-ports" placeholder="443&#10;8443=2096&#10;2053-2060">${esc((l.ports || []).join("\n"))}</textarea>
-    <p class="hint">هر خط یک پورت: «<span class="mono">443</span>» یعنی پورت 443 این سرور داخل به همان پورت روی سرور خارج می‌رود؛ «<span class="mono">8443=2096</span>» یعنی 8443 داخل به 2096 خارج؛ «<span class="mono">2053-2060</span>» یک بازه.</p>
-    ${Object.keys(l.exits || {}).length ? `<div class="opt-list">${Object.entries(l.exits).map(([spec, e]) => `<div class="opt"><span class="dot ${exitBad(e) ? "down" : "up"}"></span><span class="grow"><span dir="ltr" style="text-align:right"><span class="mono">${esc(spec)}</span> → ${esc(nm(l.kharej_id))} ↪ ${esc(exitText(e))}</span>${exitLine(e)}</span></div>`).join("")}</div>` : ""}
-    <label class="check"><input type="checkbox" id="lp-udp" ${l.accept_udp ? "checked" : ""}> UDP هم فوروارد شود</label>
-    <label class="check"><input type="checkbox" id="lp-all"> همین پورت‌ها روی همه تانل‌های ${esc(nm(l.kharej_id))} تنظیم شود</label>
-    <div class="btns"><button class="btn primary sm" data-save-ports="${l.id}">ذخیره و اعمال</button></div>
+    <p class="hint">One port per line: “<span class="mono">443</span>” means port 443 of this Iran server goes to the same port on the foreign server; “<span class="mono">8443=2096</span>” means 8443 inside goes to 2096 outside; “<span class="mono">2053-2060</span>” is a range.</p>
+    ${Object.keys(l.exits || {}).length ? `<div class="opt-list">${Object.entries(l.exits).map(([spec, e]) => `<div class="opt"><span class="dot ${exitBad(e) ? "down" : "up"}"></span><span class="grow"><span dir="ltr" style="text-align:left"><span class="mono">${esc(spec)}</span> → ${esc(nm(l.kharej_id))} ↪ ${esc(exitText(e))}</span>${exitLine(e)}</span></div>`).join("")}</div>` : ""}
+    <label class="check"><input type="checkbox" id="lp-udp" ${l.accept_udp ? "checked" : ""}> Forward UDP as well</label>
+    <label class="check"><input type="checkbox" id="lp-all"> Set the same ports on every tunnel of ${esc(nm(l.kharej_id))}</label>
+    <div class="btns"><button class="btn primary sm" data-save-ports="${l.id}">Save and apply</button></div>
   </div>
-  <div class="box"><h4>پروتکل اتصال</h4>
+  <div class="box"><h4>Connection protocol</h4>
     <div class="tgrid">${grid}</div>
-    <label class="check"><input type="checkbox" id="pin-on-apply" ${l.pinned ? "checked" : ""}> قفل روی این پروتکل (در قطعی عوض نشود)</label>
+    <label class="check"><input type="checkbox" id="pin-on-apply" ${l.pinned ? "checked" : ""}> Pin this protocol (do not switch it on a failure)</label>
     <div class="btns">
-      <button class="btn primary sm" data-apply-transport ${sel === l.transport && st === "up" ? "disabled" : ""}>اعمال ${esc(TNAME[sel] || sel || "")}</button>
-      <button class="btn sm" data-retest>تست همه پروتکل‌ها</button>
-      ${l.pinned ? `<button class="btn sm ghost" data-unpin>آزاد کردن قفل</button>` : ""}
+      <button class="btn primary sm" data-apply-transport ${sel === l.transport && st === "up" ? "disabled" : ""}>Apply ${esc(TNAME[sel] || sel || "")}</button>
+      <button class="btn sm" data-retest>Test every protocol</button>
+      ${l.pinned ? `<button class="btn sm ghost" data-unpin>Release the pin</button>` : ""}
     </div>
-    <label>پروتکل‌هایی که بازسازی خودکار این تانل امتحان می‌کند</label>
+    <label>The protocols the automatic repair of this tunnel tries</label>
     <div class="tchecks">${all.map((t) => `<label><input type="checkbox" class="lp-allowed" value="${t}" ${allowed.includes(t) ? "checked" : ""}>${t}</label>`).join("")}</div>
   </div>
-  <div class="box"><h4>تنظیمات</h4>
-    <div class="grid2"><label>نام نمایشی<input id="lp-label" value="${esc(l.label)}"></label><label>اولویت بین تانل‌های این جفت<input id="lp-prio" type="number" value="${l.priority}"></label></div>
-    <div class="btns"><button class="btn sm" data-save-link="${l.id}">ذخیره</button>
-      ${l.managed ? `<button class="btn sm danger" data-del-link="${l.id}" data-purge="1">حذف تانل</button>`
-        : `<button class="btn sm" data-del-link="${l.id}">فراموش کردن (روی سرور بماند)</button><button class="btn sm danger" data-del-link="${l.id}" data-purge="1">حذف از روی سرورها</button>`}</div>
+  <div class="box"><h4>Settings</h4>
+    <div class="grid2"><label>Display name<input id="lp-label" value="${esc(l.label)}"></label><label>Priority among the tunnels of this pair<input id="lp-prio" type="number" value="${l.priority}"></label></div>
+    <div class="btns"><button class="btn sm" data-save-link="${l.id}">Save</button>
+      ${l.managed ? `<button class="btn sm danger" data-del-link="${l.id}" data-purge="1">Delete the tunnel</button>`
+        : `<button class="btn sm" data-del-link="${l.id}">Forget it (it stays on the server)</button><button class="btn sm danger" data-del-link="${l.id}" data-purge="1">Delete it from the servers</button>`}</div>
   </div>`;
 }
 
@@ -825,41 +827,41 @@ function serverDrawer() {
   };
   const built = links.filter((l) => l.status !== "pending"), offers = links.filter((l) => l.status === "pending");
   const broken = built.filter((l) => l.status !== "up");
-  return `${head(esc(s.name), `<span class="mono">${esc(s.ip)}</span> · سرور ${s.role === "iran" ? "داخل" : "خارج"}`, s.status)}
-  <div class="box"><h4>جزئیات</h4><dl class="kv">
+  return `${head(esc(s.name), `<span class="mono">${esc(s.ip)}</span> · ${s.role === "iran" ? "Iran" : "Foreign"} server`, s.status)}
+  <div class="box"><h4>Details</h4><dl class="kv">
     <dt>SSH</dt><dd class="mono">${esc(s.ssh_user)}@${esc(s.ip)}:${s.ssh_port}</dd>
-    <dt>کلید میزبان</dt><dd class="mono">${esc(s.host_key_seen || s.host_key || "—")}</dd>
-    <dt>تأخیر SSH</dt><dd class="mono">${ms(s.ssh_latency_ms)}</dd>
-    <dt>آخرین پاسخ</dt><dd>${ago(s.last_seen)}</dd>
-    <dt>موتور تانل</dt><dd class="mono">${esc(s.engine_version || "—")}</dd>
-    <dt>آخرین جستجوی تانل</dt><dd>${ago(s.last_scan)}</dd>
-    <dt>اولویت</dt><dd>${s.priority} ${s.enabled ? "" : "<span class='chip warn'>غیرفعال</span>"}</dd>
-    ${s.error ? `<dt>خطا</dt><dd style="color:var(--down)">${esc(s.error)}</dd>` : ""}
+    <dt>Host key</dt><dd class="mono">${esc(s.host_key_seen || s.host_key || "—")}</dd>
+    <dt>SSH latency</dt><dd class="mono">${ms(s.ssh_latency_ms)}</dd>
+    <dt>Last seen</dt><dd>${ago(s.last_seen)}</dd>
+    <dt>Tunnel engine</dt><dd class="mono">${esc(s.engine_version || "—")}</dd>
+    <dt>Last tunnel scan</dt><dd>${ago(s.last_scan)}</dd>
+    <dt>Priority</dt><dd>${s.priority} ${s.enabled ? "" : "<span class='chip warn'>disabled</span>"}</dd>
+    ${s.error ? `<dt>Error</dt><dd style="color:var(--down)">${esc(s.error)}</dd>` : ""}
   </dl>
-  <div class="btns"><button class="btn sm" data-edit-server="${s.id}">ویرایش</button><button class="btn sm" data-test-server="${s.id}">تست SSH</button>
-  <button class="btn sm" data-scan>جستجوی تانل‌ها</button><button class="btn sm" data-install="${s.id}">نصب موتور تانل</button><button class="btn sm danger" data-del-server="${s.id}">حذف</button></div></div>
-  <div class="box"><h4>تست اتصال ⚡</h4>
-    <p class="hint">مسیر بین این سرور و یک سرور از طرف دیگر، روی همه پروتکل‌ها سنجیده می‌شود: زمان برقراری اتصال، زمان دست‌دهی و رفت‌وبرگشت واقعی. بهترین پروتکل همین الان همین‌جا اعمال می‌شود.</p>
-    ${probePeers(s).length ? `<div class="grid2"><label>${s.role === "iran" ? "سرور خارج" : "سرور داخل"}<select data-probe-peer>
+  <div class="btns"><button class="btn sm" data-edit-server="${s.id}">Edit</button><button class="btn sm" data-test-server="${s.id}">Test SSH</button>
+  <button class="btn sm" data-scan>Find the tunnels</button><button class="btn sm" data-install="${s.id}">Install the tunnel engine</button><button class="btn sm danger" data-del-server="${s.id}">Delete</button></div></div>
+  <div class="box"><h4>Connection test ⚡</h4>
+    <p class="hint">The path between this server and one on the other side is measured on every protocol: the time to connect, the handshake time and the real round trip. The best protocol can be applied right here.</p>
+    ${probePeers(s).length ? `<div class="grid2"><label>${s.role === "iran" ? "Foreign server" : "Iran server"}<select data-probe-peer>
       ${probePeers(s).map((o) => `<option value="${esc(o.id)}">${esc(o.name)} — ${esc(o.ip)}</option>`).join("")}
     </select></label>
-    <div class="btns"><button class="btn sm primary" data-probe="${s.id}">⚡ سنجش اتصال</button></div></div>
-    <div id="probe-out"></div>` : `<p class="note">اول یک سرور از طرف دیگر اضافه کنید تا مسیر سنجیده شود.</p>`}
+    <div class="btns"><button class="btn sm primary" data-probe="${s.id}">⚡ Measure the connection</button></div></div>
+    <div id="probe-out"></div>` : `<p class="note">Add a server on the other side first so that the path can be measured.</p>`}
   </div>
-  ${s.role === "kharej" ? `<div class="box"><h4>کانال فرمان (DNS)</h4>
-    <p class="hint">وقتی حتی TCP هم ممکن نیست، پنل فرمان را در یک رکورد TXT می‌گذارد و عامل روی سرور آن را می‌خواند و اجرا می‌کند.</p>
-    <div class="btns"><button class="btn sm" data-install-agent="${s.id}">نصب کانال فرمان</button>
-      <button class="btn sm" data-send-command="${s.id}">فرستادن فرمان «وضعیت»</button>
-      <button class="btn sm" data-read-command="${s.id}">خواندن جواب</button></div>
+  ${s.role === "kharej" ? `<div class="box"><h4>Command channel (DNS)</h4>
+    <p class="hint">When not even TCP is possible, the panel writes the command into a TXT record and the agent on the server reads and runs it.</p>
+    <div class="btns"><button class="btn sm" data-install-agent="${s.id}">Install the command channel</button>
+      <button class="btn sm" data-send-command="${s.id}">Send the “status” command</button>
+      <button class="btn sm" data-read-command="${s.id}">Read the answer</button></div>
     <div id="cmd-out" class="sub mono"></div></div>` : ""}
-  <div class="box"><h4>تانل‌ها (${built.length})</h4><div class="opt-list">${built.map(row).join("") || "<span class='muted small'>—</span>"}</div>
-    <div class="btns"><button class="btn sm" data-new-link="${s.id}">＋ تانل جدید</button>
-    ${broken.length ? `<button class="btn sm" data-discover-links="${broken.map((l) => l.id).join(",")}">ساخت دوباره تانل‌های قطع</button>` : ""}</div></div>
-  ${s.role === "kharej" && serverExits(s.id).length ? `<div class="box"><h4>پورت‌هایی که از سرور دیگری خارج می‌شوند</h4>
-    <div class="opt-list">${serverExits(s.id).map((e) => `<div class="opt"><span class="dot ${exitBad(e) ? "down" : "up"}"></span><span class="grow"><span dir="ltr" style="text-align:right"><span class="mono">${e.port}</span> ↪ ${esc(exitText(e))}</span>${exitLine(e)}</span></div>`).join("")}</div>
-    <p class="hint">پنل این‌ها را فقط از روی سرور می‌خواند و نشان می‌دهد (iptables/nft، socat، gost، realm و اتصال‌های پروسه‌ای که روی پورت گوش می‌دهد)؛ چیزی را در این مرحله تغییر نمی‌دهد.</p></div>` : ""}
-  ${offers.length ? `<div class="box"><h4>جفت‌هایی که تانل ندارند</h4><div class="opt-list">${offers.map(row).join("")}</div>
-    <div class="btns"><button class="btn sm" data-discover-links="${offers.map((l) => l.id).join(",")}">ساخت با بهترین پروتکل</button></div></div>` : ""}`;
+  <div class="box"><h4>Tunnels (${built.length})</h4><div class="opt-list">${built.map(row).join("") || "<span class='muted small'>—</span>"}</div>
+    <div class="btns"><button class="btn sm" data-new-link="${s.id}">＋ New tunnel</button>
+    ${broken.length ? `<button class="btn sm" data-discover-links="${broken.map((l) => l.id).join(",")}">Rebuild the broken tunnels</button>` : ""}</div></div>
+  ${s.role === "kharej" && serverExits(s.id).length ? `<div class="box"><h4>Ports that finally leave through another server</h4>
+    <div class="opt-list">${serverExits(s.id).map((e) => `<div class="opt"><span class="dot ${exitBad(e) ? "down" : "up"}"></span><span class="grow"><span dir="ltr" style="text-align:left"><span class="mono">${e.port}</span> ↪ ${esc(exitText(e))}</span>${exitLine(e)}</span></div>`).join("")}</div>
+    <p class="hint">The panel only reads these from the server and shows them (iptables/nft, socat, gost, realm and the connections of the process listening on the port); it changes nothing at this stage.</p></div>` : ""}
+  ${offers.length ? `<div class="box"><h4>Pairs without a tunnel</h4><div class="opt-list">${offers.map(row).join("")}</div>
+    <div class="btns"><button class="btn sm" data-discover-links="${offers.map((l) => l.id).join(",")}">Build with the best protocol</button></div></div>` : ""}`;
 }
 
 /* the servers of the other role: the path to them is the one to measure */
@@ -870,32 +872,32 @@ function probePeers(s) {
 /* the table of a measurement: one row per carrier, the best one marked */
 function probeTable(r) {
   if (!r || !r.ok) {
-    return `<p class="note" style="color:var(--down)">${esc((r && r.error) || "نتیجه‌ای نبود")}</p>`;
+    return `<p class="note" style="color:var(--down)">${esc((r && r.error) || "no result")}</p>`;
   }
   const rows = (r.results || []).map((x, i) => {
     const ok = !!x.ok;
     const best = ok && i === 0;
     const cells = ok
       ? `<td class="mono">${ms(x.connect_ms)}</td><td class="mono">${ms(x.handshake_ms)}</td><td class="mono">${ms(x.rtt_ms)}</td>`
-      : `<td colspan="3" class="muted small">${esc(x.error || "کار نکرد")}</td>`;
-    return `<tr><td class="mono">${esc(x.transport)}${best ? " ★" : ""}</td>${cells}<td>${ok ? (best ? '<b style="color:var(--up)">بهترین</b>' : "✓") : "✗"}</td></tr>`;
+      : `<td colspan="3" class="muted small">${esc(x.error || "did not work")}</td>`;
+    return `<tr><td class="mono">${esc(x.transport)}${best ? " ★" : ""}</td>${cells}<td>${ok ? (best ? '<b style="color:var(--up)">best</b>' : "✓") : "✗"}</td></tr>`;
   }).join("");
   const apply = r.best && r.link_id
-    ? `<div class="btns"><button class="btn sm primary" data-apply-probe="${esc(r.link_id)}" data-transport="${esc(r.best)}">اعمال ${esc(r.best)} روی این تانل</button></div>`
+    ? `<div class="btns"><button class="btn sm primary" data-apply-probe="${esc(r.link_id)}" data-transport="${esc(r.best)}">Apply ${esc(r.best)} on this tunnel</button></div>`
     : "";
-  return `<table class="links"><tr><th>پروتکل</th><th>اتصال</th><th>نشست</th><th>رفت‌وبرگشت</th><th></th></tr>${rows}</table>${apply}`;
+  return `<table class="links"><tr><th>Protocol</th><th>Connect</th><th>Session</th><th>Round trip</th><th></th></tr>${rows}</table>${apply}`;
 }
 
 function failbackText(d) {  if (!d || !d.failback) return "";
   const f = d.failback, name = nm(f.iran_id);
-  if (f.wait < 0) return `سرور اصلی ${name} هنوز همه پورت‌های این دامنه را سالم ندارد`;
+  if (f.wait < 0) return `the primary server ${name} does not have all the ports of this domain healthy yet`;
   const left = f.wait - (nowS() - S.now);
-  return left > 0 ? `برگشت به سرور اصلی ${name} بعد از ${dur(left)} پایداری دیگر` : `برگشت به سرور اصلی ${name} در بررسی بعدی`;
+  return left > 0 ? `back to the primary server ${name} in ${dur(left)} of stability` : `back to the primary server ${name} on the next check`;
 }
 function exitLine(e) {
   if (!e) return "";
-  const st = e.targets.map((t) => `${esc(exitName(t))}${t.server_id ? ` <span class="mono muted">${esc(t.addr)}</span>` : ""} ${t.ok === false ? "<b style='color:var(--down)'>جواب نمی‌دهد</b>" : t.ok ? "<span style='color:var(--up)'>✓</span>" : ""}`).join("، ");
-  return `<span class="sub">خروجی نهایی: ${st} <span class="muted">(${esc(e.method)}${e.inferred ? "، از روی اتصال‌ها" : ""})</span></span>`;
+  const st = e.targets.map((t) => `${esc(exitName(t))}${t.server_id ? ` <span class="mono muted">${esc(t.addr)}</span>` : ""} ${t.ok === false ? "<b style='color:var(--down)'>does not answer</b>" : t.ok ? "<span style='color:var(--up)'>✓</span>" : ""}`).join(", ");
+  return `<span class="sub">final exit: ${st} <span class="muted">(${esc(e.method)}${e.inferred ? ", inferred from the connections" : ""})</span></span>`;
 }
 function domainDrawer() {
   const d = S.domains.find((x) => x.id === drawer.id);
@@ -906,10 +908,10 @@ function domainDrawer() {
   const routeRows = (d.routes || []).map((r) => {
     const l = linkById(r.link_id);
     const st = l ? lstatus(l) : "down";
-    const sub = l ? [l.label, l.transport, st === "up" ? ms(l.latency_ms) : FA[st]].filter(Boolean).join(" · ") : "هیچ تانلی این پورت را روی این سرور باز نکرده";
+    const sub = l ? [l.label, l.transport, st === "up" ? ms(l.latency_ms) : FA[st]].filter(Boolean).join(" · ") : "no tunnel opens this port on this server";
     return `<div class="opt"><span class="dot ${r.healthy ? "up" : st}"></span>
-      <span class="grow"><span dir="ltr" style="text-align:right"><span class="mono">${esc(r.spec)}</span> → ${esc(l ? nm(l.kharej_id) : "؟")}${r.exit ? ` ↪ ${esc(exitText(r.exit))}` : ""}</span><span class="sub mono">${esc(sub)}</span>${exitLine(r.exit)}</span>
-      ${l ? `<button class="btn sm" data-link="${l.id}">تانل</button>` : ""}</div>`;
+      <span class="grow"><span dir="ltr" style="text-align:left"><span class="mono">${esc(r.spec)}</span> → ${esc(l ? nm(l.kharej_id) : "?")}${r.exit ? ` ↪ ${esc(exitText(r.exit))}` : ""}</span><span class="sub mono">${esc(sub)}</span>${exitLine(r.exit)}</span>
+      ${l ? `<button class="btn sm" data-link="${l.id}">Tunnel</button>` : ""}</div>`;
   }).join("");
   // 2. which ports this domain uses: pick from what the Iran server exposes
   const offered = [];
@@ -917,18 +919,18 @@ function domainDrawer() {
     for (const spec of l.ports || []) if (!offered.some((o) => o.spec === spec)) offered.push({ spec, l });
   }
   for (const spec of d.specs || []) if (!offered.some((o) => o.spec === spec)) offered.push({ spec, l: null });
-  const picker = offered.map((o) => `<label><input type="checkbox" class="dp-port" value="${esc(o.spec)}" ${(d.specs || []).includes(o.spec) ? "checked" : ""}><span dir="ltr">${esc(o.spec)} <span class="muted small">→ ${esc(o.l ? nm(o.l.kharej_id) : "؟")}${o.l && (o.l.exits || {})[o.spec] ? ` ↪ ${esc(exitText(o.l.exits[o.spec]))}` : ""}</span></span></label>`).join("");
+  const picker = offered.map((o) => `<label><input type="checkbox" class="dp-port" value="${esc(o.spec)}" ${(d.specs || []).includes(o.spec) ? "checked" : ""}><span dir="ltr">${esc(o.spec)} <span class="muted small">→ ${esc(o.l ? nm(o.l.kharej_id) : "?")}${o.l && (o.l.exits || {})[o.spec] ? ` ↪ ${esc(exitText(o.l.exits[o.spec]))}` : ""}</span></span></label>`).join("");
   // 3. every Iran server: can it carry all of the domain's ports?
   const cov = (d.coverage || []).map((c) => {
     const s = srv(c.iran_id);
     if (!s) return "";
     const tags = [];
-    if (c.iran_id === d.primary_iran) tags.push(`<span class="chip">اصلی</span>`);
-    if (c.iran_id === d.iran_id) tags.push(`<span class="chip good">فعلی</span>`);
-    const sub = c.ok ? "همه پورت‌ها سالم" : (c.problems[0] || "");
+    if (c.iran_id === d.primary_iran) tags.push(`<span class="chip">primary</span>`);
+    if (c.iran_id === d.iran_id) tags.push(`<span class="chip good">current</span>`);
+    const sub = c.ok ? "all the ports are healthy" : (c.problems[0] || "");
     return `<div class="opt ${c.ok ? "" : "off"}"><span class="dot ${c.ok ? "up" : "down"}"></span>
       <span class="grow"><span>${esc(s.name)} <span class="mono muted small">${esc(s.ip)}</span></span><span class="sub">${esc(sub)}${c.problems.length > 1 ? ` (+${c.problems.length - 1})` : ""}</span></span>
-      ${tags.join("")}${c.iran_id !== d.primary_iran ? `<button class="btn sm ghost" data-primary="${c.iran_id}" title="بعد از رفع قطعی، ترافیک به این سرور برمی‌گردد">اصلی شود</button>` : ""}${c.ok && c.iran_id !== d.iran_id ? `<button class="btn sm" data-switch="${c.iran_id}">انتقال</button>` : ""}</div>`;
+      ${tags.join("")}${c.iran_id !== d.primary_iran ? `<button class="btn sm ghost" data-primary="${c.iran_id}" title="Once the failure is over, the traffic comes back to this server">Make it primary</button>` : ""}${c.ok && c.iran_id !== d.iran_id ? `<button class="btn sm" data-switch="${c.iran_id}">Switch</button>` : ""}</div>`;
   }).join("");
   // 4. allowed tunnels (advanced)
   const manual = groupDraft ? groupDraft.manual : d.group.length > 0;
@@ -940,35 +942,35 @@ function domainDrawer() {
     return `<div class="opt ${on ? "" : "off"}">
       ${manual ? `<input type="checkbox" data-g-toggle="${l.id}" ${on ? "checked" : ""}>` : `<span class="muted small mono">${i + 1}</span>`}
       <span class="dot ${lstatus(l)}"></span>${linkCell(l)}
-      ${manual && on ? `<span class="ord"><button type="button" data-g-up="${l.id}" title="بالاتر">▲</button><button type="button" data-g-down="${l.id}" title="پایین‌تر">▼</button></span>` : ""}</div>`;
+      ${manual && on ? `<span class="ord"><button type="button" data-g-up="${l.id}" title="Higher">▲</button><button type="button" data-g-down="${l.id}" title="Lower">▼</button></span>` : ""}</div>`;
   }).join("");
   const fb = failbackText(d);
-  return `${head(`<span class="mono">${esc(d.fqdn)}</span>`, `${p ? `<span class="prov ${p.kind}">${p.kind === "cloudflare" ? "Cloudflare" : "ArvanCloud"}</span> ${esc(p.name)}` : "بدون حساب DNS"}`, d.status)}
-  <div class="box"><h4>مسیر ترافیک</h4>
-    <div class="path"><span class="chip">کاربر</span><span class="arrow">→</span><span class="chip mono">${esc(d.fqdn)}</span><span class="arrow">→</span><span class="chip">${esc(iran ? `${iran.name} ${iran.ip}` : "—")}</span></div>
+  return `${head(`<span class="mono">${esc(d.fqdn)}</span>`, `${p ? `<span class="prov ${p.kind}">${p.kind === "cloudflare" ? "Cloudflare" : "ArvanCloud"}</span> ${esc(p.name)}` : "no DNS account"}`, d.status)}
+  <div class="box"><h4>Traffic path</h4>
+    <div class="path"><span class="chip">User</span><span class="arrow">→</span><span class="chip mono">${esc(d.fqdn)}</span><span class="arrow">→</span><span class="chip">${esc(iran ? `${iran.name} ${iran.ip}` : "—")}</span></div>
     ${iran ? "" : (d.error || "").startsWith("DNS read") && !d.current_ip
-      ? `<p class="note" style="color:var(--degraded)">رکورد این دامنه از DNS خوانده نشد (خطا پایین). تا درست شود، پنل هر ۵ دقیقه دوباره تلاش می‌کند و هیچ تغییری در رکورد نمی‌دهد.</p>`
-      : `<p class="note" style="color:var(--degraded)">رکورد این دامنه به هیچ‌کدام از سرورهای داخل ثبت‌شده اشاره نمی‌کند. از لیست «سرورهای داخل» پایین، سرور درست را انتخاب کنید.</p>`}
-    ${d.pending_ip ? `<p class="note" style="color:var(--degraded)">رکورد به <span class="mono">${esc(d.pending_ip)}</span> تغییر کرده؛ در انتظار رسیدن تغییر به DNSهای عمومی (${ago(d.pending_since)})…</p>` : ""}
+      ? `<p class="note" style="color:var(--degraded)">The record of this domain could not be read from DNS (see the error below). Until that is fixed, the panel tries again every 5 minutes and does not change the record.</p>`
+      : `<p class="note" style="color:var(--degraded)">The record of this domain points at none of the registered Iran servers. Pick the right one in the “Iran servers” list below.</p>`}
+    ${d.pending_ip ? `<p class="note" style="color:var(--degraded)">The record was changed to <span class="mono">${esc(d.pending_ip)}</span>; waiting for the change to reach the public DNS servers (${ago(d.pending_since)})…</p>` : ""}
     ${fb ? `<p class="note"><span id="failback-timer">${esc(fb)}</span></p>` : ""}
-    <dl class="kv"><dt>آی‌پی رکورد</dt><dd class="mono">${esc(d.current_ip || "—")}</dd><dt>TTL</dt><dd class="mono">${d.ttl}s</dd>
-    <dt>آخرین جابه‌جایی</dt><dd>${ago(d.last_switch)}</dd><dt>جابه‌جایی خودکار</dt><dd>${d.auto_failover ? "فعال" : "غیرفعال"}</dd>
-    ${d.error ? `<dt>خطا</dt><dd style="color:var(--down)">${esc(d.error)}</dd>` : ""}</dl>
-    <div class="btns"><button class="btn sm" data-edit-domain="${d.id}">ویرایش</button><button class="btn sm" data-sync="${d.id}">خواندن رکورد از DNS</button><button class="btn sm danger" data-del-domain="${d.id}">حذف</button></div></div>
-  ${iran ? `<div class="box"><h4>پورت‌ها و مسیرها روی ${esc(iran.name)}</h4>
-    <div class="opt-list">${routeRows || "<span class='muted small'>هنوز پورتی برای این دامنه انتخاب نشده</span>"}</div>
-    <label>این دامنه از کدام پورت‌ها استفاده می‌کند؟</label>
-    <div class="tchecks">${picker || "<span class='muted small'>روی این سرور تانلی با پورت فورواردی نیست</span>"}</div>
-    <p class="hint">دامنه فقط وقتی سالم حساب می‌شود که همه این پورت‌ها کار کنند، و فقط به سرور داخلی منتقل می‌شود که همه‌شان را سالم داشته باشد.</p>
-    <div class="btns"><button class="btn primary sm" data-save-dports="${d.id}">ذخیره پورت‌ها</button></div></div>` : ""}
-  <div class="box"><h4>سرورهای داخل</h4>
-    <p class="note">در قطعی، رکورد به اولین سروری از این لیست می‌رود که <b>همه پورت‌های دامنه</b> را سالم دارد. «اصلی» بعد از ${Math.round(S.settings.failback_after / 60)} دقیقه پایداری کامل دوباره پشت دامنه می‌آید.</p>
+    <dl class="kv"><dt>Record IP</dt><dd class="mono">${esc(d.current_ip || "—")}</dd><dt>TTL</dt><dd class="mono">${d.ttl}s</dd>
+    <dt>Last switch</dt><dd>${ago(d.last_switch)}</dd><dt>Automatic failover</dt><dd>${d.auto_failover ? "on" : "off"}</dd>
+    ${d.error ? `<dt>Error</dt><dd style="color:var(--down)">${esc(d.error)}</dd>` : ""}</dl>
+    <div class="btns"><button class="btn sm" data-edit-domain="${d.id}">Edit</button><button class="btn sm" data-sync="${d.id}">Read the record from DNS</button><button class="btn sm danger" data-del-domain="${d.id}">Delete</button></div></div>
+  ${iran ? `<div class="box"><h4>Ports and routes on ${esc(iran.name)}</h4>
+    <div class="opt-list">${routeRows || "<span class='muted small'>No port has been selected for this domain yet</span>"}</div>
+    <label>Which ports does this domain use?</label>
+    <div class="tchecks">${picker || "<span class='muted small'>There is no tunnel with forwarded ports on this server</span>"}</div>
+    <p class="hint">A domain only counts as healthy when all of these ports work, and it only moves to another Iran server that has all of them healthy.</p>
+    <div class="btns"><button class="btn primary sm" data-save-dports="${d.id}">Save the ports</button></div></div>` : ""}
+  <div class="box"><h4>Iran servers</h4>
+    <p class="note">On a failure, the record moves to the first server in this list that has <b>all the ports of the domain</b> healthy. The “primary” comes back behind the domain again after ${Math.round(S.settings.failback_after / 60)} minutes of complete stability.</p>
     <div class="opt-list">${cov || "<span class='muted small'>—</span>"}</div></div>
-  <div class="box"><h4>پیشرفته: تانل‌های مجاز و ترتیب</h4>
-    <div class="seg"><button type="button" data-g-mode="auto" class="${manual ? "" : "on"}">خودکار</button><button type="button" data-g-mode="manual" class="${manual ? "on" : ""}">انتخاب دستی</button></div>
-    <p class="hint">${manual ? "فقط تانل‌های تیک‌خورده برای این دامنه استفاده می‌شوند؛ ترتیب آن‌ها ترتیب سرورهای داخل را هم تعیین می‌کند." : "خودکار: همه تانل‌هایی که پورت‌های این دامنه را دارند، به ترتیب اولویت سرورهای داخل؛ و اگر خارجی از کار بیفتد، تانل خارج‌های دیگر روی همان سرور داخل."}</p>
-    <div class="opt-list">${groupRows || (groupDraft ? "<span class='muted small'>بعد از ذخیره به‌صورت خودکار محاسبه می‌شود</span>" : "")}</div>
-    ${groupDraft ? `<div class="btns"><button class="btn primary sm" data-g-save="${d.id}">ذخیره</button><button class="btn sm ghost" data-g-cancel>انصراف</button></div>` : ""}
+  <div class="box"><h4>Advanced: allowed tunnels and order</h4>
+    <div class="seg"><button type="button" data-g-mode="auto" class="${manual ? "" : "on"}">Automatic</button><button type="button" data-g-mode="manual" class="${manual ? "on" : ""}">Manual selection</button></div>
+    <p class="hint">${manual ? "Only the ticked tunnels are used for this domain; their order also decides the order of the Iran servers." : "Automatic: every tunnel that has the ports of this domain, in the priority order of the Iran servers; and if a foreign server fails, the other foreign tunnels on the same Iran server."}</p>
+    <div class="opt-list">${groupRows || (groupDraft ? "<span class='muted small'>It is computed automatically after the save</span>" : "")}</div>
+    ${groupDraft ? `<div class="btns"><button class="btn primary sm" data-g-save="${d.id}">Save</button><button class="btn sm ghost" data-g-cancel>Cancel</button></div>` : ""}
   </div>`;
 }
 
@@ -989,28 +991,28 @@ function openModal(html, onSubmit) {
   if (first) setTimeout(() => first.focus(), 50);
 }
 function closeModal() { $("#modal").classList.remove("open"); }
-const actions = (label) => `<div class="modal-actions"><button type="button" class="btn ghost" data-close-modal>انصراف</button><button class="btn primary" type="submit">${label}</button></div>`;
+const actions = (label) => `<div class="modal-actions"><button type="button" class="btn ghost" data-close-modal>Cancel</button><button class="btn primary" type="submit">${label}</button></div>`;
 const lines = (v) => v.split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
 
 function serverForm(role, s) {
   const k = role === "kharej";
   const edit = !!s;
   s = s || { name: "", ip: "", ssh_port: 22, ssh_user: "root", priority: 100, enabled: true, probe_target: "" };
-  openModal(`<h2>${edit ? "ویرایش" : "افزودن"} سرور ${k ? "خارج" : "داخل"}</h2>
-    <div class="grid2"><label>نام<input name="name" required value="${esc(s.name)}" placeholder="${k ? "Hetzner-DE" : "Tehran-1"}"></label>
-    <label>آی‌پی<input name="ip" required class="mono" value="${esc(s.ip)}" placeholder="1.2.3.4"></label></div>
-    <div class="grid2"><label>کاربر SSH<input name="ssh_user" value="${esc(s.ssh_user)}"></label><label>پورت SSH<input name="ssh_port" type="number" value="${s.ssh_port}"></label></div>
-    <label>رمز SSH<input name="ssh_password" type="password" autocomplete="new-password" value="${edit && s.ssh_password ? "••••" : ""}" placeholder="${edit ? "خالی = بدون تغییر" : ""}"></label>
-    <label>کلید خصوصی SSH (اختیاری)<textarea name="ssh_key" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----">${edit && s.ssh_key ? "••••" : ""}</textarea></label>
-    <label>اثر انگشت کلید میزبان<input name="host_key" class="mono" value="${esc(s.host_key || "")}" placeholder="SHA256:..."></label>
-    <p class="hint">خالی بگذارید تا پنل کلیدی را که اولین بار دید نگه دارد. اگر اثر انگشت را از خود سرور (<span class="mono">ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</span>) کپی کنید، فقط همان کلید پذیرفته می‌شود.</p>
-    ${k ? `<label>هدف پروب سلامت<input name="probe_target" class="mono" value="${esc(s.probe_target)}" placeholder="127.0.0.1:${s.ssh_port}"></label>
-    <p class="hint">پنل برای تست واقعی مسیر، از داخل تانل به این آدرس روی سرور خارج وصل می‌شود (پیش‌فرض: SSH همین سرور).</p>` : ""}
-    <div class="grid2"><label>اولویت (عدد کمتر = اول)<input name="priority" type="number" value="${s.priority}"></label>
-    <label class="check" style="align-self:end"><input type="checkbox" name="enabled" ${s.enabled ? "checked" : ""}> فعال</label></div>
-    <p class="hint">${k ? "وقتی یک سرور خارج کامل از کار بیفتد، پورت‌هایش به خارجی با عدد کمتر منتقل می‌شود." : "در قطعی، دامنه به سرور داخلی با عدد کمتر منتقل می‌شود."} اگر همه برابر باشند ترتیب الفبایی نام است. سرور «اصلی» هر دامنه جداست و با اولویت عوض نمی‌شود.</p>
-    ${edit ? "" : `<p class="hint">بعد از اتصال، پنل خودش تانل‌هایی که از قبل روی سرورها فعال‌اند را پیدا و اضافه می‌کند.</p>`}
-    ${actions(edit ? "ذخیره" : "افزودن")}`, async (f) => {
+  openModal(`<h2>${edit ? "Edit" : "Add"} ${k ? "foreign" : "Iran"} server</h2>
+    <div class="grid2"><label>Name<input name="name" required value="${esc(s.name)}" placeholder="${k ? "Hetzner-DE" : "Tehran-1"}"></label>
+    <label>IP address<input name="ip" required class="mono" value="${esc(s.ip)}" placeholder="1.2.3.4"></label></div>
+    <div class="grid2"><label>SSH user<input name="ssh_user" value="${esc(s.ssh_user)}"></label><label>SSH port<input name="ssh_port" type="number" value="${s.ssh_port}"></label></div>
+    <label>SSH password<input name="ssh_password" type="password" autocomplete="new-password" value="${edit && s.ssh_password ? "••••" : ""}" placeholder="${edit ? "empty = unchanged" : ""}"></label>
+    <label>SSH private key (optional)<textarea name="ssh_key" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----">${edit && s.ssh_key ? "••••" : ""}</textarea></label>
+    <label>Host key fingerprint<input name="host_key" class="mono" value="${esc(s.host_key || "")}" placeholder="SHA256:..."></label>
+    <p class="hint">Leave it empty and the panel pins the key it saw the first time. If you copy the fingerprint from the server itself (<span class="mono">ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</span>), only that key is accepted.</p>
+    ${k ? `<label>Health probe target<input name="probe_target" class="mono" value="${esc(s.probe_target)}" placeholder="127.0.0.1:${s.ssh_port}"></label>
+    <p class="hint">To test the real path, the panel connects to this address from inside the tunnel (default: the SSH of this server).</p>` : ""}
+    <div class="grid2"><label>Priority (lower comes first)<input name="priority" type="number" value="${s.priority}"></label>
+    <label class="check" style="align-self:end"><input type="checkbox" name="enabled" ${s.enabled ? "checked" : ""}> Enabled</label></div>
+    <p class="hint">${k ? "When a foreign server fails completely, its ports move to a foreign server with a lower number." : "On a failure, the domain moves to an Iran server with a lower number."} If they are all equal, the order is the alphabetical order of the names. The “primary” server of a domain is a separate thing and does not follow the priority.</p>
+    ${edit ? "" : `<p class="hint">Once it is connected, the panel finds and adds the tunnels that already run on the servers by itself.</p>`}
+    ${actions(edit ? "Save" : "Add")}`, async (f) => {
     const body = {
       role, name: f.get("name").trim(), ip: f.get("ip").trim(), ssh_user: f.get("ssh_user").trim() || "root",
       ssh_port: +f.get("ssh_port") || 22, ssh_password: f.get("ssh_password"), ssh_key: f.get("ssh_key"),
@@ -1018,132 +1020,132 @@ function serverForm(role, s) {
       host_key: f.get("host_key").trim(),
     };
     if (edit) await api("PUT", `/api/servers/${s.id}`, body); else await api("POST", "/api/servers", body);
-    toast(edit ? "ذخیره شد" : "سرور اضافه شد؛ در حال اتصال و جستجوی تانل‌ها…", "success");
+    toast(edit ? "Saved" : "Server added; connecting and looking for tunnels…", "success");
   });
 }
 
 function linkForm(preset = {}) {
   const ir = byRole("iran"), kh = byRole("kharej");
-  if (!ir.length || !kh.length) { toast("اول سرورهای داخل و خارج را اضافه کنید"); return; }
+  if (!ir.length || !kh.length) { toast("Add the Iran and the foreign servers first"); return; }
   const opt = (list, sel) => list.map((s) => `<option value="${s.id}" ${s.id === sel ? "selected" : ""}>${esc(s.name)} — ${esc(s.ip)}</option>`).join("");
-  openModal(`<h2>تانل جدید</h2>
-    <div class="grid2"><label>سرور خارج<select name="kharej_id">${opt(kh, preset.kharej_id)}</select></label>
-    <label>سرور داخل<select name="iran_id">${opt(ir, preset.iran_id)}</select></label></div>
-    <label>پورت‌های فورواردی (سمت داخل)<textarea name="ports" placeholder="443&#10;8443=2096"></textarea></label>
-    <div class="grid2"><label>پروتکل<select name="transport"><option value="">خودکار (تست همه و انتخاب بهترین)</option>${S.transports.map((t) => `<option value="${t}">${TNAME[t] || t}</option>`).join("")}</select></label>
-    <label>نام نمایشی<input name="label" placeholder="مثلا spare-ws"></label></div>
-    <p class="hint">بین یک جفت سرور می‌توانید چند تانل با پروتکل‌های مختلف داشته باشید و آن‌ها را در گروه یک دامنه بگذارید.</p>
-    ${actions("ساخت")}`, async (f) => {
+  openModal(`<h2>New tunnel</h2>
+    <div class="grid2"><label>Foreign server<select name="kharej_id">${opt(kh, preset.kharej_id)}</select></label>
+    <label>Iran server<select name="iran_id">${opt(ir, preset.iran_id)}</select></label></div>
+    <label>Forwarded ports (Iran side)<textarea name="ports" placeholder="443&#10;8443=2096"></textarea></label>
+    <div class="grid2"><label>Protocol<select name="transport"><option value="">Automatic (test them all and pick the best)</option>${S.transports.map((t) => `<option value="${t}">${TNAME[t] || t}</option>`).join("")}</select></label>
+    <label>Display name<input name="label" placeholder="e.g. spare-ws"></label></div>
+    <p class="hint">Between one pair of servers you can have several tunnels with different protocols, and put them in the group of a domain.</p>
+    ${actions("Create")}`, async (f) => {
     await api("POST", "/api/links", {
       iran_id: f.get("iran_id"), kharej_id: f.get("kharej_id"), label: f.get("label").trim(),
       ports: lines(f.get("ports")), transport: f.get("transport") || null,
     });
-    toast("ساخت تانل شروع شد", "success");
+    toast("The tunnel is being built", "success");
   });
 }
 
 function providerForm(p) {
   const edit = !!p;
   p = p || { name: "", kind: "arvan", zone: "", proxied: false };
-  openModal(`<h2>${edit ? "ویرایش" : "افزودن"} حساب DNS</h2>
-    <div class="grid2"><label>نام<input name="name" required value="${esc(p.name)}" placeholder="آروان اصلی"></label>
-    <label>سرویس‌دهنده<select name="kind"><option value="arvan" ${p.kind === "arvan" ? "selected" : ""}>ArvanCloud (آروان)</option><option value="cloudflare" ${p.kind === "cloudflare" ? "selected" : ""}>Cloudflare</option></select></label></div>
-    <label>Zone (دامنه اصلی)<input name="zone" required class="mono" value="${esc(p.zone)}" placeholder="example.ir"></label>
+  openModal(`<h2>${edit ? "Edit" : "Add"} DNS account</h2>
+    <div class="grid2"><label>Name<input name="name" required value="${esc(p.name)}" placeholder="main Arvan"></label>
+    <label>Provider<select name="kind"><option value="arvan" ${p.kind === "arvan" ? "selected" : ""}>ArvanCloud</option><option value="cloudflare" ${p.kind === "cloudflare" ? "selected" : ""}>Cloudflare</option></select></label></div>
+    <label>Zone (the root domain)<input name="zone" required class="mono" value="${esc(p.zone)}" placeholder="example.ir"></label>
     <label>API Key / Token<input name="api_token" type="password" class="mono" autocomplete="off" value="${edit ? "••••" : ""}" ${edit ? "" : "required"}></label>
-    <p class="hint">آروان: کلید API (با یا بدون پیشوند Apikey). کلادفلر: API Token با دسترسی Zone → DNS → Edit.</p>
-    <label class="check"><input type="checkbox" name="proxied" ${p.proxied ? "checked" : ""}> رکوردها پروکسی شوند (ابر آروان / ابر نارنجی) — برای تانل معمولا خاموش</label>
-    ${actions(edit ? "ذخیره" : "افزودن")}`, async (f) => {
+    <p class="hint">Arvan: the API key (with or without the Apikey prefix). Cloudflare: an API Token with the Zone → DNS → Edit permission.</p>
+    <label class="check"><input type="checkbox" name="proxied" ${p.proxied ? "checked" : ""}> The records are proxied (ArvanCloud / Cloudflare CDN) — usually off for a tunnel</label>
+    ${actions(edit ? "Save" : "Add")}`, async (f) => {
     const body = { name: f.get("name"), kind: f.get("kind"), zone: f.get("zone"), api_token: f.get("api_token"), proxied: !!f.get("proxied") };
     if (edit) await api("PUT", `/api/providers/${p.id}`, body); else await api("POST", "/api/providers", body);
-    toast("ذخیره شد", "success");
+    toast("Saved", "success");
   });
 }
 
 function domainForm(d) {
-  if (!S.providers.length) { toast("اول یک حساب DNS اضافه کنید"); return providerForm(); }
-  if (!byRole("kharej").length) { toast("اول سرورها را اضافه کنید"); return serverForm("kharej"); }
+  if (!S.providers.length) { toast("Add a DNS account first"); return providerForm(); }
+  if (!byRole("kharej").length) { toast("Add the servers first"); return serverForm("kharej"); }
   const edit = !!d;
   d = d || { fqdn: "", provider_id: S.providers[0].id, kharej_id: "", ports: [], ttl: 120, auto_failover: true, group: [] };
-  openModal(`<h2>${edit ? "ویرایش" : "افزودن"} دامنه</h2>
-    <label>دامنه<input name="fqdn" required class="mono" value="${esc(d.fqdn)}" placeholder="sub.example.ir"></label>
-    <div class="grid2"><label>حساب DNS<select name="provider_id">${S.providers.map((p) => `<option value="${p.id}" ${p.id === d.provider_id ? "selected" : ""}>${esc(p.name)} (${esc(p.zone)})</option>`).join("")}</select></label>
-    <label>سرور خارج (اختیاری)<select name="kharej_id"><option value="">— پورت‌ها را خودم مشخص می‌کنم</option>${byRole("kharej").map((k) => `<option value="${k.id}" ${k.id === d.kharej_id ? "selected" : ""}>${esc(k.name)}</option>`).join("")}</select></label></div>
-    <label>پورت‌های این دامنه (اختیاری)<input name="ports" class="mono" value="${esc((d.ports || []).join(", "))}" placeholder="443, 2053"></label>
-    <p class="hint">پورت‌هایی که کاربرها با این دامنه به آن‌ها وصل می‌شوند. هر پورت می‌تواند به یک خارج متفاوت برود. خالی بگذارید تا بعد از خواندن رکورد، در پنل دامنه از روی تانل‌های همان سرور داخل تیک بزنید (یا اگر خارج را انتخاب کرده‌اید، پورت‌های تانل‌های همان خارج استفاده شود).</p>
-    <div class="grid2"><label>TTL (ثانیه)<input name="ttl" type="number" min="60" value="${d.ttl}"></label>
-    <label class="check" style="align-self:end"><input type="checkbox" name="auto_failover" ${d.auto_failover ? "checked" : ""}> جابه‌جایی خودکار در قطعی</label></div>
-    ${actions(edit ? "ذخیره" : "افزودن")}`, async (f) => {
+  openModal(`<h2>${edit ? "Edit" : "Add"} domain</h2>
+    <label>Domain<input name="fqdn" required class="mono" value="${esc(d.fqdn)}" placeholder="sub.example.ir"></label>
+    <div class="grid2"><label>DNS account<select name="provider_id">${S.providers.map((p) => `<option value="${p.id}" ${p.id === d.provider_id ? "selected" : ""}>${esc(p.name)} (${esc(p.zone)})</option>`).join("")}</select></label>
+    <label>Foreign server (optional)<select name="kharej_id"><option value="">— I will pick the ports myself</option>${byRole("kharej").map((k) => `<option value="${k.id}" ${k.id === d.kharej_id ? "selected" : ""}>${esc(k.name)}</option>`).join("")}</select></label></div>
+    <label>The ports of this domain (optional)<input name="ports" class="mono" value="${esc((d.ports || []).join(", "))}" placeholder="443, 2053"></label>
+    <p class="hint">The ports the users of this domain connect to. Every port can go to a different foreign server. Leave it empty and, once the record has been read, tick the ports in the domain panel from the tunnels of that Iran server (or, if you picked a foreign server, the ports of the tunnels of that foreign server are used).</p>
+    <div class="grid2"><label>TTL (seconds)<input name="ttl" type="number" min="60" value="${d.ttl}"></label>
+    <label class="check" style="align-self:end"><input type="checkbox" name="auto_failover" ${d.auto_failover ? "checked" : ""}> Automatic failover on a failure</label></div>
+    ${actions(edit ? "Save" : "Add")}`, async (f) => {
     const body = { fqdn: f.get("fqdn"), provider_id: f.get("provider_id"), kharej_id: f.get("kharej_id"), ports: lines(f.get("ports")), ttl: +f.get("ttl") || 120, auto_failover: !!f.get("auto_failover"), group: d.group || [] };
     if (edit) await api("PUT", `/api/domains/${d.id}`, body);
     else { const r = await api("POST", "/api/domains", body); setTimeout(() => openDrawer("domain", r.domain.id), 300); }
-    toast("ذخیره شد", "success");
+    toast("Saved", "success");
   });
 }
 
 function settingsForm() {
   const s = S.settings, tg = s.telegram;
   const order = [...s.candidate_transports, ...S.transports.filter((t) => !s.candidate_transports.includes(t))];
-  openModal(`<h2>تنظیمات</h2>
-    <fieldset><legend>حالت کار</legend>
-      <label class="check"><input type="checkbox" name="observe_only" ${s.observe_only ? "checked" : ""}> <b>حالت نظارت</b>: فقط بررسی و گزارش؛ هیچ رکورد DNS، کانفیگ یا سرویسی خودکار تغییر نمی‌کند</label>
-      <p class="hint">در این حالت هر جا پنل می‌خواست کاری کند، فقط در رویدادها و تلگرام می‌گوید «اگر فعال بود چه می‌کرد». کارهایی که خودتان در پنل انجام دهید اجرا می‌شوند.</p>
+  openModal(`<h2>Settings</h2>
+    <fieldset><legend>Working mode</legend>
+      <label class="check"><input type="checkbox" name="observe_only" ${s.observe_only ? "checked" : ""}> <span><b>Observe mode</b>: only check and report; no DNS record, config or service is changed automatically</span></label>
+      <p class="hint">In this mode, everywhere the panel would have done something, it only says in the events and on Telegram what it would have done. What you do by hand in the panel is still carried out.</p>
     </fieldset>
-    <fieldset><legend>مانیتورینگ و جابه‌جایی</legend>
-      <div class="grid2"><label>فاصله بررسی (ثانیه)<input name="check_interval" type="number" min="10" value="${s.check_interval}"></label>
-      <label>چند خطای پشت‌سرهم = «قطع»<input name="fail_threshold" type="number" min="1" value="${s.fail_threshold}"></label></div>
-      <div class="grid2"><label>برگشت به اصلی بعد از چند دقیقه پایداری<input name="failback_after" type="number" min="1" value="${Math.round(s.failback_after / 60)}"></label>
-      <label>مهلت هر پروتکل در تست (ثانیه)<input name="test_timeout" type="number" min="5" value="${s.test_timeout}"></label></div>
-      <div class="grid2"><label>«ناپایدار» = چند قطعی<input name="flap_count" type="number" min="2" value="${s.flap_count}"></label>
-      <label>در چند دقیقه<input name="flap_window" type="number" min="1" value="${Math.round(s.flap_window / 60)}"></label></div>
-      <label class="check"><input type="checkbox" name="auto_repair" ${s.auto_repair ? "checked" : ""}> بازسازی خودکار تانل‌های قطع با پروتکل‌های دیگر</label>
-      <label>پروتکل‌هایی که تست می‌شوند</label>
+    <fieldset><legend>Monitoring and failover</legend>
+      <div class="grid2"><label>Check interval (seconds)<input name="check_interval" type="number" min="10" value="${s.check_interval}"></label>
+      <label>How many errors in a row count as “down”<input name="fail_threshold" type="number" min="1" value="${s.fail_threshold}"></label></div>
+      <div class="grid2"><label>Fail back after how many minutes of stability<input name="failback_after" type="number" min="1" value="${Math.round(s.failback_after / 60)}"></label>
+      <label>Timeout of each protocol in the test (seconds)<input name="test_timeout" type="number" min="5" value="${s.test_timeout}"></label></div>
+      <div class="grid2"><label>“Unstable” = how many drops<input name="flap_count" type="number" min="2" value="${s.flap_count}"></label>
+      <label>In how many minutes<input name="flap_window" type="number" min="1" value="${Math.round(s.flap_window / 60)}"></label></div>
+      <label class="check"><input type="checkbox" name="auto_repair" ${s.auto_repair ? "checked" : ""}> Rebuild the broken tunnels automatically with other protocols</label>
+      <label>The protocols that are tested</label>
       <div class="tchecks">${order.map((t) => `<label><input type="checkbox" name="tr" value="${t}" ${s.candidate_transports.includes(t) ? "checked" : ""}>${t}</label>`).join("")}</div>
     </fieldset>
-    <fieldset><legend>سرورها و موتور تانل</legend>
-      <label class="check"><input type="checkbox" name="auto_adopt" ${s.auto_adopt ? "checked" : ""}> پیدا کردن و اضافه کردن خودکار تانل‌های موجود روی سرورها</label>
-      <label class="check"><input type="checkbox" name="auto_mesh" ${s.auto_mesh ? "checked" : ""}> پیشنهاد تانل برای هر جفت داخل/خارجی که تانل ندارد</label>
-      <div class="grid2"><label>جستجوی تانل‌ها هر چند دقیقه<input name="scan_interval" type="number" min="1" value="${Math.round(s.scan_interval / 60)}"></label>
-      <label>نسخه موتور تانل<input name="engine_release" class="mono" value="${esc(s.engine_release)}" placeholder="latest"></label></div>
-      <label>آدرس سورس موتور تانل<input name="engine_source" class="mono" value="${esc(s.engine_source || "")}" placeholder="https://github.com/Liwyd/Bull-Tunn/releases"></label>
-      <label>توکن سورس (برای ریپوی پرایوت)<input name="engine_token" type="password" class="mono" autocomplete="off" value="${esc(s.engine_token || "")}" placeholder="خالی = بدون توکن"></label>
-      <div class="grid2"><label>شروع پورت تانل<input name="tunnel_port_base" type="number" value="${s.tunnel_port_base}"></label>
-      <label>شروع پورت پروب (لوکال)<input name="probe_port_base" type="number" value="${s.probe_port_base}"></label></div>
-      <label class="check"><input type="checkbox" name="install_engine" ${s.install_engine ? "checked" : ""}> نصب خودکار موتور تانل روی سرورهایی که ندارند</label>
+    <fieldset><legend>Servers and tunnel engine</legend>
+      <label class="check"><input type="checkbox" name="auto_adopt" ${s.auto_adopt ? "checked" : ""}> Find and add the existing tunnels on the servers automatically</label>
+      <label class="check"><input type="checkbox" name="auto_mesh" ${s.auto_mesh ? "checked" : ""}> Suggest a tunnel for every Iran/foreign pair that has none</label>
+      <div class="grid2"><label>How often to look for tunnels (minutes)<input name="scan_interval" type="number" min="1" value="${Math.round(s.scan_interval / 60)}"></label>
+      <label>Tunnel engine version<input name="engine_release" class="mono" value="${esc(s.engine_release)}" placeholder="latest"></label></div>
+      <label>Tunnel engine source URL<input name="engine_source" class="mono" value="${esc(s.engine_source || "")}" placeholder="https://github.com/Liwyd/Bull-Tunn/releases"></label>
+      <label>Source token (for a private repository)<input name="engine_token" type="password" class="mono" autocomplete="off" value="${esc(s.engine_token || "")}" placeholder="empty = no token"></label>
+      <div class="grid2"><label>First tunnel port<input name="tunnel_port_base" type="number" value="${s.tunnel_port_base}"></label>
+      <label>First probe port (local)<input name="probe_port_base" type="number" value="${s.probe_port_base}"></label></div>
+      <label class="check"><input type="checkbox" name="install_engine" ${s.install_engine ? "checked" : ""}> Install the tunnel engine automatically on the servers that do not have it</label>
     </fieldset>
-    <fieldset><legend>کانال فرمان (DNS)</legend>
-      <label class="check"><input type="checkbox" name="command_enabled" ${s.command_enabled ? "checked" : ""}> کانال فرمان روشن باشد</label>
-      <label>حساب DNS کانال فرمان<select name="command_provider_id">
-        <option value="">— انتخاب نشده —</option>
+    <fieldset><legend>Command channel (DNS)</legend>
+      <label class="check"><input type="checkbox" name="command_enabled" ${s.command_enabled ? "checked" : ""}> The command channel is on</label>
+      <label>DNS account of the command channel<select name="command_provider_id">
+        <option value="">— not selected —</option>
         ${S.providers.map((p) => `<option value="${esc(p.id)}" ${s.command_provider_id === p.id ? "selected" : ""}>${esc(p.name)} (${esc(p.zone)})</option>`).join("")}
       </select></label>
-      <p class="hint">وقتی حتی TCP هم ممکن نیست، پنل فرمان را در یک رکورد TXT می‌گذارد و «عامل» روی سرور آن را با DNS می‌خواند و اجرا می‌کند. برای امنیت، یک Zone جدا با حساب جدا بسازید: سروری که خراب شده نباید بتواند رکوردهای دامنه‌های اصلی را دست بزند.</p>
+      <p class="hint">When not even TCP is possible, the panel writes the command into a TXT record and the “agent” on the server reads it over DNS and runs it. For security, create a separate zone with a separate account: a server that has failed must not be able to touch the records of the main domains.</p>
     </fieldset>
-    <fieldset><legend>ربات تلگرام</legend>
-      <label class="check"><input type="checkbox" name="tg_enabled" ${tg.enabled ? "checked" : ""}> ارسال همه رویدادها به تلگرام</label>
-      <label>توکن ربات<input name="tg_token" type="password" class="mono" autocomplete="off" value="${esc(tg.bot_token)}" placeholder="123456:ABC..."></label>
-      <label>Chat ID ها (با کاما)<input name="tg_chats" class="mono" value="${esc((tg.chat_ids || []).join(", "))}" placeholder="123456789, -100987654321"></label>
-      <p class="hint">Chat ID را نمی‌دانید؟ به ربات <span class="mono">/start</span> بدهید.</p>
-      <div class="grid2"><label>آدرس API (ریورس‌پروکسی)<input name="tg_base" class="mono" value="${esc(tg.api_base)}"></label>
-      <label>پروکسی<input name="tg_proxy" class="mono" value="${esc(tg.proxy)}" placeholder="socks5://127.0.0.1:1080"></label></div>
-      <div class="btns"><button type="button" class="btn sm" id="tg-test">ارسال پیام تست</button></div>
+    <fieldset><legend>Telegram bot</legend>
+      <label class="check"><input type="checkbox" name="tg_enabled" ${tg.enabled ? "checked" : ""}> Send every event to Telegram</label>
+      <label>Bot token<input name="tg_token" type="password" class="mono" autocomplete="off" value="${esc(tg.bot_token)}" placeholder="123456:ABC..."></label>
+      <label>Chat IDs (comma separated)<input name="tg_chats" class="mono" value="${esc((tg.chat_ids || []).join(", "))}" placeholder="123456789, -100987654321"></label>
+      <p class="hint">Do not know the Chat ID? Send <span class="mono">/start</span> to the bot.</p>
+      <div class="grid2"><label>API URL (reverse proxy)<input name="tg_base" class="mono" value="${esc(tg.api_base)}"></label>
+      <label>Proxy<input name="tg_proxy" class="mono" value="${esc(tg.proxy)}" placeholder="socks5://127.0.0.1:1080"></label></div>
+      <div class="btns"><button type="button" class="btn sm" id="tg-test">Send a test message</button></div>
     </fieldset>
-    <fieldset><legend>بکاپ</legend>
-      <label class="check"><input type="checkbox" name="backup_enabled" ${s.backup_enabled ? "checked" : ""}> هر شب بکاپ کامل به تلگرام فرستاده شود</label>
-      <div class="grid2"><label>ساعت<input name="backup_time" class="mono" value="${esc(s.backup_time)}" placeholder="03:00"></label>
-      <label>منطقه زمانی<input name="backup_tz" class="mono" value="${esc(s.backup_tz)}" placeholder="Asia/Tehran"></label></div>
-      <div class="grid2"><label>رمز بکاپ<input name="backup_password" type="password" class="mono" autocomplete="new-password" value="${esc(s.backup_password)}" placeholder="خالی = بدون رمز"></label>
-      <label>تعداد نسخه روی همین سرور<input name="backup_keep" type="number" min="1" max="100" value="${s.backup_keep}"></label></div>
-      <p class="hint">بکاپ شامل همه سرورها، رمزهای SSH، توکن‌ها، دامنه‌ها، تنظیمات و ورود پنل است؛ حتماً رمز بگذارید و رمز را جای دیگری نگه دارید. بدون آن رمز، بکاپ باز نمی‌شود.</p>
-      <div class="btns"><button type="button" class="btn sm" id="bk-now">ارسال بکاپ همین حالا</button><a class="btn sm" href="/api/backups/download" download>دانلود بکاپ</a><button type="button" class="btn sm" id="bk-restore">بازگردانی بکاپ…</button></div>
+    <fieldset><legend>Backups</legend>
+      <label class="check"><input type="checkbox" name="backup_enabled" ${s.backup_enabled ? "checked" : ""}> Send a full backup to Telegram every night</label>
+      <div class="grid2"><label>Time<input name="backup_time" class="mono" value="${esc(s.backup_time)}" placeholder="03:00"></label>
+      <label>Time zone<input name="backup_tz" class="mono" value="${esc(s.backup_tz)}" placeholder="Asia/Tehran"></label></div>
+      <div class="grid2"><label>Backup password<input name="backup_password" type="password" class="mono" autocomplete="new-password" value="${esc(s.backup_password)}" placeholder="empty = no password"></label>
+      <label>How many copies to keep on this server<input name="backup_keep" type="number" min="1" max="100" value="${s.backup_keep}"></label></div>
+      <p class="hint">A backup holds every server, the SSH passwords, the tokens, the domains, the settings and the panel login; always set a password and keep a copy of it somewhere else. Without that password the backup cannot be opened.</p>
+      <div class="btns"><button type="button" class="btn sm" id="bk-now">Send a backup now</button><a class="btn sm" href="/api/backups/download" download>Download the backup</a><button type="button" class="btn sm" id="bk-restore">Restore a backup…</button></div>
     </fieldset>
-    <fieldset><legend>حساب‌های DNS</legend>
+    <fieldset><legend>DNS accounts</legend>
       <div class="opt-list">${S.providers.map((p) => `<div class="opt"><span class="prov ${p.kind}">${p.kind === "cloudflare" ? "CF" : "ARVAN"}</span><span class="grow">${esc(p.name)} <span class="mono muted small">${esc(p.zone)}</span></span>
-        <button type="button" class="btn sm" data-verify-provider="${p.id}">تست</button><button type="button" class="btn sm" data-edit-provider="${p.id}">ویرایش</button><button type="button" class="btn sm danger" data-del-provider="${p.id}">حذف</button></div>`).join("") || "<span class='muted small'>—</span>"}</div>
-      <div class="btns"><button type="button" class="btn sm" data-add="provider">＋ حساب DNS</button></div>
+        <button type="button" class="btn sm" data-verify-provider="${p.id}">Test</button><button type="button" class="btn sm" data-edit-provider="${p.id}">Edit</button><button type="button" class="btn sm danger" data-del-provider="${p.id}">Delete</button></div>`).join("") || "<span class='muted small'>—</span>"}</div>
+      <div class="btns"><button type="button" class="btn sm" data-add="provider">＋ DNS account</button></div>
     </fieldset>
-    ${actions("ذخیره")}`, async (f) => {
+    ${actions("Save")}`, async (f) => {
     const observe = !!f.get("observe_only");
-    if (S.settings.observe_only && !observe && !confirm("حالت نظارت خاموش شود؟ از این به بعد پنل در قطعی‌ها خودش رکورد DNS را عوض می‌کند" + (f.get("auto_repair") ? " و تانل‌های قطع را با پروتکل دیگر بازسازی می‌کند" : "") + ".")) return;
+    if (S.settings.observe_only && !observe && !confirm("Turn observe mode off? From now on the panel changes the DNS record itself when something fails" + (f.get("auto_repair") ? " and rebuilds the broken tunnels with another protocol" : "") + ".")) return;
     await api("PUT", "/api/settings", {
       observe_only: observe,
       check_interval: +f.get("check_interval"), fail_threshold: +f.get("fail_threshold"), test_timeout: +f.get("test_timeout"),
@@ -1158,16 +1160,16 @@ function settingsForm() {
       backup_password: f.get("backup_password"), backup_keep: +f.get("backup_keep") || 14,
       telegram: { enabled: !!f.get("tg_enabled"), bot_token: f.get("tg_token"), chat_ids: lines(f.get("tg_chats")), api_base: f.get("tg_base").trim() || "https://api.telegram.org", proxy: f.get("tg_proxy").trim() },
     });
-    toast("تنظیمات ذخیره شد", "success");
+    toast("Settings saved", "success");
   });
   $("#bk-now").onclick = () => act(async () => {
     const r = await api("POST", "/api/backups/run");
-    if (r.error) throw new Error(`بکاپ ساخته شد ولی به تلگرام نرسید: ${r.error}`);
-  }, "بکاپ به تلگرام فرستاده شد");
+    if (r.error) throw new Error(`The backup was created but did not reach Telegram: ${r.error}`);
+  }, "The backup was sent to Telegram");
   $("#bk-restore").onclick = restoreForm;
   $("#tg-test").onclick = async () => {
     $("#modal-form").requestSubmit();
-    setTimeout(() => act(() => api("POST", "/api/telegram/test"), "پیام تست ارسال شد"), 600);
+    setTimeout(() => act(() => api("POST", "/api/telegram/test"), "The test message was sent"), 600);
   };
 }
 
@@ -1176,15 +1178,15 @@ async function restoreForm() {
   const size = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`);
   const rows = info.files.map((f, i) => `<label class="opt"><input type="radio" name="bk_name" value="${esc(f.name)}">
     <span class="grow"><span class="mono">${esc(f.name)}</span><span class="sub">${clock(f.mtime)} · ${size(f.size)} ${f.encrypted ? "· 🔒" : ""}</span></span>
-    <a class="btn sm ghost" href="/api/backups/download?name=${encodeURIComponent(f.name)}" download>دانلود</a></label>`).join("");
-  openModal(`<h2>بازگردانی بکاپ</h2>
-    <p class="note">همه سرورها، تانل‌ها، دامنه‌ها، حساب‌های DNS و تنظیمات پنل با محتوای بکاپ جایگزین می‌شود. روی خود سرورها و رکوردهای DNS <b>هیچ تغییری</b> داده نمی‌شود؛ پنل بعد از بازگردانی همه‌چیز را دوباره بررسی می‌کند. وضعیت فعلی هم قبلش یک بکاپ جدا می‌گیرد.</p>
-    <label>فایل بکاپ (از تلگرام یا دانلود)<input type="file" name="bk_file" accept=".tmbk,.gz,.json"></label>
-    ${rows ? `<label>یا یکی از نسخه‌های روی همین سرور</label><div class="opt-list">${rows}</div>` : ""}
-    <label>رمز بکاپ<input name="bk_pw" type="password" class="mono" autocomplete="off" placeholder="${info.encrypted ? "خالی = رمز فعلی تنظیمات" : ""}"></label>
-    <label class="check"><input type="checkbox" name="bk_observe" checked> بعد از بازگردانی در حالت نظارت بماند (پیشنهادی)</label>
-    <label class="check"><input type="checkbox" name="bk_login" checked> نام کاربری و رمز ورود پنل هم از بکاپ برگردد</label>
-    ${actions("بازگردانی")}`, async (f) => {
+    <a class="btn sm ghost" href="/api/backups/download?name=${encodeURIComponent(f.name)}" download>Download</a></label>`).join("");
+  openModal(`<h2>Restore a backup</h2>
+    <p class="note">Every server, tunnel, domain, DNS account and panel setting is replaced by the content of the backup. Nothing is changed <b>on the servers themselves or in the DNS records</b>; after the restore the panel checks everything again. The current state is backed up separately first.</p>
+    <label>Backup file (from Telegram or downloaded)<input type="file" name="bk_file" accept=".tmbk,.gz,.json"></label>
+    ${rows ? `<label>Or one of the copies on this server</label><div class="opt-list">${rows}</div>` : ""}
+    <label>Backup password<input name="bk_pw" type="password" class="mono" autocomplete="off" placeholder="${info.encrypted ? "empty = the password from the settings" : ""}"></label>
+    <label class="check"><input type="checkbox" name="bk_observe" checked> Stay in observe mode after the restore (recommended)</label>
+    <label class="check"><input type="checkbox" name="bk_login" checked> Restore the panel username and password as well</label>
+    ${actions("Restore")}`, async (f) => {
     const file = f.get("bk_file");
     const body = { password: f.get("bk_pw"), observe: !!f.get("bk_observe"), restore_login: !!f.get("bk_login") };
     if (file && file.size) {
@@ -1193,10 +1195,10 @@ async function restoreForm() {
       for (let i = 0; i < buf.length; i += 32768) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 32768));
       body.data = btoa(bin);
     } else if (f.get("bk_name")) body.name = f.get("bk_name");
-    else throw new Error("یک فایل یا یکی از نسخه‌ها را انتخاب کنید");
-    if (!confirm("وضعیت فعلی پنل با این بکاپ جایگزین شود؟")) return;
+    else throw new Error("Pick a file or one of the copies");
+    if (!confirm("The current state of the panel is replaced by this backup?")) return;
     const r = await api("POST", "/api/backups/restore", body);
-    toast(`بازگردانی شد: ${r.summary}`, "success");
+    toast(`Restored: ${r.summary}`, "success");
     if (r.relogin) setTimeout(() => location.reload(), 1200);
   });
 }
@@ -1232,87 +1234,87 @@ document.addEventListener("click", async (e) => {
   if ("applyTransport" in d) {
     const l = linkById(drawer.id);
     const tr = selTransport || l.transport || S.settings.candidate_transports[0];
-    await act(() => api("POST", `/api/links/${l.id}/transport`, { transport: tr, pin: $("#pin-on-apply").checked }), `تغییر به ${tr} شروع شد`);
+    await act(() => api("POST", `/api/links/${l.id}/transport`, { transport: tr, pin: $("#pin-on-apply").checked }), `Switching to ${tr} has started`);
     selTransport = null; return;
   }
-  if ("retest" in d) return act(() => api("POST", `/api/links/${drawer.id}/retest`), "تست همه پروتکل‌ها شروع شد");
-  if ("unpin" in d) return act(() => api("PUT", `/api/links/${drawer.id}`, { pinned: false }), "قفل آزاد شد");
+  if ("retest" in d) return act(() => api("POST", `/api/links/${drawer.id}/retest`), "Testing every protocol has started");
+  if ("unpin" in d) return act(() => api("PUT", `/api/links/${drawer.id}`, { pinned: false }), "The pin was released");
   if (d.savePorts) {
-    return act(() => api("PUT", `/api/links/${d.savePorts}`, { ports: lines($("#lp-ports").value), accept_udp: $("#lp-udp").checked, apply_to_kharej: $("#lp-all").checked }), "پورت‌ها ذخیره شد و روی سرور داخل اعمال می‌شود");
+    return act(() => api("PUT", `/api/links/${d.savePorts}`, { ports: lines($("#lp-ports").value), accept_udp: $("#lp-udp").checked, apply_to_kharej: $("#lp-all").checked }), "The ports are saved and are being applied on the Iran server");
   }
   if (d.saveLink) {
     const allowed = $$(".lp-allowed").filter((x) => x.checked).map((x) => x.value);
-    return act(() => api("PUT", `/api/links/${d.saveLink}`, { label: $("#lp-label").value.trim(), priority: +$("#lp-prio").value || 100, allowed }), "ذخیره شد");
+    return act(() => api("PUT", `/api/links/${d.saveLink}`, { label: $("#lp-label").value.trim(), priority: +$("#lp-prio").value || 100, allowed }), "Saved");
   }
   if (d.delLink) {
     const l = linkById(d.delLink);
     const purge = !!d.purge;
-    if (!confirm(purge ? `تانل ${linkName(l)} از پنل و از روی سرورها حذف شود؟` : `تانل ${linkName(l)} از پنل حذف شود؟ (روی سرورها دست نمی‌خورد)`)) return;
-    await act(() => api("DELETE", `/api/links/${d.delLink}?purge=${purge}`), "حذف شد");
+    if (!confirm(purge ? `Delete the tunnel ${linkName(l)} from the panel and from the servers?` : `Remove the tunnel ${linkName(l)} from the panel? (the servers are left alone)`)) return;
+    await act(() => api("DELETE", `/api/links/${d.delLink}?purge=${purge}`), "Deleted");
     return closeDrawer();
   }
-  if (d.release) return act(() => api("POST", `/api/links/${d.release}/release`), "پورت‌ها برگشت");
+  if (d.release) return act(() => api("POST", `/api/links/${d.release}/release`), "The ports came back");
   if (d.editServer) { const s = srv(d.editServer); return serverForm(s.role, s); }
   if (d.testServer) {
     const r = await act(() => api("POST", `/api/servers/${d.testServer}/test`));
-    return toast(r.status === "online" ? `SSH سالم — ${ms(r.latency_ms)}` : `SSH ناموفق: ${r.error}`, r.status === "online" ? "success" : "error");
+    return toast(r.status === "online" ? `SSH is fine — ${ms(r.latency_ms)}` : `SSH failed: ${r.error}`, r.status === "online" ? "success" : "error");
   }
-  if ("scan" in d) { const r = await act(() => api("POST", "/api/scan")); return toast(r.added ? `${r.added} تانل موجود پیدا و اضافه شد` : "تانل جدیدی پیدا نشد", "success"); }
+  if ("scan" in d) { const r = await act(() => api("POST", "/api/scan")); return toast(r.added ? `${r.added} existing tunnels were found and added` : "No new tunnel was found", "success"); }
   if (d.newLink) { const s = srv(d.newLink); return linkForm(s.role === "iran" ? { iran_id: s.id } : { kharej_id: s.id }); }
-  if (d.install) { toast("در حال نصب موتور تانل…"); const r = await act(() => api("POST", `/api/servers/${d.install}/install`)); return toast(`موتور تانل ${r.version} آماده است`, "success"); }
+  if (d.install) { toast("Installing the tunnel engine…"); const r = await act(() => api("POST", `/api/servers/${d.install}/install`)); return toast(`The tunnel engine ${r.version} is ready`, "success"); }
   if (d.probe) {
     const s = srv(d.probe);
     const sel = document.querySelector("[data-probe-peer]");
     const peer = sel ? srv(sel.value) : null;
-    if (!peer) { toast("سرور طرف دیگر انتخاب نشده است"); return; }
+    if (!peer) { toast("No server on the other side is selected"); return; }
     const out = document.getElementById("probe-out");
-    if (out) out.innerHTML = `<p class="sub muted">در حال سنجش مسیر ${esc(s.name)} ⇄ ${esc(peer.name)}…</p>`;
+    if (out) out.innerHTML = `<p class="sub muted">Measuring the path ${esc(s.name)} ⇄ ${esc(peer.name)}…</p>`;
     const body = s.role === "iran" ? { iran_id: s.id, kharej_id: peer.id } : { iran_id: peer.id, kharej_id: s.id };
     const r = await api("POST", "/api/probe", body);
     if (out) out.innerHTML = probeTable(r);
-    return toast(r.ok ? (r.best ? `بهترین پروتکل: ${r.best}` : "هیچ پروتکلی کار نکرد") : "سنجش ناموفق بود", r.ok ? "success" : "error");
+    return toast(r.ok ? (r.best ? `The best protocol: ${r.best}` : "No protocol worked") : "The measurement failed", r.ok ? "success" : "error");
   }
   if (d.applyProbe) {
     const l = linkById(d.applyProbe);
     if (!l) return;
     return act(() => api("POST", `/api/links/${l.id}/transport`, { transport: d.transport, pin: true }),
-      `پروتکل ${d.transport} اعمال شد`);
+      `The protocol ${d.transport} was applied`);
   }
-  if (d.installAgent) {    toast("در حال نصب کانال فرمان…");
+  if (d.installAgent) {    toast("Installing the command channel…");
     const r = await act(() => api("POST", `/api/servers/${d.installAgent}/agent`));
-    return toast(`کانال فرمان آماده است (${r.command_record})`, "success");
+    return toast(`The command channel is ready (${r.command_record})`, "success");
   }
   if (d.sendCommand) {
     const r = await act(() => api("POST", `/api/servers/${d.sendCommand}/command`, { action: "status" }));
-    return toast(`فرمان فرستاده شد (${r.id})؛ جواب را با «خواندن جواب» بگیرید`, "success");
+    return toast(`The command was sent (${r.id}); read the answer with “Read the answer”`, "success");
   }
   if (d.readCommand) {
     const r = await act(() => api("GET", `/api/servers/${d.readCommand}/command`));
     const out = document.getElementById("cmd-out");
-    if (out) out.textContent = r.answer ? JSON.stringify(r.answer) : "هنوز جوابی نیامده است";
-    return toast(r.answer ? "جواب آمد" : "هنوز جوابی نیامده است", r.answer ? "success" : "error");
+    if (out) out.textContent = r.answer ? JSON.stringify(r.answer) : "No answer yet";
+    return toast(r.answer ? "The answer came" : "No answer yet", r.answer ? "success" : "error");
   }
   if (d.delServer) {
-    if (!confirm("سرور از پنل حذف شود؟ تانل‌هایی که پنل ساخته از روی سرورها پاک می‌شوند؛ تانل‌های خودتان دست نمی‌خورند.")) return;
-    await act(() => api("DELETE", `/api/servers/${d.delServer}`), "حذف شد"); return closeDrawer();
+    if (!confirm("Remove the server from the panel? The tunnels the panel built are deleted from the servers; your own tunnels are left alone.")) return;
+    await act(() => api("DELETE", `/api/servers/${d.delServer}`), "Deleted"); return closeDrawer();
   }
-  if (d.discoverLinks) return act(() => api("POST", "/api/discover", { link_ids: d.discoverLinks.split(",") }), "ساخت تانل‌ها شروع شد");
+  if (d.discoverLinks) return act(() => api("POST", "/api/discover", { link_ids: d.discoverLinks.split(",") }), "Building the tunnels has started");
   if (d.switch) {
     const dom = S.domains.find((x) => x.id === drawer.id);
     const s = srv(d.switch);
-    const note = s.id !== dom.primary_iran && dom.auto_failover && !S.settings.observe_only ? `\n\nسرور اصلی این دامنه ${nm(dom.primary_iran)} است؛ اگر این تغییر باید دائمی باشد، ${s.name} را «اصلی» کنید، وگرنه بعد از پایداری اصلی، ترافیک به آن برمی‌گردد.` : "";
-    if (!confirm(`رکورد ${dom.fqdn} در DNS به ${s.name} (${s.ip}) تغییر کند؟${note}`)) return;
-    return act(() => api("POST", `/api/domains/${dom.id}/switch`, { iran_id: d.switch }), "رکورد تغییر کرد");
+    const note = s.id !== dom.primary_iran && dom.auto_failover && !S.settings.observe_only ? `\n\nThe primary server of this domain is ${nm(dom.primary_iran)}; if this change should be permanent, make ${s.name} the “primary”, otherwise the traffic comes back to the primary once it is stable.` : "";
+    if (!confirm(`Change the record of ${dom.fqdn} in DNS to ${s.name} (${s.ip})?${note}`)) return;
+    return act(() => api("POST", `/api/domains/${dom.id}/switch`, { iran_id: d.switch }), "The record was changed");
   }
   if (d.primary) {
     const dom = S.domains.find((x) => x.id === drawer.id);
-    return act(() => api("POST", `/api/domains/${dom.id}/primary`, { iran_id: d.primary }), `${nm(d.primary)} سرور اصلی ${dom.fqdn} شد`);
+    return act(() => api("POST", `/api/domains/${dom.id}/primary`, { iran_id: d.primary }), `${nm(d.primary)} is now the primary server of ${dom.fqdn}`);
   }
   if (d.saveDports) {
     const dom = S.domains.find((x) => x.id === d.saveDports);
     const ports = $$(".dp-port").filter((x) => x.checked).map((x) => x.value);
-    if (!ports.length) return toast("حداقل یک پورت انتخاب کنید", "error");
-    return act(() => saveDomain(dom, { ports }), "پورت‌های دامنه ذخیره شد");
+    if (!ports.length) return toast("Pick at least one port", "error");
+    return act(() => saveDomain(dom, { ports }), "The ports of the domain are saved");
   }
   if (d.gMode) {
     const dom = S.domains.find((x) => x.id === drawer.id);
@@ -1335,16 +1337,16 @@ document.addEventListener("click", async (e) => {
   if (d.gSave) {
     const dom = S.domains.find((x) => x.id === d.gSave);
     const group = groupDraft.manual ? groupDraft.ids : [];
-    if (groupDraft.manual && !group.length) return toast("حداقل یک تانل انتخاب کنید", "error");
-    await act(() => saveDomain(dom, { group }), "ذخیره شد");
+    if (groupDraft.manual && !group.length) return toast("Pick at least one tunnel", "error");
+    await act(() => saveDomain(dom, { group }), "Saved");
     groupDraft = null; return renderDrawer(true);
   }
-  if (d.sync) return act(() => api("POST", `/api/domains/${d.sync}/sync`), "رکورد خوانده شد");
+  if (d.sync) return act(() => api("POST", `/api/domains/${d.sync}/sync`), "The record was read");
   if (d.editDomain) return domainForm(S.domains.find((x) => x.id === d.editDomain));
-  if (d.delDomain) { if (!confirm("دامنه از پنل حذف شود؟ (رکورد DNS دست نمی‌خورد)")) return; await act(() => api("DELETE", `/api/domains/${d.delDomain}`), "حذف شد"); return closeDrawer(); }
-  if (d.verifyProvider) { const r = await act(() => api("POST", `/api/providers/${d.verifyProvider}/verify`)); return toast(`اتصال سالم: ${r.detail}`, "success"); }
+  if (d.delDomain) { if (!confirm("Remove the domain from the panel? (the DNS record is left alone)")) return; await act(() => api("DELETE", `/api/domains/${d.delDomain}`), "Deleted"); return closeDrawer(); }
+  if (d.verifyProvider) { const r = await act(() => api("POST", `/api/providers/${d.verifyProvider}/verify`)); return toast(`The connection is fine: ${r.detail}`, "success"); }
   if (d.editProvider) return providerForm(S.providers.find((p) => p.id === d.editProvider));
-  if (d.delProvider) { if (!confirm("حساب DNS حذف شود؟")) return; await act(() => api("DELETE", `/api/providers/${d.delProvider}`), "حذف شد"); return settingsForm(); }
+  if (d.delProvider) { if (!confirm("Delete the DNS account?")) return; await act(() => api("DELETE", `/api/providers/${d.delProvider}`), "Deleted"); return settingsForm(); }
   if (d.link) return openDrawer("link", d.link);
 });
 // wires & labels live inside the panned canvas: open on a clean click only
@@ -1390,13 +1392,13 @@ document.addEventListener("mouseout", (e) => {
 
 $("#btn-discover").onclick = () => {
   const n = S.links.filter((l) => l.status === "pending" || l.status === "down").length;
-  if (!n) return toast("تانل ساخته‌نشده یا قطعی وجود ندارد؛ به تانل‌های سالم دست زده نمی‌شود");
-  if (!confirm(`${n} تانل ساخته‌نشده یا قطع با تست همه پروتکل‌ها ساخته/بازسازی می‌شود. تانل‌های سالم دست نمی‌خورند. ادامه؟`)) return;
-  act(() => api("POST", "/api/discover", {}), "ساخت تانل‌ها شروع شد");
+  if (!n) return toast("There is no tunnel that is not built or that is down; the healthy tunnels are left alone");
+  if (!confirm(`${n} tunnels that are not built or that are down will be built/rebuilt by testing every protocol. The healthy tunnels are left alone. Continue?`)) return;
+  act(() => api("POST", "/api/discover", {}), "Building the tunnels has started");
 };
 document.addEventListener("click", (e) => { if (e.target.closest("#observe-pill")) settingsForm(); });
-$("#btn-check").onclick = () => act(() => api("POST", "/api/check"), "بررسی فوری شروع شد");
-$("#btn-scan").onclick = async () => { const r = await act(() => api("POST", "/api/scan")); toast(r.added ? `${r.added} تانل موجود پیدا و اضافه شد` : "تانل جدیدی پیدا نشد", "success"); };
+$("#btn-check").onclick = () => act(() => api("POST", "/api/check"), "The immediate check has started");
+$("#btn-scan").onclick = async () => { const r = await act(() => api("POST", "/api/scan")); toast(r.added ? `${r.added} existing tunnels were found and added` : "No new tunnel was found", "success"); };
 $("#btn-add").onclick = (e) => { e.stopPropagation(); $("#add-pop").classList.toggle("open"); };
 $("#btn-settings").onclick = settingsForm;
 $("#btn-logout").onclick = async () => { await api("POST", "/api/logout"); location.reload(); };

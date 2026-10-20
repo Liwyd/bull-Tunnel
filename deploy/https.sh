@@ -35,24 +35,24 @@ O443="$(port_owner 443)"
 if [ -n "$O443" ] && ! ours "$O443"; then
   fail "port 443 is used by another program on this server:
    $O443
- Nothing was changed. پورت 443 دست برنامه دیگری است؛ هیچ تغییری داده نشد."
+ Nothing was changed. Port 443 belongs to another program; nothing was changed."
 fi
 O80="$(port_owner 80)"
 if [ -n "$O80" ]; then
   fail "port 80 is used by another program (needed for a few seconds to get the certificate):
    $O80
- Nothing was changed. پورت 80 دست برنامه دیگری است؛ هیچ تغییری داده نشد."
+ Nothing was changed. Port 80 belongs to another program; nothing was changed."
 fi
 
 say "checking DNS for $DOMAIN"
 MYIP="$(curl -fsS4 --max-time 6 https://api.ipify.org 2>/dev/null || true)"
 RES="$(getent ahostsv4 "$DOMAIN" 2>/dev/null | awk '{print $1; exit}')"
 [ -n "$RES" ] || fail "$DOMAIN does not resolve yet. Add an A record -> ${MYIP:-the IP of this server} and try again in a minute.
- رکورد A دامنه هنوز ساخته نشده یا هنوز پخش نشده."
+ The A record of the domain has not been created yet, or it has not propagated yet."
 if [ -n "$MYIP" ] && [ "$RES" != "$MYIP" ] && ! hostname -I | tr ' ' '\n' | grep -qx "$RES"; then
   fail "$DOMAIN points to $RES, but this server is $MYIP.
  If the record is on Arvan/Cloudflare with the CDN proxy (cloud) on, turn it off for this record.
- رکورد دامنه به این سرور اشاره نمی‌کند؛ اگر ابر/پروکسی آروان یا کلادفلر روشن است خاموشش کنید."
+ The domain does not point at this server; if the ArvanCloud or Cloudflare proxy is on, turn it off."
 fi
 echo "   $DOMAIN -> $RES  ok"
 

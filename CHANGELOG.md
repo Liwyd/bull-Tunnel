@@ -5,6 +5,20 @@ All the versions of Bull-Tunn. The project follows
 change that may break a configuration, the one after it is a change that
 only adds something.
 
+## Unreleased
+
+### The whole project is in English now
+
+The panel, the dashboard, the Telegram bot, the command line, the install
+scripts, the documentation and the tests were translated from Persian to
+English. Nothing else changed:
+
+- The dashboard is left-to-right now and uses Inter instead of the
+  Persian typeface.
+- Every message the panel shows, writes to Telegram or returns in an API
+  error is in English.
+- The screenshots in `docs/` were taken again with the English dashboard.
+
 ## 1.0.0 — 2026-10-20
 
 The first release of Bull-Tunn: the panel, the tunnel engine and the

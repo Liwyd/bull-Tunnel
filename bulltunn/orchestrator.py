@@ -66,10 +66,10 @@ PROPAGATION_GIVE_UP = 3600
 def fmt_dur(seconds: float) -> str:
     s = int(seconds)
     if s < 90:
-        return f"{s} ثانیه"
+        return f"{s} seconds"
     if s < 5400:
-        return f"{round(s / 60)} دقیقه"
-    return f"{s / 3600:.1f} ساعت"
+        return f"{round(s / 60)} minutes"
+    return f"{s / 3600:.1f} hours"
 
 
 class Orchestrator:
@@ -204,11 +204,11 @@ class Orchestrator:
         """Why a link must not carry traffic now ("" if it may)."""
         iran, _ = self.pair(link)
         if iran is None or self.is_down(iran):
-            return f"سرور داخل {self.name(link.iran_id)} در دسترس نیست"
+            return f"Iran server {self.name(link.iran_id)} is unreachable"
         if link.status in (L_DOWN, L_PENDING):
-            return f"تانل {self.link_label(link)} قطع است"
+            return f"tunnel {self.link_label(link)} is down"
         if self.flapping(link):
-            return f"تانل {self.link_label(link)} مدام قطع و وصل می‌شود"
+            return f"tunnel {self.link_label(link)} keeps flapping"
         return ""
 
     # ------------------------------------------------------------ deployment
@@ -244,13 +244,13 @@ class Orchestrator:
         try:
             busy = await self.driver.listening(iran)
         except (SSHError, OSError) as e:
-            return f"پورت‌های آزاد {iran.name} بررسی نشد: {e}"
+            return f"the free ports of {iran.name} could not be checked: {e}"
         wanted = {link.tunnel_port} | listen_ports(self.store.link_ports(link))
         if link.probe_port:
             wanted.add(link.probe_port)
         clash = sorted(wanted & busy)
         if clash:
-            return f"پورت {', '.join(map(str, clash[:8]))} روی {iran.name} از قبل در حال استفاده است"
+            return f"port {', '.join(map(str, clash[:8]))} on {iran.name} is already in use"
         return ""
 
     async def _try(self, link: Link, transport: str, ports: list[str]) -> TestResult:
@@ -299,20 +299,20 @@ class Orchestrator:
                 await asyncio.gather(self._install(iran), self._install(kharej))
             except (SSHError, DeployError, OSError) as e:
                 link.status, link.error = L_DOWN, f"install: {e}"
-                await self.emit("error", "install", f"نصب موتور تانل روی {self.link_label(link)} ناموفق بود: {e}", link=link.id)
+                await self.emit("error", "install", f"installing the tunnel engine on {self.link_label(link)} failed: {e}", link=link.id)
                 return False
             taken = await self._ports_taken(link)
             if taken:
                 link.status, link.error = (L_PENDING if not link.built else L_DOWN), taken
-                await self.emit("error", "discover", f"تانل {self.link_label(link)} ساخته نشد: {taken}", link=link.id)
+                await self.emit("error", "discover", f"tunnel {self.link_label(link)} was not built: {taken}", link=link.id)
                 return False
             cands = transports or link.allowed or self.s.candidate_transports
             cands = self.supported(link, cands)
             if not cands:
                 link.status, link.error = L_DOWN, "the engine on this server speaks no known carrier"
-                await self.emit("error", "discover", f"موتور تانل روی {self.name(link.iran_id)} هیچ پروتکل شناخته‌شده‌ای ندارد", link=link.id)
+                await self.emit("error", "discover", f"the tunnel engine on {self.name(link.iran_id)} speaks no known protocol", link=link.id)
                 return False
-            await self.emit("info", "discover", f"تست پروتکل‌ها روی {self.link_label(link)}: {', '.join(cands)}", notify=False, link=link.id)
+            await self.emit("info", "discover", f"testing protocols on {self.link_label(link)}: {', '.join(cands)}", notify=False, link=link.id)
             results = [await self._try(link, t, []) for t in cands]
             good = sorted((r for r in results if r.ok), key=lambda r: r.latency_ms or 9e9)
             if link.pinned and link.transport and any(r.transport == link.transport for r in good):
@@ -326,20 +326,20 @@ class Orchestrator:
                 self.repair_after[link.id] = time.time() + REPAIR_BACKOFF
                 if link.managed:
                     await self.driver.stop(link, iran, kharej)
-                await self.emit("error", "discover", f"هیچ پروتکلی بین {self.link_label(link)} کار نکرد", link=link.id)
+                await self.emit("error", "discover", f"no protocol worked between {self.link_label(link)}", link=link.id)
                 return False
             final = await self._try(link, best.transport, self.store.link_ports(link))
             if not final.ok:
                 link.status, link.error = L_DOWN, final.error or "failed after adding ports"
                 link.fail_count = self.s.fail_threshold
-                await self.emit("error", "discover", f"{self.link_label(link)} با پورت‌های نهایی بالا نیامد: {link.error}", link=link.id)
+                await self.emit("error", "discover", f"{self.link_label(link)} did not come up with the final ports: {link.error}", link=link.id)
                 return False
             self._mark_up(link, best.transport, final.latency_ms)
             ranking = ", ".join(f"{r.transport} {r.latency_ms:.0f}ms" for r in good[:4])
             await self.emit(
                 "success",
                 "discover",
-                f"تانل {self.link_label(link)} با {best.transport} برقرار شد ({final.latency_ms:.0f}ms) — رتبه‌بندی: {ranking}",
+                f"Tunnel {self.link_label(link)} is up on {best.transport} ({final.latency_ms:.0f}ms) — ranking: {ranking}",
                 link=link.id,
             )
             return True
@@ -356,7 +356,7 @@ class Orchestrator:
             # "build everything" builds what is not built or clearly down; a
             # working or merely wobbling tunnel is never touched
             links = [x for x in links if x.status in (L_PENDING, L_DOWN) and x.id not in self.busy]
-        await self.emit("info", "discover", f"شروع تست و اتصال {len(links)} تانل")
+        await self.emit("info", "discover", f"starting the test and connection of {len(links)} tunnels")
         sem = asyncio.Semaphore(parallel)
 
         async def one(link: Link):
@@ -366,7 +366,7 @@ class Orchestrator:
         await asyncio.gather(*(one(x) for x in links))
         await self.evaluate_domains()
         up = sum(1 for x in links if x.status == L_UP)
-        await self.emit("info", "discover", f"پایان اتصال: {up} از {len(links)} تانل برقرار است")
+        await self.emit("info", "discover", f"done: {up} of {len(links)} tunnels are up")
 
     async def set_transport(self, link: Link, transport: str, pin: bool = True) -> bool:
         if link.id in self.busy:
@@ -384,21 +384,26 @@ class Orchestrator:
             taken = await self._ports_taken(link)
             if taken:
                 link.status, link.error = (L_PENDING if not link.built else L_DOWN), taken
-                await self.emit("error", "transport", f"تانل {self.link_label(link)} ساخته نشد: {taken}", link=link.id)
+                await self.emit("error", "transport", f"tunnel {self.link_label(link)} was not built: {taken}", link=link.id)
                 return False
             r = await self._try(link, transport, self.store.link_ports(link))
             if r.ok:
                 self._mark_up(link, transport, r.latency_ms)
-                await self.emit("success", "transport", f"پروتکل {self.link_label(link)} از {old or '—'} به {transport} تغییر کرد ({r.latency_ms:.0f}ms)", link=link.id)
+                await self.emit(
+                    "success",
+                    "transport",
+                    f"the protocol of {self.link_label(link)} changed from {old or '—'} to {transport} ({r.latency_ms:.0f}ms)",
+                    link=link.id,
+                )
                 return True
             link.transport = transport
             link.status, link.error = L_DOWN, r.error
             link.fail_count = self.s.fail_threshold
-            await self.emit("error", "transport", f"تغییر پروتکل {self.link_label(link)} به {transport} ناموفق بود: {r.error}", link=link.id)
+            await self.emit("error", "transport", f"changing the protocol of {self.link_label(link)} to {transport} failed: {r.error}", link=link.id)
             return False
         except (SSHError, DeployError, OSError) as e:
             link.status, link.error = L_DOWN, str(e)
-            await self.emit("error", "transport", f"تغییر پروتکل {self.link_label(link)} ناموفق: {e}", link=link.id)
+            await self.emit("error", "transport", f"changing the protocol of {self.link_label(link)} failed: {e}", link=link.id)
             return False
         finally:
             self.busy.discard(link.id)
@@ -426,15 +431,25 @@ class Orchestrator:
                 # a service that died only needs a restart; a blocked
                 # transport is better tried last
                 order = ([current] + ranked if crashed else ranked + [current]) if current else ranked
-            await self.emit("warning", "repair", f"تانل {self.link_label(link)} ({current or '—'}) قطع است؛ تلاش برای بازسازی با: {', '.join(order)}", link=link.id)
+            await self.emit(
+                "warning",
+                "repair",
+                f"tunnel {self.link_label(link)} ({current or '—'}) is down; trying to rebuild it with: {', '.join(order)}",
+                link=link.id,
+            )
             ports = self.store.link_ports(link)
             for t in order:
                 r = await self._try(link, t, ports)
                 if r.ok:
                     self._mark_up(link, t, r.latency_ms)
                     self.repair_after.pop(link.id, None)
-                    how = "با همان پروتکل" if t == current else f"با پروتکل {t} (قبلی: {current or '—'})"
-                    await self.emit("success", "repair", f"تانل {self.link_label(link)} {how} دوباره برقرار شد و وارد مدار شد ({r.latency_ms:.0f}ms)", link=link.id)
+                    how = "with the same protocol" if t == current else f"with the protocol {t} (previous: {current or '—'})"
+                    await self.emit(
+                        "success",
+                        "repair",
+                        f"tunnel {self.link_label(link)} {how} is back up and in service ({r.latency_ms:.0f}ms)",
+                        link=link.id,
+                    )
                     return True
             # nothing worked: leave the best known transport deployed so the
             # tunnel heals by itself when the path does
@@ -451,7 +466,13 @@ class Orchestrator:
             link.status, link.error = L_DOWN, "all transports failed"
             link.fail_count = max(link.fail_count, self.s.fail_threshold)
             self.repair_after[link.id] = time.time() + REPAIR_BACKOFF
-            await self.emit("error", "repair", f"بازسازی تانل {self.link_label(link)} ناموفق بود؛ هیچ پروتکلی جواب نداد (تلاش دوباره تا {REPAIR_BACKOFF // 60} دقیقه دیگر)", link=link.id)
+            await self.emit(
+                "error",
+                "repair",
+                f"rebuilding the tunnel {self.link_label(link)} failed; no protocol answered "
+                f"(retrying in {REPAIR_BACKOFF // 60} minutes)",
+                link=link.id,
+            )
             return False
         finally:
             self.busy.discard(link.id)
@@ -468,7 +489,7 @@ class Orchestrator:
             await self.driver.deploy_iran(link, iran, kharej, self.store.link_ports(link))  # type: ignore[arg-type]
             return True
         except (SSHError, DeployError, OSError) as e:
-            await self.emit("error", "deploy", f"به‌روزرسانی پورت‌های {self.link_label(link)} ناموفق: {e}", link=link.id)
+            await self.emit("error", "deploy", f"updating the ports of {self.link_label(link)} failed: {e}", link=link.id)
             return False
 
     async def ports_changed(self, link: Link) -> None:
@@ -476,7 +497,12 @@ class Orchestrator:
         carrier = self.store.links.get(self.store.carrier(link.id))
         if carrier and carrier.status != L_PENDING and carrier.transport:
             if await self.redeploy_iran_side(carrier):
-                await self.emit("info", "ports", f"پورت‌های فورواردی {self.link_label(link)} روی سرور داخل: {', '.join(link.ports) or '—'}", link=link.id)
+                await self.emit(
+                    "info",
+                    "ports",
+                    f"forwarded ports of {self.link_label(link)} on the Iran server: {', '.join(link.ports) or '—'}",
+                    link=link.id,
+                )
 
     async def remove_links(self, links: list[Link]) -> None:
         for link in links:
@@ -602,11 +628,12 @@ class Orchestrator:
             built=True,
         )
         st.links[link.id] = link
-        state = "فعال" if f.active == "active" and c.active == "active" else f"سرویس: {f.active or '?'} / {c.active or '?'}"
+        state = "active" if f.active == "active" and c.active == "active" else f"service: {f.active or '?'} / {c.active or '?'}"
         await self.emit(
             "success",
             "adopt",
-            f"تانل موجود «{f.name}» بین {kharej.name} ⇄ {iran.name} پیدا و به پنل اضافه شد ({f.transport}، پورت تانل {link.tunnel_port}، پورت‌ها: {', '.join(ports) or '—'}، {state})",
+            f"the existing tunnel «{f.name}» between {kharej.name} ⇄ {iran.name} was found and added to the panel "
+            f"({f.transport}, tunnel port {link.tunnel_port}, ports: {', '.join(ports) or '—'}, {state})",
             link=link.id,
         )
         return True
@@ -616,7 +643,7 @@ class Orchestrator:
         servers = [s for s in self.store.servers.values() if s.enabled]
 
         async def one(srv: Server):
-            kind = "داخل" if srv.role == IRAN else "خارج"
+            kind = "Iran" if srv.role == IRAN else "foreign"
             try:
                 srv.ssh_latency_ms = round(await self.driver.ping(srv), 1)
                 srv.fail_count = 0
@@ -626,14 +653,14 @@ class Orchestrator:
                     was = srv.status
                     srv.status = ONLINE
                     if was == OFFLINE:
-                        await self.emit("success", "server", f"سرور {kind} {srv.name} ({srv.ip}) دوباره در دسترس است", server=srv.id)
+                        await self.emit("success", "server", f"{kind} server {srv.name} ({srv.ip}) is reachable again", server=srv.id)
             except (SSHError, OSError) as e:
                 srv.fail_count += 1
                 srv.error = str(e)
                 srv.ssh_latency_ms = None
                 if srv.fail_count >= self.s.fail_threshold and srv.status != OFFLINE:
                     srv.status = OFFLINE
-                    await self.emit("error", "server", f"سرور {kind} {srv.name} ({srv.ip}) به مشکل خورد و از دسترس خارج شد: {e}", server=srv.id)
+                    await self.emit("error", "server", f"{kind} server {srv.name} ({srv.ip}) ran into trouble and went offline: {e}", server=srv.id)
                 elif srv.status == "unknown":
                     srv.status = OFFLINE
 
@@ -682,7 +709,7 @@ class Orchestrator:
                 if was != L_DEGRADED or not link.up_since:
                     link.up_since = t
                 if was == L_DOWN:
-                    await self.emit("success", "link", f"تانل {self.link_label(link)} ({link.transport}) دوباره وصل شد و وارد مدار شد", link=link.id)
+                    await self.emit("success", "link", f"tunnel {self.link_label(link)} ({link.transport}) is back up and in service", link=link.id)
             if link.id in self.flap_reported and not self.flapping(link):
                 self.flap_reported.discard(link.id)
             return
@@ -706,7 +733,12 @@ class Orchestrator:
         if self.flapping(link) and link.id not in self.flap_reported:
             self.flap_reported.add(link.id)
             n = sum(1 for x in link.flaps if x >= t - self.s.flap_window)
-            await self.emit("warning", "flap", f"تانل {self.link_label(link)} مدام قطع و وصل می‌شود: {n} قطعی در {fmt_dur(self.s.flap_window)} اخیر", link=link.id)
+            await self.emit(
+                "warning",
+                "flap",
+                f"tunnel {self.link_label(link)} keeps flapping: {n} drops in the last {fmt_dur(self.s.flap_window)}",
+                link=link.id,
+            )
         if link.fail_count >= self.s.fail_threshold:
             if link.status != L_DOWN:
                 link.status = L_DOWN
@@ -715,7 +747,7 @@ class Orchestrator:
                 # down with it are not worth a Telegram message each
                 _, kharej = self.pair(link)
                 cascade = p is None or (kharej is not None and kharej.status == OFFLINE)
-                await self.emit("error", "link", f"تانل {self.link_label(link)} ({link.transport}) قطع شد: {link.error}", notify=not cascade, link=link.id)
+                await self.emit("error", "link", f"tunnel {self.link_label(link)} ({link.transport}) went down: {link.error}", notify=not cascade, link=link.id)
         elif link.status == L_UP:
             link.status = L_DEGRADED
             link.last_change = t
@@ -780,10 +812,13 @@ class Orchestrator:
             hop = new.get(key)
             if (set(hop["targets"]) if hop else None) != (set(old["targets"]) if old else None):
                 if hop:
-                    to = "، ".join(self._exit_name(t) for t in hop["targets"])
-                    msg = f"پورت {port} روی {k.name} به {to} فوروارد می‌شود ({hop['method']}{'، از روی اتصال‌ها' if hop.get('inferred') else ''})"
+                    to = ", ".join(self._exit_name(t) for t in hop["targets"])
+                    msg = (
+                        f"port {port} on {k.name} is forwarded to {to} "
+                        f"({hop['method']}{', inferred from the live connections' if hop.get('inferred') else ''})"
+                    )
                 else:
-                    msg = f"پورت {port} روی {k.name} دیگر به سرور دیگری فوروارد نمی‌شود"
+                    msg = f"port {port} on {k.name} is no longer forwarded to another server"
                 await self.emit("info", "exit", msg, notify=False, server=k.id)
         k.exits = new
         used = {t for h in new.values() for t in h["targets"]} | set(self.store.kharej_ports(k.id)[1])
@@ -795,7 +830,12 @@ class Orchestrator:
             ports_ = [p for p, h in new.items() if t in h["targets"]] or ["-"]
             if ok:
                 if r["ok"] is False:
-                    await self.emit("success", "exit", f"خروجی {self._exit_name(t)} از {k.name} دوباره در دسترس است (پورت {', '.join(ports_)})", server=k.id)
+                    await self.emit(
+                        "success",
+                        "exit",
+                        f"the exit {self._exit_name(t)} of {k.name} is reachable again (port {', '.join(ports_)})",
+                        server=k.id,
+                    )
                 r = {"ok": True, "fails": 0, "since": r["since"] if r["ok"] else now_}
             else:
                 r = {**r, "fails": r["fails"] + 1}
@@ -804,8 +844,9 @@ class Orchestrator:
                     await self.emit(
                         "warning",
                         "exit",
-                        f"پورت {', '.join(ports_)} از {k.name} به {self._exit_name(t)} فوروارد می‌شود ولی این مقصد از {k.name} جواب نمی‌دهد. "
-                        "(فقط اطلاع؛ این مرحله بیرون از تانل است و پنل چیزی را عوض نمی‌کند)",
+                        f"port {', '.join(ports_)} on {k.name} is forwarded to {self._exit_name(t)}, but that destination "
+                        f"does not answer from {k.name}. "
+                        "(information only; this step is outside the tunnel and the panel changes nothing)",
                         server=k.id,
                     )
             k.exit_reach[t] = r
@@ -847,7 +888,8 @@ class Orchestrator:
         await self.emit(
             "warning",
             "handover",
-            f"پورت‌های {self.link_label(src)} روی سرور داخل {self.name(src.iran_id)} به تانل {self.link_label(dst)} منتقل شد (رکورد DNS تغییری نکرد) — {reason}",
+            f"the ports of {self.link_label(src)} on the Iran server {self.name(src.iran_id)} were moved to the tunnel "
+            f"{self.link_label(dst)} (the DNS record was not touched) — {reason}",
             link=src.id,
             target=dst.id,
         )
@@ -870,7 +912,8 @@ class Orchestrator:
             await self.emit(
                 "success",
                 "failback",
-                f"تانل {self.link_label(src)} {fmt_dur(self.s.failback_after)} بدون قطعی پایدار بود؛ پورت‌هایش از {self.link_label(dst)} برگشت",
+                f"tunnel {self.link_label(src)} was stable for {fmt_dur(self.s.failback_after)} without a drop; "
+                f"its ports came back from {self.link_label(dst)}",
                 link=src_id,
             )
 
@@ -886,23 +929,23 @@ class Orchestrator:
         hard, soft = [], []
         iran = self.store.servers.get(iran_id)
         if iran is None or self.is_down(iran):
-            return [f"سرور داخل {self.name(iran_id)} در دسترس نیست"], []
+            return [f"Iran server {self.name(iran_id)} is unreachable"], []
         allowed = {x.id for x in group} if d.group else None
         for spec in self.store.domain_specs(d):
             link = self.route(iran_id, spec)
             if link is None:
-                hard.append(f"پورت {spec} روی {self.name(iran_id)} تانلی ندارد")
+                hard.append(f"port {spec} has no tunnel on {self.name(iran_id)}")
                 continue
             owner = self.store.owner(iran_id, spec)
             if allowed is not None and link.id not in allowed and (owner is None or owner.id not in allowed):
-                hard.append(f"پورت {spec} روی {self.name(iran_id)} با تانلی خارج از گروه دامنه است")
+                hard.append(f"port {spec} on {self.name(iran_id)} is served by a tunnel outside the domain's group")
                 continue
             ok = self.stable(link) if stable else self.healthy(link)
             if not ok:
                 why = self.broken(link)
-                (hard if why or stable else soft).append(f"پورت {spec}: {why or 'تانل ' + self.link_label(link) + ' ناپایدار'}")
+                (hard if why or stable else soft).append(f"port {spec}: {why or 'tunnel ' + self.link_label(link) + ' is unstable'}")
         if not self.store.domain_specs(d):
-            hard.append("پورت‌های دامنه مشخص نشده")
+            hard.append("the ports of the domain are not set")
         return hard, soft
 
     def routes_text(self, d: Domain, iran_id: str) -> str:
@@ -911,8 +954,8 @@ class Orchestrator:
             link = self.route(iran_id, spec)
             e = self.store.exit_of(link, first_port(spec))
             tail = "↪" + "/".join(self.name(t["server_id"]) if t["server_id"] else t["addr"] for t in e["targets"]) if e else ""
-            parts.append(f"{spec}→{self.name(link.kharej_id) if link else '؟'}{tail}")
-        return "، ".join(parts)
+            parts.append(f"{spec}→{self.name(link.kharej_id) if link else '?'}{tail}")
+        return ", ".join(parts)
 
     async def move_domain(self, d: Domain, iran_id: str, reason: str, failback: bool = False) -> bool:
         """Point the domain's A record at another Iran server."""
@@ -920,7 +963,7 @@ class Orchestrator:
         iran = st.servers.get(iran_id)
         p = st.providers.get(d.provider_id)
         if not iran or not p:
-            await self.emit("error", "dns", f"دامنه {d.fqdn}: حساب DNS یا سرور مقصد پیدا نشد", domain=d.id)
+            await self.emit("error", "dns", f"domain {d.fqdn}: the DNS account or the target server was not found", domain=d.id)
             return False
         if d.iran_id == iran_id and d.current_ip == iran.ip:
             return True
@@ -930,7 +973,7 @@ class Orchestrator:
             except Exception as e:  # DNSError, httpx errors, anything the API throws
                 if d.error != str(e):
                     d.error = str(e)
-                    await self.emit("error", "dns", f"تغییر رکورد {d.fqdn} به {iran.ip} ناموفق بود: {e}", domain=d.id)
+                    await self.emit("error", "dns", f"changing the record of {d.fqdn} to {iran.ip} failed: {e}", domain=d.id)
                 return False
         old = st.servers.get(d.iran_id)
         d.iran_id = iran_id
@@ -941,14 +984,17 @@ class Orchestrator:
         frm = f"{old.name} ({old.ip})" if old else "—"
         routes = self.routes_text(d, iran_id)
         if failback:
-            msg = f"برگشت به سرور اصلی: رکورد {d.fqdn} از {frm} به {iran.name} ({iran.ip}) تغییر کرد — {reason}. مسیرها: {routes}"
+            msg = (
+                f"back to the primary server: the record of {d.fqdn} changed from {frm} to {iran.name} ({iran.ip}) — "
+                f"{reason}. Routes: {routes}"
+            )
         elif old:
             msg = (
-                f"رکورد {d.fqdn} از {frm} به {iran.name} ({iran.ip}) تغییر کرد — {reason}. "
-                f"مسیرها: {routes}؛ در حال بررسی رسیدن تغییر به کاربران…"
+                f"the record of {d.fqdn} changed from {frm} to {iran.name} ({iran.ip}) — {reason}. "
+                f"Routes: {routes}; checking that the change reaches the users…"
             )
         else:
-            msg = f"رکورد {d.fqdn} روی {iran.name} ({iran.ip}) تنظیم شد. مسیرها: {routes}"
+            msg = f"the record of {d.fqdn} was pointed at {iran.name} ({iran.ip}). Routes: {routes}"
         await self.emit("success" if failback or not old else "warning", "dns", msg, domain=d.id)
         return True
 
@@ -965,16 +1011,16 @@ class Orchestrator:
                     d.status = "ok"
                     d.error = ""
                 if self.suggested.pop(d.id, None):
-                    await self.emit("success", "observe", f"دامنه {d.fqdn} دوباره سالم است (حالت نظارت: تغییری داده نشده بود)", domain=d.id)
+                    await self.emit("success", "observe", f"domain {d.fqdn} is healthy again (observe mode: nothing was changed)", domain=d.id)
                 await self._maybe_failback(d, group)
                 continue
             if not hard:
                 continue  # dropped a check or two: not a reason to move yet
-            why = "؛ ".join(hard[:3])
+            why = "; ".join(hard[:3])
             if not d.auto_failover:
                 if d.status != "broken":
                     d.status = "broken"
-                    await self.emit("error", "domain", f"دامنه {d.fqdn}: {why} (جابه‌جایی خودکار خاموش است)", domain=d.id)
+                    await self.emit("error", "domain", f"domain {d.fqdn}: {why} (automatic failover is off)", domain=d.id)
                 continue
             plan = self._plan(d, group)
             if plan is None:
@@ -985,7 +1031,8 @@ class Orchestrator:
                     await self.emit(
                         "error",
                         "domain",
-                        f"دامنه {d.fqdn}: {why} — و هیچ سرور داخل دیگری همه پورت‌هایش ({', '.join(st.domain_specs(d))}) را سالم ندارد؛ رکورد تغییر نکرد",
+                        f"domain {d.fqdn}: {why} — and no other Iran server has all of its ports "
+                        f"({', '.join(st.domain_specs(d))}) healthy; the record was left untouched",
                         domain=d.id,
                     )
                 self._kick(group)
@@ -998,7 +1045,7 @@ class Orchestrator:
                 await self.move_domain(d, plan[1], why)
             else:
                 _, owner, target, spec = plan
-                await self.hand_over(owner, target, f"دامنه {d.fqdn}، پورت {spec}: {why}")
+                await self.hand_over(owner, target, f"domain {d.fqdn}, port {spec}: {why}")
                 d.last_switch = time.time()
 
     def _plan(self, d: Domain, group: list[Link]):
@@ -1056,13 +1103,16 @@ class Orchestrator:
         self.suggested[d.id] = key
         if plan[0] == "dns":
             iran = self.store.servers.get(plan[1])
-            would = f"رکوردش به {iran.name if iran else '?'} ({iran.ip if iran else '?'}) تغییر می‌کرد (مسیرها: {self.routes_text(d, plan[1])})"
+            would = (
+                f"its record would have changed to {iran.name if iran else '?'} ({iran.ip if iran else '?'}) "
+                f"(routes: {self.routes_text(d, plan[1])})"
+            )
         else:
-            would = f"پورت {plan[3]} روی همان سرور داخل به تانل {self.link_label(plan[2])} منتقل می‌شد"
+            would = f"port {plan[3]} would have been moved to the tunnel {self.link_label(plan[2])} on the same Iran server"
         await self.emit(
             "warning",
             "observe",
-            f"حالت نظارت — دامنه {d.fqdn}: {why}. اگر جابه‌جایی خودکار روشن بود، {would}. هیچ تغییری داده نشد.",
+            f"observe mode — domain {d.fqdn}: {why}. If automatic failover were on, {would}. Nothing was changed.",
             domain=d.id,
         )
 
@@ -1079,7 +1129,7 @@ class Orchestrator:
             err = f"DNS read: {e}"
             if d.error != err:
                 d.error = err
-                await self.emit("error", "dns", f"رکورد دامنه {d.fqdn} خوانده نشد: {e}", domain=d.id)
+                await self.emit("error", "dns", f"the record of the domain {d.fqdn} could not be read: {e}", domain=d.id)
             await self.changed()
             return
         d.current_ip, d.error = (ips[0] if ips else ""), ""
@@ -1098,8 +1148,18 @@ class Orchestrator:
                 d.ports = st.domain_specs(d)
             hard, _ = self.cover(d, d.iran_id, st.group_of(d))
             d.status = "unknown" if hard else "ok"
-            tail = f"مسیرها: {self.routes_text(d, d.iran_id)}" if st.domain_specs(d) else "پورت‌های دامنه را در پنل دامنه مشخص کنید"
-            await self.emit("info", "domain", f"دامنه {d.fqdn} الان به {match.name} ({match.ip}) اشاره می‌کند؛ {tail}", notify=False, domain=d.id)
+            tail = (
+                f"routes: {self.routes_text(d, d.iran_id)}"
+                if st.domain_specs(d)
+                else "set the ports of the domain in the domain panel"
+            )
+            await self.emit(
+                "info",
+                "domain",
+                f"domain {d.fqdn} currently points at {match.name} ({match.ip}); {tail}",
+                notify=False,
+                domain=d.id,
+            )
             return
         if not d.current_ip and not d.error:
             return  # the record has not been read yet
@@ -1113,8 +1173,9 @@ class Orchestrator:
             await self.emit(
                 "warning",
                 "domain",
-                f"دامنه {d.fqdn} به {d.current_ip or 'هیچ آی‌پی'} اشاره می‌کند که هیچ‌کدام از سرورهای داخل ثبت‌شده نیست؛ رکورد دست نخورد. "
-                "در پنل دامنه سرور داخل را دستی انتخاب کنید.",
+                f"domain {d.fqdn} points at {d.current_ip or 'no IP address'}, which is not one of the registered Iran "
+                "servers; the record was left untouched. "
+                "Pick the Iran server by hand in the domain panel.",
                 domain=d.id,
             )
 
@@ -1131,7 +1192,7 @@ class Orchestrator:
         await self.move_domain(
             d,
             primary,
-            f"همه پورت‌های {self.name(primary)} {fmt_dur(self.s.failback_after)} بدون قطعی پایدار بودند",
+            f"all the ports of {self.name(primary)} were stable for {fmt_dur(self.s.failback_after)} without a drop",
             failback=True,
         )
 
@@ -1203,13 +1264,19 @@ class Orchestrator:
                 await self.emit(
                     "success",
                     "propagated",
-                    f"بعد از {fmt_dur(waited)}، سرور {self.name(d.iran_id)} ({d.pending_ip}) پشت دامنه {d.fqdn} قرار گرفت. مسیرها: {self.routes_text(d, d.iran_id)}",
+                    f"after {fmt_dur(waited)}, server {self.name(d.iran_id)} ({d.pending_ip}) is behind domain {d.fqdn}. "
+                    f"Routes: {self.routes_text(d, d.iran_id)}",
                     domain=d.id,
                 )
                 d.pending_ip = ""
             elif waited > PROPAGATION_GIVE_UP:
                 got = ", ".join(sorted({ip for a in seen for ip in a})) or "—"
-                await self.emit("warning", "propagated", f"بعد از {fmt_dur(waited)} هنوز همه DNSها آی‌پی جدید {d.fqdn} را نشان نمی‌دهند (دیده‌شده: {got})", domain=d.id)
+                await self.emit(
+                    "warning",
+                    "propagated",
+                    f"after {fmt_dur(waited)} not every DNS server shows the new IP address of {d.fqdn} yet (seen: {got})",
+                    domain=d.id,
+                )
                 d.pending_ip = ""
 
     # --------------------------------------------------------------- runtime
@@ -1231,8 +1298,8 @@ class Orchestrator:
     # ------------------------------------------------------------ bot output
     def summary(self) -> str:
         st = self.store
-        lines = ["<b>📊 وضعیت Bull-Tunn</b>", ""]
-        for role, title in ((KHAREJ, "🌍 خارج"), (IRAN, "🇮🇷 داخل")):
+        lines = ["<b>📊 Bull-Tunn status</b>", ""]
+        for role, title in ((KHAREJ, "🌍 Foreign"), (IRAN, "🇮🇷 Iran")):
             lines.append(f"<b>{title}</b>")
             for srv in st.by_role(role):
                 dot = "🟢" if srv.status == ONLINE else "🔴" if srv.status == OFFLINE else "⚪"
@@ -1243,30 +1310,31 @@ class Orchestrator:
 
     def domains_text(self) -> str:
         st = self.store
-        lines = ["<b>🌐 دامنه‌ها</b>"]
+        lines = ["<b>🌐 Domains</b>"]
         for d in st.domains.values():
             dot = "🟢" if d.status == "ok" else "🔴" if d.status == "broken" else "⚪"
-            extra = " ⏳ در حال انتشار DNS" if d.pending_ip else ""
+            extra = " ⏳ DNS propagation in progress" if d.pending_ip else ""
             where = f"{self.name(d.iran_id)} ({self.routes_text(d, d.iran_id)})" if d.iran_id else "—"
             lines.append(f"{dot} {esc(d.fqdn)} → {esc(where)}{extra}")
-        return "\n".join(lines) if len(lines) > 1 else "دامنه‌ای ثبت نشده"
+        return "\n".join(lines) if len(lines) > 1 else "no domain is registered"
 
     def links_text(self) -> str:
         icon = {L_UP: "🟢", L_DEGRADED: "🟡", L_DOWN: "🔴", L_TESTING: "🔵", L_PENDING: "⚪"}
-        lines = ["<b>🔗 تانل‌ها</b>"]
+        lines = ["<b>🔗 Tunnels</b>"]
         for x in sorted(self.store.links.values(), key=lambda x: (self.name(x.kharej_id), self.name(x.iran_id))):
             if x.status == L_PENDING:
                 continue
             lat = f" {x.latency_ms:.0f}ms" if x.latency_ms else ""
-            flap = " ⚡ناپایدار" if self.flapping(x) else ""
+            flap = " ⚡unstable" if self.flapping(x) else ""
             lines.append(f"{icon.get(x.status, '⚪')} {esc(self.link_label(x))} <code>{esc(x.transport or '—')}</code>{lat}{flap}")
         return "\n".join(lines)
 
     async def bot_command(self, cmd: str, args: list[str]) -> str:
         if cmd in ("/start", "/help"):
             return (
-                "دستورها:\n/status — خلاصه وضعیت\n/links — وضعیت تانل‌ها\n"
-                "/domains — دامنه‌ها و مسیرشان\n/check — بررسی فوری همه مسیرها\n/scan — جستجوی تانل‌های موجود روی سرورها\n/backup — بکاپ کامل همین حالا"
+                "Commands:\n/status — status summary\n/links — the tunnels and their state\n"
+                "/domains — the domains and their routes\n/check — check every path right now\n"
+                "/scan — look for the tunnels that already run on the servers\n/backup — a full backup right now"
             )
         if cmd == "/status":
             return self.summary()
@@ -1276,8 +1344,8 @@ class Orchestrator:
             return self.domains_text()
         if cmd == "/check":
             self.wake()
-            return "🔄 بررسی فوری شروع شد"
+            return "🔄 the immediate check has started"
         if cmd == "/scan":
             n = await self.scan_all()
-            return f"🔍 جستجو تمام شد: {n} تانل جدید اضافه شد"
-        return "دستور ناشناخته — /help"
+            return f"🔍 the search is over: {n} new tunnels were added"
+        return "unknown command — /help"

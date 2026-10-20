@@ -47,10 +47,10 @@ async def test_down_tunnel_switches_dns_first_then_repairs_then_fails_back(world
     # the standby on the second Iran server takes over right away
     assert w.dom.iran_id == w.i2.id
     assert FakeDNS.records["a.example.ir"] == w.i2.ip
-    assert w.said("رکورد a.example.ir از I1")
+    assert w.said("the record of a.example.ir changed from I1")
     # meanwhile the broken tunnel was rebuilt on another transport
     assert primary.status == L_UP and primary.transport != first
-    assert w.said("دوباره برقرار شد")
+    assert w.said("is back up")
     # not trusted yet: no failback before 10 minutes of stability
     await w.settle(2)
     assert w.dom.iran_id == w.i2.id
@@ -58,7 +58,7 @@ async def test_down_tunnel_switches_dns_first_then_repairs_then_fails_back(world
     await w.settle(1)
     assert w.dom.iran_id == w.i1.id
     assert FakeDNS.records["a.example.ir"] == w.i1.ip
-    assert w.said("برگشت به سرور اصلی")
+    assert w.said("back to the primary server")
 
 
 async def test_iran_down_moves_domain_and_reports_each_step(world):
@@ -68,18 +68,18 @@ async def test_iran_down_moves_domain_and_reports_each_step(world):
     await w.settle(3)
     assert w.i1.status == OFFLINE
     assert w.dom.iran_id == w.i2.id
-    assert w.said("سرور داخل I1 (10.0.2.1) به مشکل خورد")
-    assert w.said("I1 در دسترس نیست")
+    assert w.said("Iran server I1 (10.0.2.1) ran into trouble")
+    assert w.said("I1 is unreachable")
     # propagation: the resolvers catch up -> "server 2 is behind the domain"
     assert w.dom.pending_ip == w.i2.ip
     w.answers["a.example.ir"] = [w.i2.ip]
     await w.settle(1)
     assert w.dom.pending_ip == ""
-    assert w.said("پشت دامنه a.example.ir قرار گرفت")
+    assert w.said("is behind domain a.example.ir")
     # I1 comes back: reported, but traffic stays put until it proves stable
     w.net.dead.discard(w.i1.id)
     await w.settle(2)
-    assert w.i1.status == ONLINE and w.said("دوباره در دسترس است")
+    assert w.i1.status == ONLINE and w.said("is reachable again")
     assert w.dom.iran_id == w.i2.id
     w.age(601)
     await w.settle(1)
@@ -98,7 +98,7 @@ async def test_flapping_primary_is_abandoned_even_if_never_fully_down(world):
         await w.settle(1)
     assert w.link(w.i1, w.k1).status == L_UP  # up right now...
     assert w.dom.iran_id == w.i2.id  # ...but not trusted
-    assert w.said("مدام قطع و وصل می‌شود")
+    assert w.said("keeps flapping")
     w.age(700)
     await w.settle(1)
     assert w.dom.iran_id == w.i1.id
@@ -130,7 +130,7 @@ async def test_kharej_down_hands_ports_over_on_same_iran(world):
     assert w.net.iran_ports[a.id] == []
     assert w.dom.iran_id == w.i1.id and w.dom.status == "ok"
     assert FakeDNS.calls == []  # the record did not move
-    assert w.said("به تانل K2 ⇄ I1 منتقل شد")
+    assert w.said("to the tunnel K2 ⇄ I1")
     # K1 back: ports return only after it has been stable
     w.net.dead.discard(w.k1.id)
     await w.settle(3)
@@ -157,7 +157,7 @@ async def test_one_domain_ports_to_different_kharejs(world):
     w.net.block(w.i1, w.k2, "tcpmux", "wsmux", "tcp", "quic")
     await w.settle(3)
     assert w.dom.iran_id == w.i2.id
-    assert w.said("443→K1، 2053→K2")
+    assert w.said("443→K1, 2053→K2")
 
 
 async def test_no_move_to_a_server_missing_one_of_the_ports(world):
@@ -172,7 +172,7 @@ async def test_no_move_to_a_server_missing_one_of_the_ports(world):
     assert w.dom.iran_id == w.i1.id  # moving would break port 2053 for everyone
     assert FakeDNS.calls == []
     assert w.dom.status == "broken"
-    assert w.said("همه پورت‌هایش (443, 2053)")
+    assert w.said("all of its ports (443, 2053)")
 
 
 async def test_dead_kharej_on_one_port_only_moves_that_port(world):
@@ -218,7 +218,7 @@ async def test_dns_failure_is_reported_and_retried(world):
     w.net.dead.add(w.i1.id)
     await w.settle(3)
     assert w.dom.iran_id == w.i1.id
-    assert w.said("ناموفق بود")
+    assert w.said("changing the record of a.example.ir to")
     FakeDNS.fail = False
     await w.settle(1)
     assert w.dom.iran_id == w.i2.id
@@ -230,7 +230,7 @@ async def test_no_path_anywhere_marks_domain_broken(world):
     w.net.dead.update({w.i1.id, w.i2.id})
     await w.settle(3)
     assert w.dom.status == "broken"
-    assert w.said("رکورد تغییر نکرد")
+    assert w.said("the record was left untouched")
 
 
 async def test_unknown_record_ip_is_left_alone(world):
@@ -239,7 +239,7 @@ async def test_unknown_record_ip_is_left_alone(world):
     await connected(w)
     await w.settle(1)
     assert w.dom.iran_id == "" and FakeDNS.calls == []
-    assert w.said("هیچ‌کدام از سرورهای داخل ثبت‌شده نیست")
+    assert w.said("not one of the registered Iran servers")
 
 
 async def test_existing_tunnels_are_adopted(world):
@@ -253,7 +253,7 @@ async def test_existing_tunnels_are_adopted(world):
     assert x.ports == ["443", "2096=2096"]
     assert x.iran_base["mux_con"] == 8  # its other settings are kept
     assert w.store.links_between(w.i1.id, w.k1.id) == [x]  # the placeholder is gone
-    assert w.said("تانل موجود «my-tunnel»")
+    assert w.said("the existing tunnel «my-tunnel»")
     await w.settle(1)
     assert x.status == L_UP
     assert w.dom.iran_id == w.i1.id and w.dom.ports == ["443", "2096=2096"]

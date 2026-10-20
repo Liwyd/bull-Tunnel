@@ -37,7 +37,7 @@ if [ -n "$OWNER" ] && ! echo "$OWNER" | grep -q bulltunn && ! systemctl is-activ
   echo "Port $PORT is already in use on this server:"
   echo "  $OWNER"
   echo "Nothing was changed. Pick a free port, e.g.:  BT_PORT=9090 bash deploy/install.sh"
-  echo "پورت $PORT روی این سرور اشغال است؛ هیچ تغییری داده نشد. با یک پورت آزاد اجرا کنید."
+  echo "Port $PORT is already in use on this server; nothing was changed. Run it with a free port."
   exit 1
 fi
 

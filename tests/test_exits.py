@@ -130,12 +130,12 @@ async def test_exits_are_shown_and_reported_but_change_nothing(world):
     for _ in range(3):
         w.orch.last_exits = 0
         await w.orch.check_exits()
-    assert w.said("جواب نمی‌دهد") and sum("جواب نمی‌دهد" in n for n in w.notes) == 1
+    assert w.said("does not answer") and sum("does not answer" in n for n in w.notes) == 1
     assert st.servers[k1.id].exit_reach[f"{k2.ip}:443"]["ok"] is False
     w.net.dead.discard(k2.id)
     w.orch.last_exits = 0
     await w.orch.check_exits()
-    assert w.said("دوباره در دسترس است")
+    assert w.said("reachable again")
     # nothing was touched for it
     assert FakeDNS.calls == [] and {x.id: (x.transport, x.status) for x in st.links.values()} == before
     assert w.dom.iran_id == w.i1.id
