@@ -1,4 +1,6 @@
-# Bull-Tunn
+<p align="center">
+  <img src="docs/logo.svg" width="289" alt="Bull-Tunn">
+</p>
 
 **The control panel for reverse tunnels between Iranian and foreign servers.**
 Bull-Tunn builds the tunnels, measures their health end to end, moves the
@@ -9,11 +11,12 @@ Bull-Tunn is an independent tool: the tunnel engine, the panel and the
 contract between them are all defined in this repository, and it depends on
 no outside project.
 
-![Dashboard](docs/dashboard-dark.png)
+![The network view of the panel](docs/dashboard-dark.png)
 
 ## Contents
 
 - [What it is](#what-it-is)
+- [The panel](#the-panel)
 - [Architecture](#architecture)
 - [Features](#features)
 - [Installation](#installation)
@@ -44,6 +47,33 @@ Bull-Tunn keeps two things apart:
 The panel is never in the traffic path. If it is switched off, the tunnels
 keep working exactly as before.
 
+## The panel
+
+The panel is one page with a sidebar, in two themes (**charcoal** and
+**mineral paper**). Every page follows the same grammar: a title, a strip of
+counters, numbered sections and a 1px line instead of a shadow. Every
+number, every protocol and every address is written in a monospace face, so
+that a column of figures can be read at a glance.
+
+| Page | What it is for |
+|---|---|
+| **Network view** | The whole network as a graph: the foreign servers on the left, the Iran servers in the middle, the domains on the right. Free zoom and dragging, the layout is saved. Below it: the tunnel list and the event log. |
+| **Tunnels & protocols** | Every path between an Iran server and a foreign server, with the carrier it speaks, its latency and the ports it carries. |
+| **Domains** | The record, the ports it uses, the routes of every port and the order in which the Iran servers take over. |
+| **Infrastructure** | The servers: their SSH, the tunnel engine on them, their tunnels and the ports they forward. |
+| **Settings** | The working mode, the monitoring and the failover, the discovery of the tunnels, the DNS accounts, Telegram and the backups. |
+
+The **line** of a path in the graph is its state, and the shape of the line
+says it even without a colour: a solid line is a connected tunnel, a long
+dash an unstable one, a short dash a broken one, a dash and a dot a tunnel
+that is being tested, a directed dash a port that is forwarded to another
+server, and a directed dotted line the route of a domain. A selection is
+never a different colour but a red edge.
+
+<p align="center">
+  <img src="docs/dashboard-light.png" width="900" alt="The light theme">
+</p>
+
 ## Architecture
 
 ```
@@ -64,8 +94,11 @@ explanation: [docs/architecture.md](docs/architecture.md).
 - **A graphical workbench:** the foreign servers on the left, the Iran
   servers in the middle and the domains on the right. Free zoom and
   dragging, the layout is saved, and there is a dark and a light mode. The
-  colour of a line is the state of the tunnel, and the protocol and the
-  latency are written on it.
+  shape and the colour of a line are the state of the tunnel, and the
+  protocol and the latency are written on it.
+- **Five pages instead of one long screen:** the network, the tunnels, the
+  domains, the servers and the settings, each with its own counters, so
+  that nothing is hidden behind a drawer.
 - **Finding the tunnels that already exist:** add the servers with their IP
   address and SSH access. The panel reads `/etc/bulltunn` and adds the
   running tunnels with the same name, protocol and ports.
@@ -79,7 +112,7 @@ explanation: [docs/architecture.md](docs/architecture.md).
 - **Switching the protocol with one click:** for example `tcpmux` to
   `wsmux`. Every protocol is tested, and the result and its latency are
   shown side by side.
-- **Connection test ⚡:** in the drawer of each server, the ⚡ button
+- **Connection test ⚡:** in the panel of each server, the ⚡ button
   measures the path between that server and one on the other side **on
   every protocol**: the time to connect, the handshake time and the **real
   round trip** over the very path the tunnel goes through. The best
@@ -113,7 +146,7 @@ and **over the very path the tunnel goes through**. That is why:
 - The panel sorts the results: the fastest protocol that works is the
   "best" one.
 
-The ⚡ button in the drawer of each server does this: pick the server on
+The ⚡ button in the panel of each server does this: pick the server on
 the other side, press ⚡, and look at the table. With "Apply" on the
 tunnel, that protocol is pinned to the tunnel.
 
@@ -428,7 +461,7 @@ panel ◄──HTTPS── DNS account ◄── TXT record ◄──DNS── a
 be able to touch the records of the main domains.
 
 Setting it up: in the settings, switch the "command channel" on and pick
-its DNS account. Then, in the drawer of each foreign server, press
+its DNS account. Then, in the panel of each foreign server, press
 "Install the command channel".
 
 ## Backups and restore
@@ -515,6 +548,10 @@ settings are not touched.
   the server.
 - The environment variables: `BT_HOST`, `BT_PORT`, `BT_DATA_DIR`,
   `BT_SSL_CERT`, `BT_SSL_KEY`, `BT_NO_MONITOR`, `BT_DNS_PROXY`.
+- The interface is plain HTML, CSS and JavaScript: no build step, no
+  framework, no bundler. The stylesheet and the script are served with
+  `Cache-Control: no-cache`, so a new version of the panel is never mixed
+  with the files of the old one in a browser.
 
 ### Demo and development
 

@@ -7,6 +7,40 @@ only adds something.
 
 ## Unreleased
 
+### A new interface for the panel
+
+The panel was redesigned from the ground up. The screens, the colours, the
+type and the way the network is drawn follow one system, and the panel is
+now a small application with a sidebar and five pages instead of one long
+screen.
+
+- **The design system.** The palette is exact: a charcoal dark theme
+  (`#171A1B`, `#1E2223`, `#272C2D`, `#3B4243`, `#F1F0E9`, `#A1ABAB`,
+  `#E23B32`) and a mineral-paper light theme (`#EDEEE8`, `#F8F8F2`,
+  `#E3E5DE`, `#C3C8C0`, `#202726`, `#5E6B66`, `#BE2F28`), plus one colour
+  per state: healthy, unstable, down, testing and forwarded. The corners
+  are square, the lines are 1px, and every number, protocol and address is
+  written in `IBM Plex Mono`.
+- **The shell.** A sidebar with the brand, the pages and the state of the
+  network, a breadcrumb bar, a counter strip under every title and a
+  footer. The pages are: **Network view**, **Tunnels & protocols**,
+  **Domains**, **Infrastructure** and **Settings**.
+- **The network graph** keeps the softer structure of the earlier design —
+  three columns of cards, the pills on the wires, the zoom tools and the
+  legend — inside the new palette, and the shape of a line now says the
+  state of a tunnel even without a colour: solid, a long dash, a short
+  dash, a dash and a dot, a directed dash for a forwarded port and a
+  directed dotted line for the route of a domain. A selection is a red
+  edge, never a different colour.
+- **Everything is still reachable.** The panels of a server, a tunnel and a
+  domain are still there, with the same actions; the forms, the probes,
+  the command channel, the backups and the restore did not change.
+- **The logo** is the mark of the new design, and the mark in the sidebar
+  takes the colour of the theme.
+- The static files are served with `Cache-Control: no-cache`, so a browser
+  never mixes the stylesheet of the old version with the page of the new
+  one.
+
 ### The whole project is in English now
 
 The panel, the dashboard, the Telegram bot, the command line, the install
