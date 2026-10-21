@@ -1,12 +1,26 @@
 # The tunnel engine
 
-This is **the BackPack engine**, vendored.
+This is **bull-Tunnel's tunnel engine**: the program that runs on both ends
+of every tunnel and brings it up. The panel builds it, ships it, versions it
+and installs it on the servers that carry the tunnels.
 
-The engine that carries the tunnels is not a bull-Tunnel re-implementation: it is
-the engine of [BackPack](https://github.com/AminMGMT/BackPack), the project
-this one grew out of. Everything under this directory is that code, and the
-module path is kept as `github.com/backpack/backpack` so the copy is
-byte-identical to upstream and can be re-synced with a plain copy:
+It is the engine of [BackPack](https://github.com/AminMGMT/BackPack),
+vendored here unchanged, and it is licensed under the **AGPL-3.0** — see
+`LICENSE` and `NOTICE` in this directory, and the NOTICE at the root of the
+repository. The credit for the design and the code it started from belongs
+to its author, and the licence asks for it to stay visible:
+
+```
+Based on BackPack by Amin Mohammadi (AminMGMT)
+https://github.com/AminMGMT/BackPack
+```
+
+The panel and the engine are **separate programs**: the panel drives the
+engine over SSH and never links a package of it, so each keeps its own
+licence (the panel is MIT).
+
+The module path is kept as `github.com/backpack/backpack` for now, so the
+copy is byte-identical to upstream and can be re-synced with a plain copy:
 
 ```bash
 rsync -a --delete /path/to/BackPack/cmd/            engine/cmd/

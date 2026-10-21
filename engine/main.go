@@ -71,6 +71,11 @@ func Version() string {
 	return app.Version
 }
 
+// Attribution is the notice the licence of the engine asks to be visible
+// wherever the engine is used: it is the engine of BackPack, and the credit
+// for that belongs to its author.
+const Attribution = "Based on BackPack by Amin Mohammadi (AminMGMT) https://github.com/AminMGMT/BackPack"
+
 func main() {
 	// The two subcommands with flags of their own are handled before the
 	// flag package, which would stop at the subcommand and report the rest as
@@ -95,8 +100,13 @@ func main() {
 	case *showVer:
 		// Two lines, and the panel reads both: the version, then the
 		// carriers this build speaks.
+		//
+		// The attribution follows them: the engine is licensed under the
+		// AGPL-3.0, whose Section 7 asks for the notice to stay visible to
+		// the users of the network service.
 		fmt.Printf("bull-tunnel-engine %s\n", Version())
 		fmt.Printf("transports: %s\n", strings.Join(carriers, ","))
+		fmt.Println(Attribution)
 		return
 
 	case *configPath == "":

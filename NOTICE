@@ -1,0 +1,28 @@
+bull-Tunnel
+Copyright (C) 2026 bull-Tunnel contributors. All rights reserved.
+
+The control panel (everything outside the `engine/` directory) is licensed
+under the MIT licence; see the LICENSE file.
+
+--------------------------------------------------------------------------------
+The tunnel engine
+--------------------------------------------------------------------------------
+
+The tunnel engine in the `engine/` directory is licensed under the GNU Affero
+General Public License v3.0 (AGPL-3.0); see `engine/LICENSE` for the full
+text and `engine/NOTICE` for the notices that go with it.
+
+It is this project's engine: the panel builds it, ships it, versions it and
+installs it on the servers that carry the tunnels. It started as the engine of
+BackPack, and the credit for that belongs where the licence asks for it:
+
+  Based on BackPack by Amin Mohammadi (AminMGMT)
+  https://github.com/AminMGMT/BackPack
+
+The two parts are separate programs: the panel drives the engine over SSH and
+never links a package of it, so each keeps its own licence.
+
+The "BackPack" name and the BackPack logo are marks of Amin Mohammadi
+(AminMGMT) and are not licensed with this code. This project has its own
+name and its own logo. Saying truthfully that the engine is based on, forked
+from, or compatible with BackPack is always allowed and needs no permission.

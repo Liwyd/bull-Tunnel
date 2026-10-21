@@ -14,11 +14,14 @@ no step is taken "from memory".
    API the front-end uses.
 2. **Every change needs a test.** A bug fix without a regression test is not
    finished. The test must fail before the fix and pass after it.
-3. **The engine is BackPack.** The tunnel engine is not a rewrite: it is the
+3. **The engine is this project's engine.** The tunnel engine is the
    BackPack engine (`github.com/AminMGMT/BackPack`, vendored under
-   `engine/`). Anything in `engine/` that is *not* BackPack must be either
-   removed or reduced to the smallest possible addition with a clear reason
-   written next to it. The panel side is what may be redesigned.
+   `engine/`), and it stays the same code: anything in `engine/` that is
+   *not* BackPack must be either removed or reduced to the smallest possible
+   addition with a clear reason written next to it. The panel side is what
+   may be redesigned. The credit for the design and the code it started
+   from is in the NOTICE, where the licence asks for it, and nowhere else
+   in the product.
 4. **The previous working version is the reference.** `../Tunnelmanager`
    (the `tunnelmanager` package) is a version of this panel that works in
    production. When in doubt about behaviour, read it and follow it.
@@ -36,6 +39,11 @@ no step is taken "from memory".
    backup password stay masked in every API answer and in every log line.
 10. **Update this file in the same commit as the change.** A commit that does
     not update this file is incomplete.
+11. **The licences are not negotiable.** The `engine/` tree is AGPL-3.0 (it
+    is BackPack's code) and the panel is MIT. The attribution the AGPL's
+    Section 7 asks for stays in the NOTICE and in the README, unaltered,
+    and **the Go panel never imports a package of the engine**, so that the
+    two stay separate works. See "The plan: the whole panel in Go" below.
 
 ---
 
@@ -355,6 +363,240 @@ left out.
 
 ---
 
+# The plan: the whole panel in Go
+
+**What the end state is.** One repository, one Go module, two binaries:
+
+| binary | what it is | licence |
+|---|---|---|
+| `bull-tunnel` | the control panel: the API, the web interface, the management command | MIT |
+| `bull-tunnel-engine` | the tunnel engine | AGPL-3.0 |
+
+The panel and the engine are **synchronized by contract, not by linking**:
+the same configuration format, the same state file, the same API, the same
+version, the same repository, the same build. The panel drives the engine
+over SSH, exactly as the Python panel does today, and never imports a
+package of the engine.
+
+### Why "contract, not linking" — the licence
+
+The engine is AGPL-3.0 (it is BackPack's code, vendored) and the panel is
+MIT. Those can live in the same repository, and stay that way, **as long as
+the panel does not link the engine**:
+
+* a program that links AGPL code is AGPL, whatever else is in it;
+* two programs that talk over a socket are two works, and each keeps its
+  own licence.
+
+So the rule for every phase below is:
+
+> **The Go panel must not import a package of `internal/engine`.**
+> It reads the engine's files (the TOML, the metrics) and runs it over SSH,
+> the way the Python panel does.
+
+Two things follow, and they are not optional:
+
+* the engine's tree carries **its own `LICENSE` (AGPL-3.0) and `NOTICE`**,
+  and the root carries the panel's MIT licence; the README says which is
+  which;
+* the AGPL's Section 7 (as BackPack's NOTICE puts it) requires this line,
+  unaltered, in the NOTICE **and** in the README:
+
+  ```
+  Based on BackPack by Amin Mohammadi (AminMGMT)
+  https://github.com/AminMGMT/BackPack
+  ```
+
+  and the "BackPack" name and logo are trademarks: the project already has
+  its own name and its own logo, which is what the clause asks for.
+
+### The rules of the rewrite
+
+1. **The API is frozen.** The web interface and the management command
+   depend on it. A change to an endpoint needs the front-end, the
+   management command and the contract test changed in the same commit.
+2. **The state file is frozen.** A `state.json` written by 1.1.2 must load
+   in the Go panel, and the Go panel must write a file the Python panel
+   can still read, until phase 9 retires it.
+3. **One contract, two implementations, one suite.** Every behaviour is
+   pinned by a fixture in `tests/contract/` and a test that runs against
+   either implementation. The Python suite is the reference; the Go suite
+   must pass the same fixtures before the Python one is retired.
+4. **The Python panel keeps working until phase 9.** Both run side by side
+   against the same data directory (one at a time ✓) and the same servers ✓.
+5. **One commit per phase, and the phase is only done when its
+   acceptance list is met.** The tests, the CI and the build are green, and
+   the TODO is updated with what was done.
+
+### Phase 0 — the licence, the attribution and the framing  ✅ done
+
+* ✅ `NOTICE` at the root: the line the AGPL's Section 7 asks for, unaltered,
+  with the AGPL's own wording around it.
+* ✅ `engine/LICENSE`: the AGPL-3.0 text.
+* ✅ `engine/NOTICE`: the attribution of the engine's tree.
+* ✅ The root `LICENSE` stays MIT (the panel) and says in one line that the
+  `engine/` tree is AGPL-3.0.
+* ✅ The README: the attribution line, the trademark note (the project has its
+  own name and logo ✓), the split of the licences ✓, and the framing: the
+  engine is **bull-Tunnel's own** ✓, the credit is in the NOTICE ✓.
+* ✅ `engine/README.md`: what the tree is, where it came from, that it is
+  AGPL-3.0 ✓, and that it is this project's engine ✓.
+* ✅ The engine's `-v` prints the attribution line ✓ (the AGPL asks for the
+  notice to be visible to the users of the network service ✓).
+
+**Done when:** `grep -r "Based on BackPack by Amin Mohammadi (AminMGMT)" `
+finds the line in `NOTICE` and in `README.md` ✓, `engine/LICENSE` is the
+AGPL ✓, the panel's licence is still MIT ✓, and the README no longer
+introduces the engine as somebody else's ✓.
+
+### Phase 1 — one Go module
+
+* `go.mod`: `module github.com/Liwyd/bull-Tunnel`, `go 1.26.9` (what the
+  engine asks for ✓).
+* The engine's tree moves from `engine/` to `internal/engine/` and every
+  import path is rewritten (a mechanical `sed` over the tree ✓, the vendor
+  directory excepted ✓).
+* `cmd/bull-tunnel-engine/main.go`: the engine's binary ✓ (today's
+  `engine/main.go` ✓).
+* `engine/build.sh` becomes `build.sh` at the root: it builds **both**
+  binaries for the four architectures and writes the checksums ✓.
+* The release assets become:
+  * `bull-tunnel-engine_linux_<arch>.tar.gz` (the same name as today ✓ so
+    the panel's install path does not change ✓),
+  * `bull-tunnel_linux_<arch>.tar.gz` (the panel ✓).
+* The CI: the Go build ✓, the Go tests ✓, the Python tests (until phase
+  9 ✓).
+
+**Done when:** `go build ./...` and `go test ./...` pass at the root, the
+engine's binary still prints its version and its nine carriers ✓, and a
+tunnel that the old engine brought up still comes up ✓ (the config format
+did not change ✓).
+
+### Phase 2 — the state and the model
+
+* `internal/panel/model`: the same structures as `bulltunnel/models.py`
+  ✓ (the same JSON names ✓, the same defaults ✓).
+* `internal/panel/store`: the load, the save (atomic ✓), the migrations
+  (the `v0.1`, the `v0.2` and the `v1.0` ones ✓) and the events ✓.
+* The tests: the migrations of `tests/test_engine.py` and
+  `tests/test_safety.py` translated ✓.
+
+**Done when:** a `state.json` of every version in `tests/fixtures/` loads
+in Go and comes out identical ✓.
+
+### Phase 3 — the SSH layer
+
+* `internal/panel/ssh`: the pool (one connection per server ✓, reused ✓),
+  the host keys (pinned ✓, the fingerprint shown ✓, a changed key refused
+  ✓), the password and the private key ✓, the timeouts ✓, the file
+  transfer (SFTP with the `cat >` fallback ✓).
+* `golang.org/x/crypto/ssh` (already in the module's dependencies ✓
+  through the engine ✓).
+* The tests: the ones of `tests/test_security.py` ✓ (the pinning ✓, the
+  reconnect ✓, the timeout ✓).
+
+**Done when:** the panel can open a connection, run a command, put a file
+and read the host key of a server it has never seen ✓.
+
+### Phase 4 — the driver of the engine
+
+* `internal/panel/engine`: the rendering of the configuration (the same
+  TOML ✓ — the same `server`/`client` sections ✓, the same port mappings
+  ✓, the same probe mapping ✓), the deploy ✓, the unit ✓, the ufw ✓, the
+  scan (the adoption ✓), the health scripts (the same shell ✓, the same
+  parsing ✓), the metrics ✓, the install (the release, the checksum, the
+  cache ✓).
+* The tests: `tests/test_engine.py` ✓ and `tests/test_exits.py` ✓
+  translated ✓.
+
+**Done when:** a tunnel the Python panel built is adopted by the Go panel
+and comes up ✓, and the Go panel writes a configuration the engine accepts
+✓ (the same bytes ✓).
+
+### Phase 5 — the DNS, the Telegram and the backups
+
+* `internal/panel/dns`: the Cloudflare and the Arvan clients ✓ (the same
+  requests ✓, the same TXT quoting ✓), the resolvers ✓.
+* `internal/panel/telegram`: the bot (the long polling ✓, the commands ✓).
+* `internal/panel/backup`: the same format (gzip + AES-256-GCM with
+  scrypt ✓) so a backup of 1.1.2 restores in the Go panel ✓ and the other
+  way round ✓.
+
+**Done when:** a backup written by the Python panel restores with the Go
+panel and the other way round ✓.
+
+### Phase 6 — the orchestrator
+
+* `internal/panel/orch`: the state machine of `bulltunn/orchestrator.py`:
+  the discovery ✓, the adoption ✓, the checks ✓, the repair ✓, the
+  handover ✓, the failover ✓, the failback ✓, the propagation ✓, the
+  exits ✓, the command channel ✓.
+* The tests: `tests/test_failover.py` ✓ and `tests/test_safety.py` ✓
+  translated ✓ (the world of the tests becomes a Go fixture ✓).
+
+**Done when:** the Go orchestrator makes the same decisions as the Python
+one on the same fixtures ✓ (the contract test ✓).
+
+### Phase 7 — the API
+
+* `internal/panel/api`: the endpoints of `bulltunn/app.py` ✓, one for
+  one ✓, with the same shapes ✓ (the front-end changes nothing ✓).
+* The websocket ✓, the security headers ✓, the CSP ✓, the login limiter
+  ✓, the local management key ✓.
+* The tests: `tests/test_api.py` ✓ translated ✓.
+
+**Done when:** the web interface (the current `static/`) works against the
+Go panel without a change ✓, and the API answers the same JSON ✓.
+
+### Phase 8 — the management command
+
+* `cmd/bull-tunnel/main.go` with the subcommands of `bulltunnel/cli.py` ✓:
+  the menu ✓, the status ✓, the servers ✓, the tunnels ✓, the domains ✓,
+  the DNS ✓, the engine ✓, the backups ✓, the service ✓, the log ✓, the
+  password ✓, the doctor ✓.
+
+**Done when:** `bull-tunnel` opens the menu and every command does what the
+Python one did ✓.
+
+### Phase 9 — the switchover
+
+* The Python panel is retired: `bulltunnel/`, `tests/` (the Python part)
+  and the wheel go; the Go panel, the Go tests and the Go binaries stay.
+* The installer: the Go binary in `/opt/bull-tunnel` ✓, the service ✓, the
+  management command on the path ✓.
+* The Dockerfile: the Go build ✓ (a multi-stage build ✓, a small image ✓).
+* The README, the CHANGELOG, the docs: the panel is Go now ✓.
+* The one-line installation stays the same ✓.
+
+**Done when:** a fresh machine installs the panel with the one line ✓, the
+panel comes up ✓, the demo runs ✓, and the release carries the two
+binaries ✓.
+
+### Phase 10 — the dashboard in Go (later)
+
+The API carries the whole truth, so the dashboard can be rewritten without
+touching the server: the network graph is a canvas ✓, the pages are
+server-rendered or a small Go template ✓, and the live feed is the
+websocket that exists today ✓.
+
+**This phase is not part of the port.** It is the next thing after it, and
+it is free of the panel's internals ✓.
+
+### The order, and what may not be skipped
+
+```
+0 licence  →  1 one module  →  2 state  →  3 ssh  →  4 engine driver
+   →  5 dns/telegram/backups  →  6 orchestrator  →  7 api  →  8 command
+   →  9 switchover  →  10 the dashboard (later)
+```
+
+Phase 7 needs 2, 3, 4, 5 and 6 ✓. Phase 9 needs 8 ✓. Nothing may be
+skipped, and nothing may be done twice: the point of the order is that the
+API is written **once**, against a state, a driver and an orchestrator that
+already work ✓.
+
+---
+
 ## 3. Status
 
 | Commit | What | State |
@@ -368,11 +610,21 @@ left out.
 | 7 | The rename and the management tool | done |
 | 8 | The release | done |
 | 9 | The network graph follows the type-1 design | done |
+| 10 | The Go rewrite — phase 0 (the licence) | done |
+| 11 | The Go rewrite — phase 1 (one module) | **next** |
+| 12 | The Go rewrite — phase 2 (the state) | pending |
+| 13 | The Go rewrite — phase 3 (ssh) | pending |
+| 14 | The Go rewrite — phase 4 (the engine driver) | pending |
+| 15 | The Go rewrite — phase 5 (dns, telegram, backups) | pending |
+| 16 | The Go rewrite — phase 6 (the orchestrator) | pending |
+| 17 | The Go rewrite — phase 7 (the api) | pending |
+| 18 | The Go rewrite — phase 8 (the command) | pending |
+| 19 | The Go rewrite — phase 9 (the switchover) | pending |
+| 20 | The Go rewrite — phase 10 (the dashboard) | later |
 
 **All the findings of the audit are closed, and the graph is the type-1
-design.** What is left is the work itself: watching the panel on a live
-server, and the rewrite of the dashboard in Go, for which the state of the
-API is now complete and self-describing.
+design.** What is left is the Go rewrite above, and the work that never
+ends: watching the panel on a live server.
 
 ### What is left to do, and is not a fault
 
@@ -383,11 +635,6 @@ API is now complete and self-describing.
   engine measures all nine carriers without disturbing the tunnel that is
   carrying the traffic. What has not happened yet is a real Iran server
   and a real foreign server, with the panel talking to them over SSH.
-* **The dashboard is to be rewritten in Go.** The API carries the whole
-  truth — the servers, the links, the domains, the coverage, the failback,
-  the errors — so the new front-end needs no change on the server. The
-  management command is written against the same API, which is the proof
-  that it is complete.
 * **The engine's experimental carriers** (`xdi`, `pck`, `spoof`) are not
   offered to the panel: they need raw sockets and root, and an unattended
   repair must not ask for either.

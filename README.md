@@ -431,16 +431,14 @@ The panel does not build the tunnels itself: a separate program, the
 writes its config, creates the systemd service and reads its health from
 its metrics file.
 
-The tunnel engine **is the BackPack engine**
-([github.com/AminMGMT/BackPack](https://github.com/AminMGMT/BackPack)),
-vendored under `engine/` with its module path kept as
-`github.com/backpack/backpack`, so the copy is byte-identical to upstream
-and can be re-synced with a plain `rsync`. It is one static binary (no
-Python, no pip, no dependency at all on the tunnel servers) built for
-amd64, arm64, 386 and armv7. See [engine/README.md](engine/README.md) for
-what was taken, what was left behind and what was added.
+The tunnel engine is **bull-Tunnel's own engine**. It is one static binary
+(no Python, no pip, no dependency at all on the tunnel servers), built for
+amd64, arm64, 386 and armv7, and the panel builds it, ships it, versions it
+and installs it on the servers that carry the tunnels. It started as the
+engine of BackPack and it is that engine, unchanged; what this project added
+to it is written down in [engine/README.md](engine/README.md).
 
-What that brings:
+What it brings:
 
 - **An encrypted session on every carrier:** the two ends authenticate
   each other with a shared token, the traffic keys come from an X25519
@@ -463,8 +461,8 @@ What that brings:
   the control channel, so it never takes the tunnel away from the client
   that is carrying the traffic.
 
-Two things are bull-Tunnel's own and are not in BackPack: the `probe` and
-`agent` entry points, and the command channel below.
+Two of its entry points are bull-Tunnel's own: the `probe` and the `agent`
+(the command channel below).
 
 The full contract of the engine (config, unit, metrics file, health probe,
 session and the list of carriers): [docs/engine-schema.md](docs/engine-schema.md).
@@ -648,4 +646,22 @@ every version: [CHANGELOG.md](CHANGELOG.md).
   contract (config, unit, metrics, health probe, transports).
 - [CHANGELOG.md](CHANGELOG.md) — what changed in every version.
 
-MIT licensed.
+## Licences
+
+The **control panel** — everything outside the `engine/` directory — is MIT
+licensed.
+
+The **tunnel engine** in the `engine/` directory is licensed under the GNU
+Affero General Public License v3.0 (`engine/LICENSE`, `engine/NOTICE`). It
+started as the engine of BackPack, and the credit for that belongs where the
+licence asks for it:
+
+```
+Based on BackPack by Amin Mohammadi (AminMGMT)
+https://github.com/AminMGMT/BackPack
+```
+
+The two are separate programs — the panel drives the engine over SSH and
+never links a package of it — so each keeps its own licence. The "BackPack"
+name and logo are marks of their owner; this project has its own name and
+its own logo.

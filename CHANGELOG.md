@@ -67,14 +67,27 @@ starts the service, opens the management tool and prints the address and
 the password. It is safe to run again on a live panel: the code is swapped
 while the service is stopped, and the data directory is never touched.
 
-### The engine is BackPack
+### The engine is bull-Tunnel's own
 
 The tunnel engine was a re-implementation written for this project. It is
-now **the BackPack engine** ([github.com/AminMGMT/BackPack](https://github.com/AminMGMT/BackPack)),
+now the engine of [BackPack](https://github.com/AminMGMT/BackPack),
 vendored under `engine/` with its module path kept as
 `github.com/backpack/backpack`, so the copy is byte-identical to upstream
 and can be re-synced with a plain `rsync`. See `engine/README.md` for what
 was taken, what was left behind and what was added.
+
+**The engine is this project's engine**: the panel builds it, ships it,
+versions it and installs it, and the tunnel it brings up is a bull-Tunnel
+tunnel. The credit for the design and the code it started from is in the
+NOTICE, where the licence asks for it, and nowhere else in the product.
+
+### The licences are split
+
+The control panel stays MIT. The engine is AGPL-3.0 — it is BackPack's
+code — and it carries its own `LICENSE` and `NOTICE` under `engine/`, with
+the attribution the AGPL's Section 7 asks for, unaltered. The two are
+separate programs: the panel drives the engine over SSH and never links a
+package of it, so each keeps its own licence.
 
 That brings the carriers the panel always offered but the engine never
 had: `kcp` and `quic`, next to `tcp`, `tcpmux`, `stealth`, `ws`, `wss`,

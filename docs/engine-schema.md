@@ -6,9 +6,10 @@ tunnel. The panel never sits in the traffic path.
 
 The panel does not care which build of the engine runs on a server, as long
 as that build obeys this contract. The engine that ships with bull-Tunnel is
-the **BackPack engine** ([github.com/AminMGMT/BackPack](https://github.com/AminMGMT/BackPack)),
-vendored under `engine/` and built into one static binary that runs on the
-servers of the tunnel, wherever they are.
+its own: one static binary that runs on the servers of the tunnel, wherever
+they are. It started as the engine of BackPack and it is that engine,
+unchanged; the credit is in the NOTICE, and the licence of the engine is
+the AGPL-3.0 (`engine/LICENSE`).
 
 ```
 /etc/bull-tunnel/<name>.toml                 config

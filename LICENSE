@@ -2,6 +2,14 @@ MIT License
 
 Copyright (c) 2026 bull-Tunnel contributors
 
+This licence covers the control panel of bull-Tunnel: everything outside the
+`engine/` directory.
+
+The tunnel engine in the `engine/` directory is licensed under the GNU
+Affero General Public License v3.0 (AGPL-3.0) — see `engine/LICENSE` — and
+the notices that go with it are in `engine/NOTICE` and in the NOTICE file at
+the root of the repository.
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
