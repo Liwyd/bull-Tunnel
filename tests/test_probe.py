@@ -28,6 +28,16 @@ def test_the_results_are_ranked_by_the_round_trip():
     assert pr.best(results) == "wss"
 
 
+def test_the_address_is_only_bracketed_when_it_is_an_ipv6_one():
+    """The engine splits the address at the last colon, so an IPv4 address
+    with its port must be left alone: "[10.0.2.1:3080]" is not an address
+    the engine can read, and the connection test of an IPv4 server never
+    worked."""
+    assert 'remote_addr = "10.0.2.1:3080"' in pr.build_config("10.0.2.1:3080", "token")
+    assert 'remote_addr = "[2001:db8::1]:3080"' in pr.build_config("[2001:db8::1]:3080", "token")
+    assert 'remote_addr = "[2001:db8::1]:3080"' in pr.build_config("2001:db8::1:3080", "token")
+
+
 def test_the_output_of_the_engine_is_read():
     out = (
         '{"transport":"tcp","ok":true,"connect_ms":1.0,"handshake_ms":2.0,"rtt_ms":3.0,"samples":3}\n'

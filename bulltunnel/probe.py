@@ -50,9 +50,16 @@ def build_config(addr: str, token: str) -> str:
     The address is bracketed when it is an IPv6 one: the engine splits the
     address at the last colon, so an unbracketed one would be read as a port
     of "::1" and the dial would go nowhere.
+
+    Only the host decides: the address always has a colon (the port is
+    after it), so bracketing every address would write "[10.0.2.1:3080]",
+    which the engine cannot read at all — the connection test of an IPv4
+    server never worked. And it is the host that is bracketed, not the
+    whole address: "[2001:db8::1]:3080", not "[2001:db8::1:3080]".
     """
-    if ":" in addr and not addr.startswith("["):
-        addr = f"[{addr}]"
+    host, _, port = addr.rpartition(":")
+    if ":" in host and not addr.startswith("["):
+        addr = f"[{host}]:{port}"
     return (
         "# Written by the bull-Tunnel panel for a connection test.\n"
         '[client]\n'

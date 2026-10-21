@@ -2,6 +2,7 @@ package orch
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -36,6 +37,10 @@ type Driver interface {
 	Scan(s *model.Server) ([]*engine.Found, error)
 	Listening(s *model.Server) (map[int]bool, error)
 	Exits(s *model.Server, ports []int, targets []string) (map[int]*engine.Exit, map[string]bool, error)
+	// PutFile writes a file on a server.
+	PutFile(s *model.Server, path string, data []byte, mode os.FileMode) error
+	// Run runs a command on a server.
+	Run(s *model.Server, command string, timeout time.Duration) (int, string, string, error)
 }
 
 // Resolver asks the public resolvers what a name points at.

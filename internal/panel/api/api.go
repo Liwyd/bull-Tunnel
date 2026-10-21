@@ -18,9 +18,13 @@ import (
 	"time"
 
 	"github.com/Liwyd/bull-Tunnel/internal/panel/auth"
+	"github.com/Liwyd/bull-Tunnel/internal/panel/backup"
+	"github.com/Liwyd/bull-Tunnel/internal/panel/dns"
+	"github.com/Liwyd/bull-Tunnel/internal/panel/model"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/orch"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/ssh"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/store"
+	"github.com/Liwyd/bull-Tunnel/internal/panel/telegram"
 )
 
 // LocalHeader is the header the management tool of the machine itself
@@ -57,6 +61,14 @@ type Options struct {
 	Demo bool
 	// Static is the directory of the files of the web interface.
 	Static string
+	// DNS builds the client of a DNS account.
+	DNS func(provider *model.DNSProvider) (dns.Client, error)
+	// Bot is the panel's Telegram bot.
+	Bot *telegram.Bot
+	// Backups is the folder of the backups.
+	Backups *backup.Store
+	// Driver is how the panel talks to the servers.
+	Driver orch.Driver
 }
 
 // Server is the panel's web interface.
@@ -71,6 +83,11 @@ type Server struct {
 	demo    bool
 	static  string
 	hub     *hub
+
+	dnsFactory   func(provider *model.DNSProvider) (dns.Client, error)
+	bot          *telegram.Bot
+	backupsStore *backup.Store
+	driver       orch.Driver
 }
 
 // New returns the web interface of the panel.
@@ -80,16 +97,20 @@ func New(options Options) *Server {
 		limiter = auth.NewLimiter(8, 300, 900)
 	}
 	return &Server{
-		store:   options.Store,
-		orch:    options.Orchestrator,
-		auth:    options.Auth,
-		limiter: limiter,
-		keys:    options.HostKeys,
-		local:   options.LocalKey,
-		version: options.Version,
-		demo:    options.Demo,
-		static:  options.Static,
-		hub:     newHub(),
+		store:        options.Store,
+		orch:         options.Orchestrator,
+		auth:         options.Auth,
+		limiter:      limiter,
+		keys:         options.HostKeys,
+		local:        options.LocalKey,
+		version:      options.Version,
+		demo:         options.Demo,
+		static:       options.Static,
+		hub:          newHub(),
+		dnsFactory:   options.DNS,
+		bot:          options.Bot,
+		backupsStore: options.Backups,
+		driver:       options.Driver,
 	}
 }
 
@@ -114,6 +135,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/providers", s.authed(s.providers))
 	mux.HandleFunc("/api/providers/", s.authed(s.providerByID))
 	mux.HandleFunc("/api/settings", s.authed(s.settings))
+	mux.HandleFunc("/api/probe", s.authed(s.probe))
+	mux.HandleFunc("/api/telegram/test", s.authed(s.telegramTest))
+	mux.HandleFunc("/api/backups", s.authed(s.backups))
+	mux.HandleFunc("/api/backups/run", s.authed(s.runBackup))
+	mux.HandleFunc("/api/backups/download", s.authed(s.downloadBackup))
+	mux.HandleFunc("/api/backups/restore", s.authed(s.restoreBackup))
 	mux.HandleFunc("/ws", s.websocket)
 	if s.static != "" {
 		mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(s.static))))

@@ -328,6 +328,14 @@ func (s *Server) serverAction(w http.ResponseWriter, r *http.Request, server *mo
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"latency_ms": latency})
+	case "agent":
+		s.installAgent(w, r, server)
+	case "command":
+		if r.Method == http.MethodGet {
+			s.readAnswer(w, r, server)
+			return
+		}
+		s.sendCommand(w, r, server)
 	default:
 		writeError(w, http.StatusNotFound, "not found")
 	}

@@ -731,6 +731,41 @@ repository itself, which is where the code comes from.
   The reason is written next to it ✓, so nobody has to find out again why
   the test is there twice.
 
+### Commit 24 — the connection test of the panel, in Go  ✅ done
+
+The ⚡ button of the panel: the measurement of the path between two servers,
+done on the servers themselves, over the carrier, exactly the way the tunnel
+goes.
+
+* ✅ `internal/panel/probe`: the tunnel the probe has to dial ✓, the file
+  the engine reads on the far side ✓, the parsing of what the engine
+  answers ✓ (one JSON object per carrier ✓, with the noise of the log in
+  between ✓), the ranking ✓ (the working carriers first ✓, the quickest of
+  them at the top ✓) and the measurement itself ✓ (the file is taken away
+  again when it is read ✓).
+* ✅ The file the panel writes is a contract:
+  `tests/fixtures/probe-config.toml` ✓.
+
+**And a fault of the Python panel, found on the way:** the file the probe
+wrote bracketed the *whole* address, and the engine splits an address at
+the last colon — so the file said `[10.0.0.2:3080]` and the engine
+answered "missing port in address". **The connection test of an IPv4 server
+never worked.** Only the host is bracketed now, and only when it is an IPv6
+one: `[2001:db8::1]:3080` ✓, `10.0.0.2:3080` ✓. The fix is in both panels
+✓, and the tests say it ✓.
+
+### Commit 25 — the endpoints that talk to the outside  ✅ done
+
+The rest of the API: the measurement of the path ✓, the command channel ✓,
+the Telegram test ✓ and the backups ✓.
+
+* ✅ `/api/probe` ✓, `/api/servers/{id}/agent` ✓ (the agent is put on the
+  server and started ✓), `/api/servers/{id}/command` ✓ (the command is
+  sent over DNS ✓ and the answer is read back ✓), `/api/telegram/test` ✓
+  and the backups ✓ (the list ✓, the run ✓, the download ✓ and the
+  restore ✓ — the state being replaced is kept first ✓, in case it was a
+  mistake ✓).
+
 ### Phase 7 — the API
 
 * `internal/panel/api`: the endpoints of `bulltunn/app.py` ✓, one for
@@ -818,10 +853,12 @@ already work ✓.
 | 21 | The state the dashboard is shown | done |
 | 22 | The web interface of the panel, in Go | done |
 | 23 | The timing sensitive test, run a few times | done |
-| 24 | The Go rewrite — phase 7 (the api) | **next** |
-| 25 | The Go rewrite — phase 8 (the command) | pending |
-| 26 | The Go rewrite — phase 9 (the switchover) | pending |
-| 27 | The Go rewrite — phase 10 (the dashboard) | later |
+| 24 | The connection test of the panel, in Go | done |
+| 25 | The endpoints that talk to the outside | done |
+| 26 | The Go rewrite — phase 7 (the api) | **next** |
+| 27 | The Go rewrite — phase 8 (the command) | pending |
+| 28 | The Go rewrite — phase 9 (the switchover) | pending |
+| 29 | The Go rewrite — phase 10 (the dashboard) | later |
 
 **All the findings of the audit are closed, and the graph is the type-1
 design.** What is left is the Go rewrite above, and the work that never

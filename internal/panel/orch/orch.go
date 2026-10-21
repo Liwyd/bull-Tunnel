@@ -139,6 +139,23 @@ func (o *Orchestrator) FlappingList() []string {
 	return out
 }
 
+// Reset forgets everything the panel learnt at run time: the next check
+// starts from what the servers say. It is used after the state is replaced
+// by a backup.
+func (o *Orchestrator) Reset() {
+	o.mu.Lock()
+	o.repairAfter = map[string]float64{}
+	o.lastProbe = map[string]*engine.Probe{}
+	o.prevOK = map[string]bool{}
+	o.flapReported = map[string]bool{}
+	o.suggested = map[string]string{}
+	o.lastRead = map[string]float64{}
+	o.lastScan = 0
+	o.lastExits = 0
+	o.mu.Unlock()
+	o.Wake()
+}
+
 // Store is the state the brain looks at.
 func (o *Orchestrator) Store() *store.Store { return o.store }
 

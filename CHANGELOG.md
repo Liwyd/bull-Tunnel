@@ -7,6 +7,18 @@ only adds something.
 
 ## Unreleased
 
+### The connection test of an IPv4 server never worked
+
+The file the connection test (the ⚡ button) writes on the far side
+bracketed the **whole** address, and the engine splits an address at the
+last colon — so the file said `[10.0.0.2:3080]` and the engine answered
+"missing port in address". The measurement of the path between two servers
+was therefore broken for every IPv4 server, which is most of them.
+
+Only the host is bracketed now, and only when it is an IPv6 one:
+`[2001:db8::1]:3080` and `10.0.0.2:3080`. The fix is in both panels, and
+the tests say it.
+
 ### The web interface of the panel, in Go
 
 `internal/panel/api` is the API the front-end talks to: the same endpoints

@@ -1,0 +1,7 @@
+# Written by the bull-Tunnel panel for a connection test.
+[client]
+remote_addr = "10.0.2.1:3080"
+transport = "tcp"
+token = "0123456789abcdef0123456789abcdef"
+connection_pool = 1
+log_level = "error"

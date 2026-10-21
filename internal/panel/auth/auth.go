@@ -164,6 +164,35 @@ func (a *Auth) usernameLocked() string {
 	return name
 }
 
+// Data is what the login file holds.
+func (a *Auth) Data() map[string]any {
+	a.reload()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := map[string]any{}
+	for key, value := range a.data {
+		out[key] = value
+	}
+	return out
+}
+
+// SetData replaces what the login file holds, and gives it a secret when it
+// has none: a backup of an older panel may hold a login without the key the
+// sessions are signed with, and without one every login would fail with an
+// error the operator cannot do anything about.
+func (a *Auth) SetData(data map[string]any) error {
+	a.mu.Lock()
+	a.data = map[string]any{}
+	for key, value := range data {
+		a.data[key] = value
+	}
+	if secret, _ := a.data["secret"].(string); secret == "" {
+		a.data["secret"] = randomHex(32)
+	}
+	a.mu.Unlock()
+	return a.save()
+}
+
 // SetPassword writes a new password.
 func (a *Auth) SetPassword(username string, password string) error {
 	salt := make([]byte, 16)

@@ -2,8 +2,10 @@ package orch
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/Liwyd/bull-Tunnel/internal/panel/dns"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/engine"
@@ -110,6 +112,16 @@ func (d *fakeDriver) Listening(s *model.Server) (map[int]bool, error) {
 
 func (d *fakeDriver) Exits(s *model.Server, ports []int, targets []string) (map[int]*engine.Exit, map[string]bool, error) {
 	return map[int]*engine.Exit{}, map[string]bool{}, nil
+}
+
+func (d *fakeDriver) PutFile(s *model.Server, path string, data []byte, mode os.FileMode) error {
+	d.calls = append(d.calls, "put:"+path)
+	return nil
+}
+
+func (d *fakeDriver) Run(s *model.Server, command string, timeout time.Duration) (int, string, string, error) {
+	d.calls = append(d.calls, "run:"+command)
+	return 0, "", "", nil
 }
 
 // fakeDNS is the DNS service of the tests.
