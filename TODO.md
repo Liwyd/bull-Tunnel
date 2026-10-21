@@ -665,6 +665,24 @@ work moves there with it.
 **Done when:** the Go orchestrator makes the same decisions as the Python
 one on the same fixtures ✓ (the contract test ✓).
 
+### Commit 20 — the door of the panel  ✅ done
+
+The first half of the API: the login file ✓, the sessions ✓ and the rate
+limiter of the login ✓.
+
+* ✅ `internal/panel/auth`: the login file ✓ (the password hashed with
+  PBKDF2 ✓, the file only readable by its owner ✓), the sessions ✓ (signed
+  with HMAC ✓, the secret rotated when the password changes ✓), and the
+  limiter ✓ (the failures of an address in a moving window ✓, the addresses
+  that have not failed for a while forgotten ✓).
+* ✅ A login file that cannot be read does not lock the operator out ✓: what
+  was read last stays ✓, the file is left alone ✓, and the reason is shown
+  in the panel ✓.
+* ✅ The sessions of the two panels are the same ✓: the session the Python
+  panel issues is good in the Go panel ✓ (`tests/fixtures/session-python.txt`
+  ✓) — the operator does not have to log in again when the panel is
+  swapped ✓.
+
 ### Phase 7 — the API
 
 * `internal/panel/api`: the endpoints of `bulltunn/app.py` ✓, one for
@@ -748,10 +766,11 @@ already work ✓.
 | 17 | The questions the panel asks its state | done |
 | 18 | The decisions of the brain | done |
 | 19 | The Go rewrite — phase 6 (the orchestrator) | done |
-| 20 | The Go rewrite — phase 7 (the api) | **next** |
-| 21 | The Go rewrite — phase 8 (the command) | pending |
-| 22 | The Go rewrite — phase 9 (the switchover) | pending |
-| 23 | The Go rewrite — phase 10 (the dashboard) | later |
+| 20 | The door of the panel (the auth) | done |
+| 21 | The Go rewrite — phase 7 (the api) | **next** |
+| 22 | The Go rewrite — phase 8 (the command) | pending |
+| 23 | The Go rewrite — phase 9 (the switchover) | pending |
+| 24 | The Go rewrite — phase 10 (the dashboard) | later |
 
 **All the findings of the audit are closed, and the graph is the type-1
 design.** What is left is the Go rewrite above, and the work that never
