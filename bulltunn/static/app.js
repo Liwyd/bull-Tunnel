@@ -47,6 +47,9 @@ let netFilter = "all";
 let selectedDomain = "";   // the domain open on the domains page
 let selNode = null;        // the node picked in the flow graph
 let selLink = null;        // the tunnel picked in the flow graph
+let signedInAs = "admin";  // the name of the account, from the session
+let settingsSave = null;   // the settings being saved, so two saves do not race
+let lastSubmit = Promise.resolve();  // the last form submit, for what follows it
 
 /* ------------------------------------------------------------------ api */
 async function api(method, path, body) {
@@ -87,6 +90,13 @@ const nm = (id) => (srv(id) || {}).name || "—";
 const isBusy = (l) => S.busy.includes(l.id);
 const lstatus = (l) => (isBusy(l) ? "testing" : l.status);
 const isFlapping = (l) => S.flapping.includes(l.id);
+/* the tunnels that are not steady: the ones that are degraded, and the ones
+   that keep flapping. A tunnel that is both is counted once. */
+function unstableCount() {
+  const ids = new Set(S.links.filter((l) => lstatus(l) === "degraded").map((l) => l.id));
+  for (const id of S.flapping) ids.add(id);
+  return ids.size;
+}
 const handedOver = (l) => !!S.handover[l.id];
 const ms = (v) => (v == null ? "—" : `${Math.round(v)}ms`);
 const provider = (id) => S.providers.find((p) => p.id === id);
@@ -161,6 +171,8 @@ async function boot() {
   let sess;
   try { sess = await api("GET", "/api/session"); } catch (e) { toast(e.message, "error"); return; }
   $("#ss-ver").textContent = `v${sess.version}`;
+  signedInAs = sess.username || "admin";
+  if (sess.error) toast(sess.error, "error");
   if (!sess.logged_in) return showAuth(sess.configured);
   startApp(sess);
 }
@@ -185,7 +197,8 @@ let firstState = true;
 function startApp(sess) {
   $("#auth").classList.add("hidden");
   $("#app").classList.remove("hidden");
-  if (sess) $("#ss-user").textContent = sess.username || "admin";
+  if (sess) signedInAs = sess.username || signedInAs;
+  $("#ss-user").textContent = signedInAs;
   api("GET", "/api/state").then((st) => {
     events = st.events || [];
     setState(st);
@@ -221,7 +234,18 @@ setInterval(() => { if (wsAlive) try { ws.send("ping"); } catch (_) { /* ignore 
 function setState(st) {
   S = st;
   skew = st.now - Date.now() / 1000;
+  showErrors(st.errors || []);
   renderAll();
+}
+
+/* the problems the panel has with its own files: a state file or a login
+   file that could not be read. They are said once, not at every check. */
+let shownErrors = "";
+function showErrors(list) {
+  const text = (list || []).join(" · ");
+  if (!text || text === shownErrors) return;
+  shownErrors = text;
+  toast(text, "error");
 }
 
 function renderAll() {
@@ -253,12 +277,12 @@ window.addEventListener("hashchange", route);
 /* --------------------------------------------------------------- sidebar */
 function renderSide() {
   const on = S.servers.filter((s) => s.status === "online").length;
-  const deg = S.links.filter((l) => lstatus(l) === "degraded").length + S.flapping.length;
+  const deg = unstableCount();
   const dom = S.domains.filter((d) => d.status === "ok").length;
   $("#ss-on").textContent = `${on} / ${S.servers.length}`;
   $("#ss-deg").textContent = String(deg);
   $("#ss-dom").textContent = String(dom);
-  $("#ss-user").textContent = (S.username || "admin");
+  $("#ss-user").textContent = signedInAs;
   $("#ss-ver").textContent = `v${S.version}`;
   const foot = S.demo ? "demo environment" : "production";
   const sync = S.last_check ? `last check ${ago(S.last_check)}` : "waiting for the first check";
@@ -276,7 +300,7 @@ function renderStrip() {
   const on = S.servers.filter((s) => s.status === "online").length;
   const live = S.links.filter((l) => l.status !== "pending");
   const up = live.filter((l) => l.status === "up").length;
-  const deg = live.filter((l) => l.status === "degraded").length + S.flapping.length;
+  const deg = unstableCount();
   const dok = S.domains.filter((d) => d.status === "ok").length;
   const next = S.last_check ? Math.max(0, S.settings.check_interval - (nowS() - S.last_check)) : S.settings.check_interval;
   const cell = (k, v, cls = "") => `<div><span class="k">${k}</span><span class="v ${cls}">${v}</span></div>`;
@@ -925,7 +949,7 @@ function renderDomains() {
   if (!selectedDomain || !S.domains.some((d) => d.id === selectedDomain)) selectedDomain = S.domains[0].id;
   $("#dom-list").innerHTML = `<div class="opt-list">${S.domains.map((d) => {
     const st = d.status;
-    return `<div class="opt click ${d.id === selectedDomain ? "" : ""}" data-dom="${d.id}" style="${d.id === selectedDomain ? "border-left:2px solid var(--brand)" : ""}">
+    return `<div class="opt click ${d.id === selectedDomain ? "on" : ""}" data-dom="${d.id}">
       <span class="dot ${st}"></span>
       <span class="grow"><span class="mono">${esc(d.fqdn)}</span>
       <span class="sub">${esc(d.current_ip || "—")} · ${d.ttl}s · ${esc((provider(d.provider_id) || {}).name || "no account")}</span></span>
@@ -1071,9 +1095,11 @@ function renderInfra() {
 /* ============================================================== settings */
 function renderSettings() {
   if (!S) return;
-  // never wipe what the operator is typing in
+  // never wipe what the operator is typing in: a field that has the focus
+  // is left alone, and the section is not rebuilt under it
   const body = $("#set-body");
-  if (body.contains(document.activeElement)) return;
+  const active = document.activeElement;
+  if (active && body.contains(active) && active.matches("input,textarea,select")) return;
   const s = S.settings, tg = s.telegram;
   const order = [...s.candidate_transports, ...S.transports.filter((t) => !s.candidate_transports.includes(t))];
   const sec = (n, title, kicker, body) => `<div class="section" id="set-${n}">
@@ -1174,7 +1200,17 @@ async function saveQuickSettings() {
     telegram: { ...s.telegram, enabled: !!get("tg_enabled").checked },
   };
   if (!body.candidate_transports.length) return toast("Pick at least one protocol", "error");
-  await act(() => api("PUT", "/api/settings", body), "Settings saved");
+  // The saves go one after another. Two at the same time would write over
+  // each other, and the one that arrived last would be the one that
+  // counted — which is not necessarily the one the operator changed last.
+  const save = (settingsSave || Promise.resolve()).then(() => api("PUT", "/api/settings", body));
+  settingsSave = save.catch(() => {});
+  try {
+    await save;
+    toast("Settings saved", "success");
+  } catch (e) {
+    toast(e.message, "error");
+  }
 }
 
 /* ------------------------------------------------------------ onboarding */
@@ -1446,9 +1482,14 @@ function openModal(html, onSubmit) {
     e.preventDefault();
     const btn = f.querySelector("[type=submit]");
     if (btn) btn.disabled = true;
-    try { await onSubmit(new FormData(f), f); closeModal(); }
-    catch (err) { toast(err.message, "error"); }
-    finally { if (btn) btn.disabled = false; }
+    // the submit is kept, so that whatever the form does after it — the
+    // test message, for one — waits for it instead of racing with it
+    lastSubmit = (async () => {
+      try { await onSubmit(new FormData(f), f); closeModal(); }
+      catch (err) { toast(err.message, "error"); }
+      finally { if (btn) btn.disabled = false; }
+    })();
+    await lastSubmit;
   };
   const first = f.querySelector("input:not([type=checkbox]),select,textarea");
   if (first) setTimeout(() => first.focus(), 50);
@@ -1632,7 +1673,10 @@ function settingsForm() {
   $("#bk-restore").onclick = restoreForm;
   $("#tg-test").onclick = async () => {
     $("#modal-form").requestSubmit();
-    setTimeout(() => act(() => api("POST", "/api/telegram/test"), "The test message was sent"), 600);
+    // the settings must be saved before the message goes out, or the message
+    // is sent with the ones that were in place before
+    await lastSubmit.catch(() => {});
+    await act(() => api("POST", "/api/telegram/test"), "The test message was sent");
   };
 }
 
@@ -1738,11 +1782,17 @@ document.addEventListener("click", async (e) => {
     const s = srv(d.probe);
     const sel = document.querySelector("[data-probe-peer]");
     const peer = sel ? srv(sel.value) : null;
-    if (!peer) { toast("No server on the other side is selected"); return; }
+    if (!peer) { toast("No server on the other side is selected", "error"); return; }
     const out = document.getElementById("probe-out");
     if (out) out.innerHTML = `<p class="sub muted">Measuring the path ${esc(s.name)} ⇄ ${esc(peer.name)}…</p>`;
     const body = s.role === "iran" ? { iran_id: s.id, kharej_id: peer.id } : { iran_id: peer.id, kharej_id: s.id };
-    const r = await api("POST", "/api/probe", body);
+    let r;
+    try {
+      r = await api("POST", "/api/probe", body);
+    } catch (e) {
+      if (out) out.innerHTML = `<p class="note" style="color:var(--down)">${esc(e.message)}</p>`;
+      return toast(e.message, "error");
+    }
     if (out) out.innerHTML = probeTable(r);
     return toast(r.ok ? (r.best ? `The best protocol: ${r.best}` : "No protocol worked") : "The measurement failed", r.ok ? "success" : "error");
   }
@@ -1833,6 +1883,17 @@ wiresEl.addEventListener("pointerdown", (e) => {
   const up = (ev) => {
     window.removeEventListener("pointerup", up);
     if (Math.hypot(ev.clientX - start[0], ev.clientY - start[1]) < 5) {
+      if (w.dataset.hop) {
+        // a forwarded port: it leaves from one server and arrives at
+        // another. The drawer of the server it leaves from says which
+        // ports, and where they go.
+        const [from] = w.dataset.hop.split("|");
+        selNode = from;
+        selLink = null;
+        paintSelection();
+        openDrawer("server", from);
+        return;
+      }
       selLink = w.dataset.link || null;
       selNode = null;
       paintSelection();
@@ -1854,9 +1915,20 @@ document.addEventListener("mouseover", (e) => {
   }
   if (n) { focus = relatedTo(n.dataset.type, n.dataset.id); applyFocus(); }
   else if (w) {
-    focus = relatedTo("link", w.dataset.link); applyFocus();
-    const l = linkById(w.dataset.link);
-    if (l) { tip.innerHTML = linkTip(l); tip.classList.add("show"); }
+    if (w.dataset.hop) {
+      // a forwarded port: it leaves from one server and arrives at another.
+      // The path is the two servers, and the tip says what the wire is.
+      const [from, to] = w.dataset.hop.split("|");
+      focus = { nodes: new Set([from, to]), links: new Set(), domains: new Set() };
+      applyFocus();
+      tip.innerHTML = `<b>${esc(nm(from))} → ${esc(nm(to))}</b><br>these ports are forwarded from one server to the other`;
+      tip.classList.add("show");
+    } else {
+      focus = relatedTo("link", w.dataset.link);
+      applyFocus();
+      const l = linkById(w.dataset.link);
+      if (l) { tip.innerHTML = linkTip(l); tip.classList.add("show"); }
+    }
   }
 });
 document.addEventListener("mousemove", (e) => {

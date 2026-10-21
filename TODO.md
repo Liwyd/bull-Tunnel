@@ -242,8 +242,40 @@ recorded below with the reason).
 **Findings closed by this commit:** 12, 13, 15, 19, 22, 24, 26, 27, 28, 29,
 31, 32, 33, 34, 35.
 
-### Commit 5 — the front-end
+### Commit 5 — the front-end  ✅ done
+
 Findings 36 to 48.
+
+* ✅ **36** the signed-in user is the one who signed in: the name comes
+  from the session and is not overwritten by the state, which had none.
+* ✅ **37** a tunnel that is both degraded and flapping is counted once.
+* ✅ **38** clicking a forwarded-port label opens the drawer of the server
+  the ports leave from, instead of an empty drawer.
+* ✅ **39** hovering a forwarded-port label lights the two servers it
+  connects, instead of clearing the highlight.
+* ✅ **40** the ⚡ measurement says what went wrong instead of failing
+  silently.
+* ✅ **41** the dead ternary in the domain list is gone; the selected
+  domain is marked with a class.
+* ✅ **42** the quick settings are saved one after another: two saves at
+  the same time wrote over each other, and the one that arrived last was
+  the one that counted.
+* ✅ **43** the quick settings are not rebuilt under a field the operator
+  is typing in, but a button that has the focus does not stop the
+  section from being refreshed.
+* ✅ **44** "Send a test message" waits for the settings to be saved
+  before it sends the message.
+* ✅ **45/46** `.wlabel.hop`, `.opt.on` and `.menu-btn` have a style.
+* ✅ **47** the demo's chaos now picks the tunnels the domains really use
+  (it looked at a field that no longer exists, so it broke nothing).
+* ✅ The panel shows the problems it has with its own files (a state file
+  or a login file that could not be read), once, not at every check.
+* ✅ Tests: `tests/test_frontend.py` — the panel's script is read into a
+  JavaScript context with a small stub of the DOM around it, and the
+  parts of it that decide what is shown are checked there.
+
+**Findings closed by this commit:** 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
+46, 47, 48.
 
 ### Commit 6 — tests, docs and the changelog
 The whole suite, the README, the CHANGELOG and `docs/engine-schema.md`.
@@ -258,30 +290,18 @@ The whole suite, the README, the CHANGELOG and `docs/engine-schema.md`.
 | 2 | The engine is BackPack | done |
 | 3 | The critical panel bugs | done |
 | 4 | The medium panel bugs | done |
-| 5 | The front-end | pending |
+| 5 | The front-end | done |
 | 6 | Tests, docs, changelog | pending |
 
-**Next up (commit 5):** the front-end.
+**Next up (commit 6):** the last one.
 
-1. `bulltunn/static/app.js`: the signed-in user always shows as "admin" —
-   the state has no user name in it.
-2. `bulltunn/static/app.js`: a flapping and degraded tunnel is counted
-   twice.
-3. `bulltunn/static/app.js`: clicking a "hop" label opens an empty drawer.
-4. `bulltunn/static/app.js`: hovering a hop label clears the path
-   highlight.
-5. `bulltunn/static/app.js`: the ⚡ measurement has no error handling.
-6. `bulltunn/static/app.js`: the dead ternary in the domain list.
-7. `bulltunn/static/app.js`: the quick settings fire one PUT per field and
-   can race with each other.
-8. `bulltunn/static/app.js`: the quick settings are not refreshed when a
-   button inside them has the focus.
-9. `bulltunn/static/app.js`: "Send a test message" races with the save of
-   the form.
-10. `bulltunn/static/style.css`: `.wlabel.hop` and `.menu-btn` have no
-    style.
-11. `bulltunn/demo.py`: the chaos never picks a victim, and the demo still
-    knows carriers the engine does not have.
+1. `docs/engine-schema.md`: the contract is the BackPack engine's now —
+   the carriers, the configuration, the metrics file, the commands.
+2. `README.md`: what the project is and how it is put together.
+3. `CHANGELOG.md`: what changed.
+4. The whole suite, one more time, and the engine's own tests.
+5. A live check: the panel comes up, the demo runs, the engine builds.
+
 
 
 

@@ -276,8 +276,17 @@ async def chaos(orch, net: SimNet) -> None:
     while True:
         await asyncio.sleep(random.uniform(45, 80))
         roll = random.random()
-        active = [st.links.get(st.carrier(d.link_id)) for d in st.domains.values() if d.link_id]
-        active = [x for x in active if x and x.transport]
+        # the tunnels the domains are actually using: the one that carries
+        # each domain's ports
+        active = []
+        for d in st.domains.values():
+            link = st.link_for(d.iran_id, d.kharej_id) if d.iran_id and d.kharej_id else None
+            if link is None:
+                continue
+            carried = st.links.get(st.carrier(link.id)) or link
+            if carried.transport:
+                active.append(carried)
+        active = [x for x in {x.id: x for x in active}.values()]
         if roll < 0.3 and active:
             x = random.choice(active)
             net.flaky[(x.iran_id, x.kharej_id)] = 0.5
