@@ -165,7 +165,8 @@ possible (there is no port to measure) and the panel says so.
 Install the panel on a server **outside Iran**: one of the foreign servers,
 or a separate one. The panel must be able to reach the Telegram API, the
 ArvanCloud and Cloudflare APIs, the source of the tunnel engine and every
-server over SSH. Ubuntu 22.04 or later, with Python 3.10 or later.
+server over SSH. Ubuntu 22.04 or later (the panel is a static binary: no
+Python, no pip and no dependency on the server).
 
 ### One line
 
@@ -231,15 +232,14 @@ backups, the service, the log and the admin password.
 To change the password:
 
 ```bash
-sudo -u bulltunnel /opt/bull-tunnel/venv/bin/python -m bulltunnel --data /var/lib/bull-tunnel passwd
+sudo -u bulltunnel /opt/bull-tunnel/bin/bull-tunnel passwd
 ```
 
-Installing with pip works as well (if you want to run the panel inside
-your own venv or container):
+The panel is a static binary: it is started by the service, and it can be
+started by hand the same way:
 
 ```bash
-pip install "bull-tunnel @ git+https://github.com/Liwyd/bull-Tunnel.git@main"
-bull-tunnel --data /var/lib/bull-tunnel serve
+sudo -u bulltunnel /opt/bull-tunnel/bin/bull-tunnel-panel --data /var/lib/bull-tunnel
 ```
 
 > Installing on a server that has tunnels of its own is not a problem. The
@@ -548,8 +548,8 @@ copy of the password somewhere else as well.
 git clone https://<user>:<token>@github.com/Liwyd/bull-Tunnel.git && cd bull-Tunnel
 sudo bash deploy/install.sh
 sudo systemctl stop bull-tunnel
-sudo -u bulltunnel /opt/bull-tunnel/venv/bin/python -m bulltunnel --data /var/lib/bull-tunnel \
-     restore bt-backup-XXXXXXXX-XXXX.tmbk --password 'the backup password'
+sudo -u bulltunnel /opt/bull-tunnel/bin/bull-tunnel backup restore \
+     bt-backup-XXXXXXXX-XXXX.tmbk --password 'the backup password'
 sudo systemctl start bull-tunnel
 ```
 
@@ -586,7 +586,7 @@ settings are not touched.
 
 | Path | What it holds |
 |---|---|
-| `/opt/bull-tunnel` | The program and the python environment |
+| `/opt/bull-tunnel` | The program, the management tool and the tunnel engine |
 | `/var/lib/bull-tunnel/state.json` | All the information of the panel (mode 600) |
 | `/var/lib/bull-tunnel/backups/` | The copies of the backups |
 | `/etc/default/bull-tunnel` | The port, the address and the path of the HTTPS certificate |
@@ -617,7 +617,14 @@ watched live:
 ```bash
 python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
 ./venv/bin/python -m bulltunnel demo --port 8080
-./venv/bin/pip install pytest pytest-asyncio && ./venv/bin/python -m pytest
+```
+
+The panel itself is Go: it is built and tested with the Go toolchain, and
+the dependencies are vendored, so the build needs no network:
+
+```bash
+go build ./...
+go test ./...
 ```
 
 ![Light mode](docs/dashboard-light.png)

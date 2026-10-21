@@ -881,15 +881,33 @@ bounded and rare, and it is better than a panel that falls over; it is fixed
 by letting the cycle give the lock back between its phases, which is a
 bigger change than this commit.
 
-### Phase 9 — the switchover
+### Phase 9 — the switchover  (in progress)
 
-* The Python panel is retired: `bulltunnel/`, `tests/` (the Python part)
-  and the wheel go; the Go panel, the Go tests and the Go binaries stay.
-* The installer: the Go binary in `/opt/bull-tunnel` ✓, the service ✓, the
-  management command on the path ✓.
-* The Dockerfile: the Go build ✓ (a multi-stage build ✓, a small image ✓).
-* The README, the CHANGELOG, the docs: the panel is Go now ✓.
-* The one-line installation stays the same ✓.
+The panel is Go now: the binary, the service, the installer and the image
+are the Go panel's ✓, and the release carries the panel and the management
+tool ✓.
+
+* ✅ The README says the panel is Go ✓ (the installation ✓, the password ✓,
+  the restore ✓, the paths of the installation ✓, the development ✓).
+* ✅ The service runs the Go binary ✓, the installer fetches the panel of
+  the release ✓ and the image is a multi-stage build with the panel and the
+  engine in it ✓.
+
+**What is left, and why it waits:**
+
+* **The demo.** The demo mode is still the Python panel's, and the Go panel
+  has none: the simulated network and the fake DNS are not ported yet. The
+  demo is how a newcomer watches the failovers without a server, so it is
+  part of the switchover and not an extra.
+* **The Python panel goes last.** It is the reference the fixtures compare
+  against — the state file, the configuration of a tunnel, the scripts, the
+  backups, the sessions and the decisions of the brain are all pinned by
+  what the Python panel writes. It goes when the demo is ported and the
+  last comparison has been made.
+* **The API waits for the check cycle.** A change made by the operator
+  takes the lock of the state, and the cycle holds it while it checks the
+  servers (commit 31 ✓). It is bounded and rare, and it is fixed by
+  letting the cycle give the lock back between its phases.
 
 **Done when:** a fresh machine installs the panel with the one line ✓, the
 panel comes up ✓, the demo runs ✓, and the release carries the two
@@ -955,7 +973,7 @@ already work ✓.
 | 29 | The panel itself, in Go | done |
 | 30 | The image is built again | done |
 | 31 | The panel does not fall over its own state | done |
-| 32 | The Go rewrite — phase 9 (the switchover) | **next** |
+| 32 | The Go rewrite — phase 9 (the switchover) | **in progress** |
 | 33 | The Go rewrite — phase 10 (the dashboard) | later |
 
 **All the findings of the audit are closed, and the graph is the type-1

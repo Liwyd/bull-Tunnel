@@ -426,12 +426,19 @@ func cmdBackup(panel *Panel, args []string) (int, error) {
 		if len(args) < 2 {
 			return 1, panelError("which backup? (its name)")
 		}
+		password := ""
+		for i := 0; i < len(args); i++ {
+			if args[i] == "--password" && i+1 < len(args) {
+				password = args[i+1]
+				i++
+			}
+		}
 		if !confirm(fmt.Sprintf("restore the backup %s? The state it replaces is kept.", args[1])) {
 			out.Warn("nothing was restored")
 			return 0, nil
 		}
 		if _, err := panel.call(http.MethodPost, "/api/backups/restore", map[string]any{
-			"name": args[1],
+			"name": args[1], "password": password,
 		}); err != nil {
 			return 1, err
 		}
