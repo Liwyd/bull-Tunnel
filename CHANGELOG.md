@@ -7,6 +7,14 @@ only adds something.
 
 ## Unreleased
 
+### The questions the panel asks its state
+
+The state knows more than it stores: which tunnels join two servers, which
+of them exposes a port now, and what a domain may use. The orchestrator and
+the API ask these questions on every cycle, so they live in the store — and
+their answers are the same in the two panels, down to the order of the
+servers and of the tunnels.
+
 ### The DNS, the Telegram and the backups, in Go
 
 - **`internal/panel/dns`** is the panel's access to Cloudflare and

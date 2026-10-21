@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"time"
 
 	"github.com/Liwyd/bull-Tunnel/internal/panel/model"
@@ -42,6 +41,11 @@ type Store struct {
 	// Meta is the panel's own bookkeeping.
 	Meta map[string]any
 
+	// portMaps and ownerMaps are the maps of the forwarded ports of the Iran
+	// servers, worked out again when something they depend on changes.
+	portMaps  map[string]*portMap
+	ownerMaps map[string]*portMap
+
 	// LoadError says what went wrong with the state file, if anything.
 	// The panel shows it: a state file that cannot be read must not take
 	// the panel down.
@@ -62,6 +66,8 @@ func New(path string) *Store {
 		Handover:  map[string]string{},
 		Layout:    map[string][]float64{},
 		Meta:      map[string]any{},
+		portMaps:  map[string]*portMap{},
+		ownerMaps: map[string]*portMap{},
 	}
 	if path != "" {
 		if _, err := os.Stat(path); err == nil {
@@ -247,37 +253,4 @@ func (s *Store) AddEvent(event *model.Event) {
 	if len(s.Events) > MaxEvents {
 		s.Events = s.Events[len(s.Events)-MaxEvents:]
 	}
-}
-
-// LinkFor returns the tunnel between two servers: the one that is preferred
-// first, the built ones before the ones that are not built yet.
-func (s *Store) LinkFor(iranID string, kharejID string) *model.Link {
-	found := s.LinksBetween(iranID, kharejID)
-	if len(found) == 0 {
-		return nil
-	}
-	return found[0]
-}
-
-// LinksBetween returns the tunnels between two servers, the preferred one
-// first.
-func (s *Store) LinksBetween(iranID string, kharejID string) []*model.Link {
-	out := []*model.Link{}
-	for _, link := range s.Links.List() {
-		if link.IranID == iranID && link.KharejID == kharejID {
-			out = append(out, link)
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		a, b := out[i], out[j]
-		if a.Priority != b.Priority {
-			return a.Priority < b.Priority
-		}
-		ap, bp := a.Status == model.StatusPending, b.Status == model.StatusPending
-		if ap != bp {
-			return bp
-		}
-		return a.ID < b.ID
-	})
-	return out
 }
