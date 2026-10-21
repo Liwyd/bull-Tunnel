@@ -7,6 +7,18 @@ only adds something.
 
 ## Unreleased
 
+### The decisions of the brain
+
+The brain of the panel now decides in Go: whether a tunnel is healthy,
+whether it is stable enough to take the traffic back, why it must not carry
+it, which carriers the engine on the Iran side really speaks, which tunnel
+carries a port, whether an Iran server can carry every port of a domain, and
+what would fix the domain if it could not — a handover of the ports on the
+same server, or a move of the record to another one.
+
+The decisions are a contract: the Python panel and the Go panel must decide
+the same for the same state, down to the words they say to the operator.
+
 ### The questions the panel asks its state
 
 The state knows more than it stores: which tunnels join two servers, which

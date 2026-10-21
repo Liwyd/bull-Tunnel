@@ -625,6 +625,21 @@ panels.
   what the Python panel answers for a state ✓, and the Go panel must give
   the same answers ✓.
 
+### Commit 18 — the decisions of the brain  ✅ done
+
+The brain of the panel: what it decides about the tunnels and the domains.
+The decisions are here ✓; the work they lead to (the SSH calls ✓, the DNS
+changes ✓) comes with the rest of the panel ✓.
+
+* ✅ `internal/panel/orch`: the healthy ✓, the stable ✓, the broken ✓ and
+  the supported carriers of a tunnel ✓, the route of a port ✓, the cover of
+  a domain ✓ (the hard problems ✓ and the soft ones ✓), and the plan that
+  would fix it ✓ (a handover on the same Iran server ✓ or a move to another
+  one ✓).
+* ✅ The decisions are a contract: `tests/fixtures/state-decisions.json`
+  holds what the Python panel decides for a state ✓, and the Go panel must
+  decide the same ✓ — down to the words it says to the operator ✓.
+
 ### Phase 6 — the orchestrator
 
 * `internal/panel/orch`: the state machine of `bulltunn/orchestrator.py`:
@@ -718,11 +733,12 @@ already work ✓.
 | 15 | The health script counts milliseconds, not microseconds | done |
 | 16 | The Go rewrite — phase 5 (dns, telegram, backups) | done |
 | 17 | The questions the panel asks its state | done |
-| 18 | The Go rewrite — phase 6 (the orchestrator) | **next** |
-| 19 | The Go rewrite — phase 7 (the api) | pending |
-| 20 | The Go rewrite — phase 8 (the command) | pending |
-| 21 | The Go rewrite — phase 9 (the switchover) | pending |
-| 22 | The Go rewrite — phase 10 (the dashboard) | later |
+| 18 | The decisions of the brain | done |
+| 19 | The Go rewrite — phase 6 (the orchestrator) | **next** |
+| 20 | The Go rewrite — phase 7 (the api) | pending |
+| 21 | The Go rewrite — phase 8 (the command) | pending |
+| 22 | The Go rewrite — phase 9 (the switchover) | pending |
+| 23 | The Go rewrite — phase 10 (the dashboard) | later |
 
 **All the findings of the audit are closed, and the graph is the type-1
 design.** What is left is the Go rewrite above, and the work that never

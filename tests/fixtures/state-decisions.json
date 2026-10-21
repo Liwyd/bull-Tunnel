@@ -1,0 +1,131 @@
+{
+ "broken": {
+  "l1": "",
+  "l2": "tunnel K1 \u21c4 I1 is down",
+  "l3": "",
+  "l4": "Iran server I3 is unreachable",
+  "l5": "tunnel K1 \u21c4 I2 is down"
+ },
+ "domains": {
+  "d1": {
+   "group": [
+    "l1",
+    "l2",
+    "l4",
+    "l3",
+    "l5"
+   ],
+   "hard": [],
+   "hard_stable": [],
+   "plan": null,
+   "routes": {
+    "443": "l1"
+   },
+   "soft": [],
+   "soft_stable": []
+  },
+  "d2": {
+   "group": [
+    "l5"
+   ],
+   "hard": [
+    "port 443 on I1 is served by a tunnel outside the domain's group"
+   ],
+   "hard_stable": [
+    "port 443 on I1 is served by a tunnel outside the domain's group"
+   ],
+   "plan": null,
+   "routes": {
+    "443": "l1"
+   },
+   "soft": [],
+   "soft_stable": []
+  },
+  "d3": {
+   "group": [
+    "l1",
+    "l2",
+    "l4",
+    "l3",
+    "l5"
+   ],
+   "hard": [
+    "Iran server I3 is unreachable"
+   ],
+   "hard_stable": [
+    "Iran server I3 is unreachable"
+   ],
+   "plan": {
+    "iran": "si1",
+    "kind": "dns"
+   },
+   "routes": {
+    "443": ""
+   },
+   "soft": [],
+   "soft_stable": []
+  }
+ },
+ "healthy": {
+  "l1": true,
+  "l2": false,
+  "l3": true,
+  "l4": false,
+  "l5": false
+ },
+ "is_down": {
+  "si1": false,
+  "si2": false,
+  "si3": true,
+  "sk1": false,
+  "sk2": true
+ },
+ "labels": {
+  "l1": "K1 \u21c4 I1",
+  "l2": "K1 \u21c4 I1",
+  "l3": "K2 \u21c4 I1",
+  "l4": "K1 \u21c4 I3",
+  "l5": "K1 \u21c4 I2"
+ },
+ "stable": {
+  "l1": true,
+  "l2": false,
+  "l3": true,
+  "l4": false,
+  "l5": false
+ },
+ "supported": {
+  "l1": [
+   "tcpmux",
+   "wsmux",
+   "tcp"
+  ],
+  "l2": [
+   "tcpmux",
+   "wsmux",
+   "tcp"
+  ],
+  "l3": [
+   "tcpmux",
+   "wsmux",
+   "tcp"
+  ],
+  "l4": [
+   "tcpmux",
+   "wsmux",
+   "tcp"
+  ],
+  "l5": [
+   "tcpmux",
+   "wsmux",
+   "tcp"
+  ]
+ },
+ "usable": {
+  "si1": true,
+  "si2": true,
+  "si3": false,
+  "sk1": true,
+  "sk2": false
+ }
+}
