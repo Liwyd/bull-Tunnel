@@ -1,0 +1,62 @@
+{
+ "_comment": "A state file of v1.0: the engine settings still carried the names of the project before the rename.",
+ "servers": [
+  {
+   "id": "sk",
+   "name": "K1",
+   "role": "kharej",
+   "ip": "10.0.1.1",
+   "backpack_version": "v1.9.0"
+  },
+  {
+   "id": "si",
+   "name": "I1",
+   "role": "iran",
+   "ip": "10.0.2.1",
+   "backpack_version": "v1.9.0"
+  }
+ ],
+ "links": [
+  {
+   "id": "l",
+   "iran_id": "si",
+   "kharej_id": "sk",
+   "tunnel_port": 3080,
+   "probe_port": 61000,
+   "token": "0123456789abcdef0123456789abcdef",
+   "transport": "tcpmux",
+   "status": "up",
+   "ports": ["443"],
+   "built": true,
+   "last_change": 1700000000.0
+  }
+ ],
+ "domains": [
+  {
+   "id": "d",
+   "fqdn": "a.example.ir",
+   "provider_id": "p",
+   "kharej_id": "sk",
+   "iran_id": "si",
+   "primary_iran": "si",
+   "ports": ["443"]
+  }
+ ],
+ "providers": [
+  {
+   "id": "p",
+   "name": "arvan",
+   "kind": "arvan",
+   "api_token": "secret",
+   "zone": "example.ir"
+  }
+ ],
+ "settings": {
+  "install_backpack": false,
+  "backpack_release": "v1.9.0"
+ },
+ "events": [],
+ "handover": {},
+ "layout": {},
+ "meta": {}
+}

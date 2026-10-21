@@ -7,6 +7,30 @@ only adds something.
 
 ## Unreleased
 
+### The state of the panel, in Go
+
+The first half of the panel's Go rewrite: the model and the state file.
+
+- **`internal/panel/model`** is the data model of the panel: the same
+  structures the Python panel writes in its state file, with the same names
+  and the same defaults. The reading is tolerant — a field the file does
+  not mention keeps its default, a field it does not know is ignored — so
+  a state file of any version loads.
+- **`internal/panel/store`** reads the state file, writes it back (the
+  write is atomic and the file is only readable by its owner: it holds the
+  SSH passwords and the API tokens), and brings the old files forward: the
+  `v0.1` ports that were on the kharej server, the `v0.2` domains that
+  followed one tunnel and the `v1.0` names of the engine settings.
+- **The order of the entries is kept.** A Go map has no order of its own,
+  so the store remembers the order the file had: the panel shows the
+  servers and the tunnels in that order, the way it always did.
+- **The state files of every version are a contract.** `tests/fixtures/`
+  holds a state file of every version the panel has known, and the state
+  each of them comes out as. The Python panel writes the expected files —
+  it is the reference until the rewrite is finished — and the Go panel
+  must come out with the same state. The file the Go panel writes is a
+  fixture too, and the Python panel reads it back.
+
 ### One Go module
 
 The panel and the engine are one Go module now —

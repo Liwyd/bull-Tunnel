@@ -486,14 +486,34 @@ engine's binary still prints its version and its nine carriers ✓, and a
 tunnel that the old engine brought up still comes up ✓ (the config format
 did not change ✓).
 
-### Phase 2 — the state and the model
+### Phase 2 — the state and the model  ✅ done
 
-* `internal/panel/model`: the same structures as `bulltunnel/models.py`
-  ✓ (the same JSON names ✓, the same defaults ✓).
-* `internal/panel/store`: the load, the save (atomic ✓), the migrations
-  (the `v0.1`, the `v0.2` and the `v1.0` ones ✓) and the events ✓.
-* The tests: the migrations of `tests/test_engine.py` and
-  `tests/test_safety.py` translated ✓.
+* ✅ `internal/panel/model`: the same structures as `bulltunnel/models.py`
+  ✓ (the same JSON names ✓, the same defaults ✓). The reading is
+  tolerant: a field the file does not mention keeps its default and a
+  field it does not know is ignored, so a state file of any version loads
+  ✓.
+* ✅ `internal/panel/store`: the load ✓, the save (atomic ✓, and only
+  readable by its owner ✓ — the file holds the SSH passwords and the API
+  tokens), the migrations (the `v0.1`, the `v0.2` and the `v1.0` ones ✓)
+  and the events ✓. A state file that cannot be read is moved aside and
+  the panel says so, the way the Python panel does ✓.
+* ✅ The order of the entries is kept: a Go map has no order of its own,
+  so the store remembers the order the file had ✓. The panel shows the
+  servers and the tunnels in that order, and the Python panel does the
+  same — the two files are the same state.
+* ✅ The tests: the migrations of `tests/test_engine.py` and
+  `tests/test_safety.py` translated ✓, and the defaults of the model ✓.
+* ✅ `tests/fixtures/`: a state file of every version the panel has known,
+  and the state each of them comes out as ✓. The Python panel writes the
+  expected files — it is the reference until phase 9 — and the Go panel
+  must come out with the same state ✓. The file the Go panel writes is a
+  fixture as well, and the Python panel reads it back ✓.
+
+  (The rules of the rewrite say the fixtures live in `tests/contract/`,
+  and the acceptance of this phase says `tests/fixtures/`. The fixtures are
+  in `tests/fixtures/`, where the phase looks for them; the name can move
+  when the rest of the contract arrives.)
 
 **Done when:** a `state.json` of every version in `tests/fixtures/` loads
 in Go and comes out identical ✓.
@@ -626,7 +646,8 @@ already work ✓.
 | 9 | The network graph follows the type-1 design | done |
 | 10 | The Go rewrite — phase 0 (the licence) | done |
 | 11 | The Go rewrite — phase 1 (one module) | done |
-| 12 | The Go rewrite — phase 2 (the state) | **next** |
+| 12 | The Go rewrite — phase 2 (the state) | done |
+| 13 | The Go rewrite — phase 3 (ssh) | **next** |
 | 13 | The Go rewrite — phase 3 (ssh) | pending |
 | 14 | The Go rewrite — phase 4 (the engine driver) | pending |
 | 15 | The Go rewrite — phase 5 (dns, telegram, backups) | pending |

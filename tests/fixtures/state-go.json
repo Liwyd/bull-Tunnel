@@ -1,0 +1,214 @@
+{
+ "servers": [
+  {
+   "name": "K1",
+   "role": "kharej",
+   "ip": "10.0.1.1",
+   "id": "sk",
+   "ssh_port": 22,
+   "ssh_user": "root",
+   "ssh_password": "",
+   "ssh_key": "",
+   "priority": 1,
+   "enabled": true,
+   "probe_target": "",
+   "host_key": "",
+   "command_key": "",
+   "status": "unknown",
+   "last_seen": 0,
+   "ssh_latency_ms": null,
+   "engine_version": "",
+   "engine_transports": [],
+   "error": "",
+   "fail_count": 0,
+   "last_scan": 0,
+   "exits": {},
+   "exit_reach": {}
+  },
+  {
+   "name": "I1",
+   "role": "iran",
+   "ip": "10.0.2.1",
+   "id": "si",
+   "ssh_port": 22,
+   "ssh_user": "root",
+   "ssh_password": "",
+   "ssh_key": "",
+   "priority": 1,
+   "enabled": true,
+   "probe_target": "",
+   "host_key": "",
+   "command_key": "",
+   "status": "unknown",
+   "last_seen": 0,
+   "ssh_latency_ms": null,
+   "engine_version": "",
+   "engine_transports": [],
+   "error": "",
+   "fail_count": 0,
+   "last_scan": 0,
+   "exits": {},
+   "exit_reach": {}
+  }
+ ],
+ "links": [
+  {
+   "iran_id": "si",
+   "kharej_id": "sk",
+   "tunnel_port": 3080,
+   "id": "l",
+   "probe_port": 61000,
+   "token": "0123456789abcdef0123456789abcdef",
+   "transport": "tcpmux",
+   "ports": [
+    "443",
+    "8443=2096"
+   ],
+   "accept_udp": false,
+   "label": "",
+   "priority": 100,
+   "managed": true,
+   "iran_name": "bt-l",
+   "kharej_name": "bt-l",
+   "iran_base": {},
+   "kharej_base": {},
+   "allowed": [],
+   "pinned": false,
+   "iran_unit": "",
+   "kharej_unit": "",
+   "engine_transports": [],
+   "built": true,
+   "status": "up",
+   "latency_ms": null,
+   "last_ok": 1700000000,
+   "last_fail": 0,
+   "last_change": 1700000000,
+   "up_since": 1700000000,
+   "fail_count": 0,
+   "flaps": [],
+   "verified": true,
+   "tests": {
+    "tcpmux": {
+     "at": 1700000000,
+     "connect_s": 1.5,
+     "error": "",
+     "latency_ms": 12.5,
+     "ok": true,
+     "transport": "tcpmux"
+    }
+   },
+   "error": "",
+   "history": [
+    [
+     1700000000,
+     12.5
+    ],
+    [
+     1700000000,
+     -1
+    ]
+   ]
+  }
+ ],
+ "domains": [
+  {
+   "fqdn": "a.example.ir",
+   "provider_id": "p",
+   "kharej_id": "sk",
+   "id": "d",
+   "group": [],
+   "iran_id": "si",
+   "primary_iran": "si",
+   "ports": [
+    "443"
+   ],
+   "link_id": "",
+   "ttl": 120,
+   "auto_failover": true,
+   "status": "ok",
+   "current_ip": "10.0.2.1",
+   "last_switch": 1700000000,
+   "pending_ip": "",
+   "pending_since": 0,
+   "error": ""
+  }
+ ],
+ "providers": [
+  {
+   "name": "arvan",
+   "kind": "arvan",
+   "api_token": "secret",
+   "zone": "example.ir",
+   "id": "p",
+   "proxied": false
+  }
+ ],
+ "settings": {
+  "observe_only": true,
+  "check_interval": 30,
+  "fail_threshold": 3,
+  "flap_window": 600,
+  "flap_count": 3,
+  "failback_after": 600,
+  "candidate_transports": [
+   "tcpmux",
+   "wsmux",
+   "tcp",
+   "ws",
+   "stealth",
+   "kcp",
+   "quic"
+  ],
+  "tunnel_port_base": 3080,
+  "probe_port_base": 61000,
+  "test_timeout": 15,
+  "auto_repair": true,
+  "auto_adopt": true,
+  "auto_mesh": false,
+  "scan_interval": 600,
+  "command_enabled": false,
+  "command_provider_id": "",
+  "install_engine": true,
+  "engine_release": "latest",
+  "engine_source": "",
+  "engine_token": "",
+  "doh_resolvers": [
+   "https://cloudflare-dns.com/dns-query",
+   "https://dns.google/resolve"
+  ],
+  "telegram": {
+   "api_base": "https://api.telegram.org",
+   "bot_token": "",
+   "chat_ids": [],
+   "enabled": true,
+   "proxy": ""
+  },
+  "backup_enabled": true,
+  "backup_time": "03:00",
+  "backup_tz": "Asia/Tehran",
+  "backup_password": "",
+  "backup_keep": 14
+ },
+ "events": [
+  {
+   "level": "info",
+   "kind": "panel",
+   "message": "the panel started",
+   "refs": {},
+   "id": "e",
+   "ts": 1700000000
+  }
+ ],
+ "handover": {
+  "l": "l2"
+ },
+ "layout": {
+  "l": [
+   10.5,
+   20.5
+  ]
+ },
+ "meta": {
+  "last_backup": 1700000000
+ }
+}
