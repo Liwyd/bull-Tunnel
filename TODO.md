@@ -840,6 +840,18 @@ panel is Go ✓. The Python panel stays in the tree until the last commit of
 the rewrite, so that the two can still be compared — that is what the
 fixtures are for.
 
+### Commit 30 — the image is built again  ✅ done
+
+The `.dockerignore` still excluded the Go module — it was written when the
+image carried the Python panel — so the build of the image failed at the
+first `COPY` ("/go.mod: not found").
+
+* ✅ The module is in the build context again ✓ (`go.mod` ✓, `go.sum` ✓,
+  `vendor` ✓, `cmd` ✓, `internal` ✓), and what the image does not need is
+  left out ✓.
+* ✅ The image is built and it runs ✓: the panel answers ✓, the page is
+  served ✓ and the health check of the container is green ✓.
+
 ### Phase 9 — the switchover
 
 * The Python panel is retired: `bulltunnel/`, `tests/` (the Python part)
@@ -912,8 +924,9 @@ already work ✓.
 | 27 | The Go rewrite — phase 7 (the api) | done |
 | 28 | The Go rewrite — phase 8 (the command) | done |
 | 29 | The panel itself, in Go | done |
-| 30 | The Go rewrite — phase 9 (the switchover) | **next** |
-| 31 | The Go rewrite — phase 10 (the dashboard) | later |
+| 30 | The image is built again | done |
+| 31 | The Go rewrite — phase 9 (the switchover) | **next** |
+| 32 | The Go rewrite — phase 10 (the dashboard) | later |
 
 **All the findings of the audit are closed, and the graph is the type-1
 design.** What is left is the Go rewrite above, and the work that never

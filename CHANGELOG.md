@@ -7,6 +7,16 @@ only adds something.
 
 ## Unreleased
 
+### The image is built again
+
+The `.dockerignore` still excluded the Go module — it was written when the
+image carried the Python panel — so the build of the image failed at the
+first `COPY`. The module is in the build context again, and what the image
+does not need is left out.
+
+The image is built and it runs: the panel answers, the page is served and
+the health check of the container is green.
+
 ### The panel itself, in Go
 
 `bull-tunnel-panel` is the panel: the API, the web interface, the monitor

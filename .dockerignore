@@ -9,12 +9,10 @@ data
 venv
 .venv
 docs/*.png
+# the Python tests are not in the image
 tests
-# the Go module: the image carries the Python panel, and the engine is
-# built by the release, not by the image
-go.mod
-go.sum
+pyproject.toml
+requirements.txt
+new-ui
+deploy
 build.sh
-cmd
-internal
-vendor
