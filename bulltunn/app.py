@@ -231,6 +231,17 @@ def keep_secret(new: str | None, old: str) -> str:
     return old if new is None or new == MASK else new
 
 
+class PanelStatic(StaticFiles):
+    """The panel is updated in place. A browser that keeps the old
+    stylesheet next to the new page would show a broken panel, so the
+    static files are revalidated on every load instead of being cached."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 # ------------------------------------------------------------------ app
 class Hub:
     """Live WebSocket clients."""
@@ -1022,7 +1033,7 @@ WantedBy=multi-user.target
         return {"ok": True, "summary": bk.summary(data_), "created": data_.get("created", 0), "relogin": relogin}
 
     # ---- static UI -----------------------------------------------------
-    app.mount("/static", StaticFiles(directory=STATIC), name="static")
+    app.mount("/static", PanelStatic(directory=STATIC), name="static")
 
     @app.get("/")
     async def index():
