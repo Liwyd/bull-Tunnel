@@ -20,6 +20,12 @@ with sharp ones.
   under the address, the state dot in its corner, and a soft tint on the
   card that is picked and on the ones the path goes through. The rows of
   chips are gone: the meta is text, the way the type-1 card has it.
+- **The points where a wire meets a card are drawn**, in the colour of the
+  wire, the way the type-1 graph draws them: they say which side of the
+  card the path uses.
+- **The card of a domain** has the name in the panel's own face, the
+  address on the left and the DNS account on the right, and the route the
+  traffic really uses in the text colour while the others stay quiet.
 - **The labels on the wires are plain text**, in the colour of the state,
   dimmed for the standby tunnels. The wire that is picked gets a pill
   around its label, as in the type-1 design.

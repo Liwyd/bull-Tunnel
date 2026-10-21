@@ -338,6 +338,11 @@ where the older, softer shape is kept.
   quiet line of meta, the state dot in the corner, and a soft tint on the
   card that is picked and on the ones the path goes through. The rows of
   chips are gone.
+* ✅ **The points where a wire meets a card are drawn**, in the colour of
+  the wire, the way the type-1 graph draws them.
+* ✅ **The card of a domain**: the name in the panel's own face, the
+  address on the left and the DNS account on the right, the route the
+  traffic really uses in the text colour and the others quiet.
 * ✅ The labels on the wires are plain text in the colour of the state, and
   the wire that is picked gets a pill around its label.
 * ✅ Every wire carries its label, the healthy ones included.
@@ -345,7 +350,8 @@ where the older, softer shape is kept.
 * ✅ The screenshots in `docs/` were taken again.
 
 **Findings closed by this commit:** the graph that was built from the type-2
-design instead of the type-1 one.
+design instead of the type-1 one, and the details of the nodes that were
+left out.
 
 ---
 

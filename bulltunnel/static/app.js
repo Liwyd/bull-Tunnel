@@ -463,11 +463,13 @@ function nodeCard(s) {
 function domainCard(d) {
   const p = provider(d.provider_id);
   const routes = (d.routes || []).slice(0, 3);
-  // the type-1 flow card lists the routes as plain lines under the address
+  // The routes of the type-1 card: the one the traffic really uses is in
+  // the text colour, the others are quiet.
   const lines = routes.map((r) => {
     const l = linkById(r.link_id);
     const ex = r.exit ? ` → ${exitText(r.exit)}` : "";
-    return `<span class="route ${r.healthy ? "" : "bad"}" title="${esc(l ? linkName(l) : "no tunnel")}">${esc(r.spec)} → ${esc(l ? nm(l.kharej_id) : "?")}${esc(ex)}</span>`;
+    const on = l && l.iran_id === d.iran_id && r.healthy;
+    return `<span class="route ${on ? "on" : r.healthy ? "" : "bad"}" title="${esc(l ? linkName(l) : "no tunnel")}">${esc(r.spec)} → ${esc(l ? nm(l.kharej_id) : "?")}${esc(ex)}</span>`;
   }).join("");
   const more = (d.routes || []).length - routes.length;
   const flags = [];
@@ -478,10 +480,10 @@ function domainCard(d) {
   return {
     cls: "fnode domain",
     html: `<div class="r1"><span class="nm">${esc(d.fqdn)}</span><span class="dot ${d.status}"></span></div>
-      <div class="ip">${esc(d.current_ip || "—")}</div>
+      <div class="ip"><span>${esc(d.current_ip || "—")}</span><span class="pname">${p ? (p.kind === "cloudflare" ? "Cloudflare" : "ArvanCloud") : "no account"}</span></div>
       ${lines ? `<div class="routes">${lines}${more > 0 ? `<span class="route muted">+${more} more</span>` : ""}</div>` : ""}
-      <div class="r3"><span class="role">${p ? (p.kind === "cloudflare" ? "Cloudflare" : "ArvanCloud") : "no account"}</span>
-      <span class="meta">${d.ttl}s${flags.length ? " · " + flags.join(" · ") : ""}</span></div>`,
+      <div class="r3"><span class="role">${d.ttl}s TTL</span>
+      <span class="meta">${flags.join(" · ")}</span></div>`,
   };
 }
 
@@ -674,6 +676,14 @@ function drawWiresNow() {
       const cls = `wire ${moved ? "handover" : e.st}${sel ? " sel" : ""}${e.standby ? " standby" : ""}`;
       parts.push(`<path class="${cls}" d="${c.d}" data-link="${l.id}"/>`);
       parts.push(`<path class="hit" d="${c.d}" data-link="${l.id}"/>`);
+      // the points where the wire meets the card, in the colour of the wire:
+      // the type-1 design draws them, and they say which side of the card the
+      // path uses
+      const colour = e.st === "up" ? "var(--ok)" : e.st === "down" ? "var(--down)"
+        : e.st === "degraded" ? "var(--degraded)" : e.st === "testing" ? "var(--testing)"
+        : moved ? "var(--forward)" : "var(--muted)";
+      parts.push(`<circle class="anchor" cx="${x1.toFixed(1)}" cy="${e.y_a.toFixed(1)}" r="4" fill="${colour}"/>`);
+      parts.push(`<circle class="anchor" cx="${x2.toFixed(1)}" cy="${e.y_b.toFixed(1)}" r="4" fill="${colour}"/>`);
       let txt;
       if (e.st === "testing") txt = "testing…";
       else if (moved) txt = `${l.transport} · ports moved`;
@@ -685,6 +695,8 @@ function drawWiresNow() {
     } else {
       const d = e.d;
       parts.push(`<path class="dwire ${d.pending_ip ? "pending-dns" : d.status}" d="${c.d}" data-domain="${d.id}"/>`);
+      // the domain card is reached from the left, and the point is marked too
+      parts.push(`<circle class="anchor" cx="${x2.toFixed(1)}" cy="${e.y_b.toFixed(1)}" r="4" fill="var(--muted)"/>`);
     }
   }
   wiresEl.innerHTML = `<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"/></marker></defs>` + parts.join("") + labels.join("");
