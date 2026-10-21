@@ -29,6 +29,10 @@ export CGO_ENABLED=0
 export GOFLAGS=-mod=vendor
 
 mkdir -p "$OUT"
+# The output directory is made absolute before the build moves into the
+# engine: a relative "dist" would otherwise land in engine/dist, and the
+# release would carry the panel without the engine.
+OUT="$(cd "$OUT" && pwd)"
 cd "$HERE"
 
 # name:GOARCH[:GOARM]  the name is the one the control panel looks for
