@@ -7,6 +7,29 @@ only adds something.
 
 ## Unreleased
 
+### The brain of the panel, in Go
+
+`internal/panel/orch` is the state machine of the panel: the check cycle,
+the discovery, the repair, the adoption, the failover, the failback, the
+handovers, the exits and the propagation — and what the bot says about all
+of it.
+
+- **The failover policy is the one of the Python panel**: a domain that
+  cannot be served where it is moves to the first healthy tunnel of its
+  group — to another Iran server (the record moves) or to a spare tunnel on
+  the same one (the ports are handed over) — and the traffic comes back to
+  the primary once it has been stable, with not a single drop.
+- **The observe mode changes nothing**: the panel says what it would have
+  done, once, and does nothing.
+- **The command channel** is the panel's side of the contract with the
+  agent: the same bytes, the same signature, the same test vector as the
+  engine and the Python panel.
+
+The work runs in the check cycle, not in the background: the state is
+shared, and Go has no cooperative multitasking — two goroutines writing the
+same tunnel would be a race. The lock that lets the panel read the state
+while the cycle writes it comes with the API.
+
 ### The decisions of the brain
 
 The brain of the panel now decides in Go: whether a tunnel is healthy,

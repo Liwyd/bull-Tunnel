@@ -120,6 +120,17 @@ func (s *Store) SetHandover(srcID string, dstID string) bool {
 	return true
 }
 
+// HandoverHas tells whether a tunnel is the one that exposes the ports of
+// another one.
+func (s *Store) HandoverHas(linkID string) bool {
+	for _, dst := range s.Handover {
+		if dst == linkID {
+			return true
+		}
+	}
+	return false
+}
+
 // LinkPorts are the forwarded ports the Iran end of a tunnel exposes: its
 // own (unless it handed them over) plus those of every tunnel handed over
 // to it.

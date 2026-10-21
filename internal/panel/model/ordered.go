@@ -48,6 +48,23 @@ func (o *Ordered) Set(key string, value any) {
 	o.values[key] = value
 }
 
+// Delete takes a key out of the map.
+func (o *Ordered) Delete(key string) {
+	if o == nil || o.values == nil {
+		return
+	}
+	if _, there := o.values[key]; !there {
+		return
+	}
+	delete(o.values, key)
+	for i, other := range o.keys {
+		if other == key {
+			o.keys = append(o.keys[:i], o.keys[i+1:]...)
+			break
+		}
+	}
+}
+
 // Has tells whether the map holds a key.
 func (o *Ordered) Has(key string) bool {
 	_, there := o.Get(key)

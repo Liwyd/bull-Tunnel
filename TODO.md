@@ -640,14 +640,27 @@ changes ✓) comes with the rest of the panel ✓.
   holds what the Python panel decides for a state ✓, and the Go panel must
   decide the same ✓ — down to the words it says to the operator ✓.
 
-### Phase 6 — the orchestrator
+### Phase 6 — the orchestrator  ✅ done
 
-* `internal/panel/orch`: the state machine of `bulltunn/orchestrator.py`:
+* ✅ `internal/panel/orch`: the state machine of `bulltunnel/orchestrator.py`:
   the discovery ✓, the adoption ✓, the checks ✓, the repair ✓, the
   handover ✓, the failover ✓, the failback ✓, the propagation ✓, the
-  exits ✓, the command channel ✓.
-* The tests: `tests/test_failover.py` ✓ and `tests/test_safety.py` ✓
-  translated ✓ (the world of the tests becomes a Go fixture ✓).
+  exits ✓, the command channel ✓ (`internal/panel/cmdchannel` ✓ — the same
+  bytes as the agent's ✓, the same test vector ✓) and what the bot says ✓.
+* ✅ The tests: `tests/test_failover.py` ✓ and `tests/test_safety.py` ✓
+  translated ✓ — the cycle ✓, the failover ✓, the handover ✓, the observe
+  mode ✓, the adoption ✓, the repair ✓ — with a stand-in for the servers ✓,
+  the way the Python panel is tested ✓.
+* ✅ The decisions are a contract: `tests/fixtures/state-decisions.json` ✓.
+
+**One difference with the Python panel, and why:** the Python panel runs the
+repairs and the discoveries in the background, so the check cycle is never
+held up by a repair that takes a minute. The Go panel does them in the
+cycle, because the state is shared and Go has no cooperative multitasking:
+two goroutines writing the same tunnel would be a race. The lock that lets
+the panel read the state while the cycle writes it comes with the API
+(phase 7), where the panel's real concurrency starts — and the background
+work moves there with it.
 
 **Done when:** the Go orchestrator makes the same decisions as the Python
 one on the same fixtures ✓ (the contract test ✓).
@@ -734,8 +747,8 @@ already work ✓.
 | 16 | The Go rewrite — phase 5 (dns, telegram, backups) | done |
 | 17 | The questions the panel asks its state | done |
 | 18 | The decisions of the brain | done |
-| 19 | The Go rewrite — phase 6 (the orchestrator) | **next** |
-| 20 | The Go rewrite — phase 7 (the api) | pending |
+| 19 | The Go rewrite — phase 6 (the orchestrator) | done |
+| 20 | The Go rewrite — phase 7 (the api) | **next** |
 | 21 | The Go rewrite — phase 8 (the command) | pending |
 | 22 | The Go rewrite — phase 9 (the switchover) | pending |
 | 23 | The Go rewrite — phase 10 (the dashboard) | later |

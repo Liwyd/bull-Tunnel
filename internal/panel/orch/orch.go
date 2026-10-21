@@ -28,8 +28,11 @@ package orch
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
+	"github.com/Liwyd/bull-Tunnel/internal/panel/dns"
+	"github.com/Liwyd/bull-Tunnel/internal/panel/engine"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/model"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/store"
 )
@@ -37,14 +40,73 @@ import (
 // Orchestrator is the brain: it looks at the state and decides.
 type Orchestrator struct {
 	store *store.Store
+	// mu guards what the background work touches: the tunnels that are
+	// busy, and what the panel has learnt at run time.
+	mu sync.Mutex
 	// busy are the links with an operation in flight: a tunnel that is
 	// being built or repaired is not healthy yet.
 	busy map[string]bool
+	// woken says that the monitor must check right now.
+	woken bool
+
+	// driver is how the panel talks to the servers.
+	driver Driver
+	// dnsFactory builds the client of a DNS account.
+	dnsFactory func(provider *model.DNSProvider) (dns.Client, error)
+	// notify sends a message to the operator.
+	notify func(text string)
+	// broadcast tells the web interface that something changed.
+	broadcast func(message map[string]any)
+	// resolver watches the propagation of a changed record.
+	resolver Resolver
+
+	// repairAfter is when a tunnel may be repaired again.
+	repairAfter map[string]float64
+	// lastProbe is what the last health check said about a tunnel.
+	lastProbe map[string]*engine.Probe
+	// prevOK says whether a tunnel was healthy at the last check.
+	prevOK map[string]bool
+	// flapReported are the tunnels the panel already complained about.
+	flapReported map[string]bool
+	// suggested is what the panel would have done, in observe mode.
+	suggested map[string]string
+	// lastRead is when the record of a domain was last read.
+	lastRead map[string]float64
+
+	lastCheck float64
+	lastScan  float64
+	lastExits float64
 }
 
 // New returns the brain of a panel.
 func New(st *store.Store) *Orchestrator {
-	return &Orchestrator{store: st, busy: map[string]bool{}}
+	return &Orchestrator{
+		store:        st,
+		busy:         map[string]bool{},
+		repairAfter:  map[string]float64{},
+		lastProbe:    map[string]*engine.Probe{},
+		prevOK:       map[string]bool{},
+		flapReported: map[string]bool{},
+		suggested:    map[string]string{},
+		lastRead:     map[string]float64{},
+	}
+}
+
+// Wake asks the monitor to check right now.
+func (o *Orchestrator) Wake() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.woken = true
+}
+
+// Woken says whether the monitor was asked to check right now, and forgets
+// it.
+func (o *Orchestrator) Woken() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	woken := o.woken
+	o.woken = false
+	return woken
 }
 
 // Store is the state the brain looks at.
@@ -54,10 +116,16 @@ func (o *Orchestrator) Store() *store.Store { return o.store }
 func (o *Orchestrator) settings() *model.Settings { return o.store.Settings }
 
 // Busy tells whether an operation is running on a tunnel.
-func (o *Orchestrator) Busy(linkID string) bool { return o.busy[linkID] }
+func (o *Orchestrator) Busy(linkID string) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.busy[linkID]
+}
 
 // SetBusy says that an operation is running on a tunnel.
 func (o *Orchestrator) SetBusy(linkID string, busy bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	if busy {
 		o.busy[linkID] = true
 		return
