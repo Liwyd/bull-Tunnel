@@ -683,6 +683,19 @@ limiter of the login ✓.
   ✓) — the operator does not have to log in again when the panel is
   swapped ✓.
 
+### Commit 21 — the state the dashboard is shown  ✅ done
+
+The shape of the state the web interface renders: it is a contract between
+the two panels, and the front-end depends on it.
+
+* ✅ `internal/panel/store/snapshot.go`: the servers without their secrets
+  ✓, the tunnels with the ports they expose now ✓, the tunnel that exposes
+  them after a handover ✓ and where the traffic leaves from ✓, and the
+  domains with the tunnels they may use ✓ and where each of their ports
+  goes ✓.
+* ✅ The fixture `tests/fixtures/state-snapshot.json` holds what the Python
+  panel shows for a state ✓, and the Go panel must show the same ✓.
+
 ### Phase 7 — the API
 
 * `internal/panel/api`: the endpoints of `bulltunn/app.py` ✓, one for
@@ -767,10 +780,11 @@ already work ✓.
 | 18 | The decisions of the brain | done |
 | 19 | The Go rewrite — phase 6 (the orchestrator) | done |
 | 20 | The door of the panel (the auth) | done |
-| 21 | The Go rewrite — phase 7 (the api) | **next** |
-| 22 | The Go rewrite — phase 8 (the command) | pending |
-| 23 | The Go rewrite — phase 9 (the switchover) | pending |
-| 24 | The Go rewrite — phase 10 (the dashboard) | later |
+| 21 | The state the dashboard is shown | done |
+| 22 | The Go rewrite — phase 7 (the api) | **next** |
+| 23 | The Go rewrite — phase 8 (the command) | pending |
+| 24 | The Go rewrite — phase 9 (the switchover) | pending |
+| 25 | The Go rewrite — phase 10 (the dashboard) | later |
 
 **All the findings of the audit are closed, and the graph is the type-1
 design.** What is left is the Go rewrite above, and the work that never
