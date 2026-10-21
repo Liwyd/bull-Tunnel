@@ -18,6 +18,7 @@ require (
 	github.com/flynn/noise v1.1.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/klauspost/reedsolomon v1.14.2
+	github.com/pkg/sftp v1.13.11
 	github.com/quic-go/quic-go v0.63.0
 	github.com/refraction-networking/utls v1.8.2
 	github.com/shirou/gopsutil/v4 v4.26.9
@@ -37,6 +38,7 @@ require (
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
+	github.com/kr/fs v0.1.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/power-devops/perfstat v0.0.0-20260805114148-88456608a4f6 // indirect

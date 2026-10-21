@@ -11,13 +11,32 @@
 package model
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
 	"time"
 )
+
+// Marshal writes a value as the panel's files write it: indented by one
+// space, with the characters Python leaves alone (Go escapes the HTML ones
+// by default) and without a line of its own at the end.
+//
+// The state file and the file of the host keys are written this way, so
+// that the two panels write the same bytes for the same thing.
+func Marshal(value any) ([]byte, error) {
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", " ")
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
+}
 
 // The role of a server: the one inside Iran, which the traffic comes to,
 // and the one outside, which the traffic goes to.

@@ -8,7 +8,6 @@
 package store
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -239,14 +238,7 @@ func (s *Store) Save() error {
 // space, with the characters Python leaves alone (Go escapes the HTML ones
 // by default) and without a line of its own at the end.
 func Marshal(value any) ([]byte, error) {
-	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent("", " ")
-	if err := encoder.Encode(value); err != nil {
-		return nil, err
-	}
-	return bytes.TrimRight(buf.Bytes(), "\n"), nil
+	return model.Marshal(value)
 }
 
 // AddEvent writes one line in the log of the panel.

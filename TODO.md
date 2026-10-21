@@ -518,16 +518,25 @@ did not change ✓).
 **Done when:** a `state.json` of every version in `tests/fixtures/` loads
 in Go and comes out identical ✓.
 
-### Phase 3 — the SSH layer
+### Phase 3 — the SSH layer  ✅ done
 
-* `internal/panel/ssh`: the pool (one connection per server ✓, reused ✓),
-  the host keys (pinned ✓, the fingerprint shown ✓, a changed key refused
-  ✓), the password and the private key ✓, the timeouts ✓, the file
+* ✅ `internal/panel/ssh`: the pool (one connection per server ✓, reused
+  ✓), the host keys (pinned ✓, the fingerprint shown ✓, a changed key
+  refused ✓), the password and the private key ✓, the timeouts ✓, the file
   transfer (SFTP with the `cat >` fallback ✓).
-* `golang.org/x/crypto/ssh` (already in the module's dependencies ✓
-  through the engine ✓).
-* The tests: the ones of `tests/test_security.py` ✓ (the pinning ✓, the
-  reconnect ✓, the timeout ✓).
+* ✅ `golang.org/x/crypto/ssh` (already in the module's dependencies ✓
+  through the engine ✓), and `github.com/pkg/sftp` for the SFTP ✓ — the
+  engine does not need it, the panel needs a client for it ✓.
+* ✅ The tests: the pinning ✓, the reconnect ✓, the timeout ✓, the
+  password ✓, the private key ✓, the upload ✓ — against an SSH server that
+  is right there, in the test itself ✓, that runs the commands with the
+  shell of the machine ✓.
+* ✅ The file of the host keys is the same in the two panels, byte for byte
+  ✓ (`tests/fixtures/hostkeys-go.json` ✓).
+* ✅ One small difference with the Python panel, on purpose: the key the
+  operator wrote is part of what a connection was opened with ✓, so
+  changing it drops the connection and the next one is checked against the
+  new key ✓. The Python panel keeps the old connection until it breaks.
 
 **Done when:** the panel can open a connection, run a command, put a file
 and read the host key of a server it has never seen ✓.
@@ -647,9 +656,8 @@ already work ✓.
 | 10 | The Go rewrite — phase 0 (the licence) | done |
 | 11 | The Go rewrite — phase 1 (one module) | done |
 | 12 | The Go rewrite — phase 2 (the state) | done |
-| 13 | The Go rewrite — phase 3 (ssh) | **next** |
-| 13 | The Go rewrite — phase 3 (ssh) | pending |
-| 14 | The Go rewrite — phase 4 (the engine driver) | pending |
+| 13 | The Go rewrite — phase 3 (ssh) | done |
+| 14 | The Go rewrite — phase 4 (the engine driver) | **next** |
 | 15 | The Go rewrite — phase 5 (dns, telegram, backups) | pending |
 | 16 | The Go rewrite — phase 6 (the orchestrator) | pending |
 | 17 | The Go rewrite — phase 7 (the api) | pending |

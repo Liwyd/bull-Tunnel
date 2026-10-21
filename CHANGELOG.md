@@ -7,6 +7,34 @@ only adds something.
 
 ## Unreleased
 
+### The SSH layer of the panel, in Go
+
+`internal/panel/ssh` is the panel's access to the servers it manages: one
+connection per server, kept and reused, with the host keys pinned.
+
+- **The host key of a server is pinned.** The first connection records it,
+  and every later connection must present the same one — a key that changed
+  means something is in the middle, and the connection is refused. The
+  operator can also write the expected fingerprint into the settings of the
+  server, and then even the first contact is checked.
+- **A command that does not finish in time is not run again.** The
+  connection is dropped, because it may be in a state nobody can predict.
+  A connection that died under the panel is opened again, and the command
+  is run once more.
+- **A private key that cannot be read is the operator's mistake, not a
+  fault of the network** — but it is an error of the SSH layer and nothing
+  else, so one bad server cannot stop the check cycle.
+- **A file is written with SFTP**, and with the shell on a server that has
+  no SFTP subsystem, which is what the smallest images have.
+- **The file of the host keys is the same in the two panels**, byte for
+  byte: `tests/fixtures/hostkeys-go.json` is the file the Go panel writes
+  and the Python panel reads it back.
+
+The tests run against an SSH server that is right there, in the test
+itself, that runs the commands with the shell of the machine — the panel is
+tested the way it works in production: over a socket, with a host key, with
+a password and with a private key.
+
 ### The state of the panel, in Go
 
 The first half of the panel's Go rewrite: the model and the state file.
