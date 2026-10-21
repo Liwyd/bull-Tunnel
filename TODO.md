@@ -588,14 +588,21 @@ the time a tunnel took to come up was a thousand times too big.
 (The old measurements in the history of a tunnel are in the old unit and
 fade away by themselves; the numbers from now on are the real ones.)
 
-### Phase 5 — the DNS, the Telegram and the backups
+### Phase 5 — the DNS, the Telegram and the backups  ✅ done
 
-* `internal/panel/dns`: the Cloudflare and the Arvan clients ✓ (the same
+* ✅ `internal/panel/dns`: the Cloudflare and the Arvan clients ✓ (the same
   requests ✓, the same TXT quoting ✓), the resolvers ✓.
-* `internal/panel/telegram`: the bot (the long polling ✓, the commands ✓).
-* `internal/panel/backup`: the same format (gzip + AES-256-GCM with
+* ✅ `internal/panel/telegram`: the bot (the long polling ✓, the commands
+  ✓).
+* ✅ `internal/panel/backup`: the same format (gzip + AES-256-GCM with
   scrypt ✓) so a backup of 1.1.2 restores in the Go panel ✓ and the other
   way round ✓.
+* ✅ The backups are a contract: `tests/fixtures/` holds a backup written by
+  the Python panel ✓ (plain and encrypted ✓) and one written by the Go
+  panel ✓, and each panel reads the one of the other ✓.
+* ✅ The DNS clients and the bot are tested against a server that is right
+  there ✓, with the same requests and the same bodies as the Python panel
+  ✓.
 
 **Done when:** a backup written by the Python panel restores with the Go
 panel and the other way round ✓.
@@ -691,12 +698,12 @@ already work ✓.
 | 13 | The Go rewrite — phase 3 (ssh) | done |
 | 14 | The Go rewrite — phase 4 (the engine driver) | done |
 | 15 | The health script counts milliseconds, not microseconds | done |
-| 16 | The Go rewrite — phase 5 (dns, telegram, backups) | **next** |
-| 16 | The Go rewrite — phase 6 (the orchestrator) | pending |
-| 17 | The Go rewrite — phase 7 (the api) | pending |
-| 18 | The Go rewrite — phase 8 (the command) | pending |
-| 19 | The Go rewrite — phase 9 (the switchover) | pending |
-| 20 | The Go rewrite — phase 10 (the dashboard) | later |
+| 16 | The Go rewrite — phase 5 (dns, telegram, backups) | done |
+| 17 | The Go rewrite — phase 6 (the orchestrator) | **next** |
+| 18 | The Go rewrite — phase 7 (the api) | pending |
+| 19 | The Go rewrite — phase 8 (the command) | pending |
+| 20 | The Go rewrite — phase 9 (the switchover) | pending |
+| 21 | The Go rewrite — phase 10 (the dashboard) | later |
 
 **All the findings of the audit are closed, and the graph is the type-1
 design.** What is left is the Go rewrite above, and the work that never

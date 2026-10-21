@@ -7,6 +7,21 @@ only adds something.
 
 ## Unreleased
 
+### The DNS, the Telegram and the backups, in Go
+
+- **`internal/panel/dns`** is the panel's access to Cloudflare and
+  ArvanCloud: the same requests, the same bodies and the same way of
+  quoting the text of a TXT record as the Python panel — the command
+  channel lives in one, and the panel must not split it.
+- **`internal/panel/telegram`** is the bot: it pushes every event to the
+  configured chats and answers the commands of the chats that are linked to
+  the panel.
+- **`internal/panel/backup`** writes and reads the backups of the panel.
+  The format is the one the Python panel writes — gzipped JSON, encrypted
+  with AES-256-GCM and a key from scrypt — so a backup written by one
+  panel is restored by the other. The files in `tests/fixtures/` are the
+  contract: each panel reads the backup of the other.
+
 ### The time of a tunnel is the time it really took
 
 The health check of a tunnel measured the time in **microseconds** and the
