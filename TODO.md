@@ -795,12 +795,21 @@ wheels with a vulnerable OpenSSL (fixed in 48.0.1).
 **Done when:** the web interface (the current `static/`) works against the
 Go panel without a change ✓, and the API answers the same JSON ✓.
 
-### Phase 8 — the management command
+### Phase 8 — the management command  ✅ done
 
-* `cmd/bull-tunnel/main.go` with the subcommands of `bulltunnel/cli.py` ✓:
-  the menu ✓, the status ✓, the servers ✓, the tunnels ✓, the domains ✓,
-  the DNS ✓, the engine ✓, the backups ✓, the service ✓, the log ✓, the
-  password ✓, the doctor ✓.
+`cmd/bull-tunnel`: the hand on the panel. It runs on the machine the panel
+runs on, talks to the panel over its own API and needs no password: the
+panel wrote a key for it, in a file only the owner of the machine can read,
+and the panel accepts that key only from this machine.
+
+* ✅ The commands of the Python panel ✓: the status ✓, the servers ✓, the
+  tunnels ✓, the domains ✓, the DNS accounts ✓, the engine ✓, the backups
+  ✓, the service ✓, the log ✓, the password ✓ and the doctor ✓.
+* ✅ The menu ✓ — a list, a number, and it does the thing ✓.
+* ✅ The password is read without an echo ✓, and the secret the sessions are
+  signed with is rotated ✓, so every session is invalid afterwards ✓.
+* ✅ The release carries the binary now ✓:
+  `bull-tunnel_linux_<arch>.tar.gz` ✓ next to the engine's ✓.
 
 **Done when:** `bull-tunnel` opens the menu and every command does what the
 Python one did ✓.
@@ -875,8 +884,8 @@ already work ✓.
 | 25 | The endpoints that talk to the outside | done |
 | 26 | The declared dependencies cannot pull a vulnerable version | done |
 | 27 | The Go rewrite — phase 7 (the api) | done |
-| 28 | The Go rewrite — phase 8 (the command) | **next** |
-| 29 | The Go rewrite — phase 9 (the switchover) | pending |
+| 28 | The Go rewrite — phase 8 (the command) | done |
+| 29 | The Go rewrite — phase 9 (the switchover) | **next** |
 | 30 | The Go rewrite — phase 10 (the dashboard) | later |
 
 **All the findings of the audit are closed, and the graph is the type-1

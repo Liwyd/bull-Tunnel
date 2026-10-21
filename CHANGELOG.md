@@ -7,6 +7,24 @@ only adds something.
 
 ## Unreleased
 
+### The management tool of the panel, in Go
+
+`bull-tunnel` is the hand on the panel: it runs on the machine the panel
+runs on, talks to the panel over its own API and needs no password — the
+panel wrote a key for it, in a file only the owner of the machine can read,
+and the panel accepts that key only from this machine.
+
+Every command of the Python tool is there — the status, the servers, the
+tunnels, the domains, the DNS accounts, the engine, the backups, the
+service, the log, the password and the doctor — and so is the menu: a list, a
+number, and it does the thing.
+
+The password is read without an echo, and the secret the sessions are
+signed with is rotated, so every session is invalid afterwards.
+
+The release carries the binary now, next to the engine's:
+`bull-tunnel_linux_<arch>.tar.gz`.
+
 ### The API of the panel is complete
 
 Every endpoint of the Python panel is there, one for one, with the same
