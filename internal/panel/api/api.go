@@ -121,8 +121,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/setup", s.setup)
 	mux.HandleFunc("/api/login", s.login)
 	mux.HandleFunc("/api/logout", s.logout)
-	mux.HandleFunc("/api/state", s.authed(s.state))
-	mux.HandleFunc("/api/layout", s.authed(s.layout))
+	mux.HandleFunc("/api/state", s.authed(s.read(s.state)))
+	mux.HandleFunc("/api/layout", s.authed(s.write(s.layout)))
 	mux.HandleFunc("/api/check", s.authed(s.check))
 	mux.HandleFunc("/api/scan", s.authed(s.scan))
 	mux.HandleFunc("/api/discover", s.authed(s.discover))
@@ -137,7 +137,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/settings", s.authed(s.settings))
 	mux.HandleFunc("/api/probe", s.authed(s.probe))
 	mux.HandleFunc("/api/telegram/test", s.authed(s.telegramTest))
-	mux.HandleFunc("/api/backups", s.authed(s.backups))
+	mux.HandleFunc("/api/backups", s.authed(s.read(s.backups)))
 	mux.HandleFunc("/api/backups/run", s.authed(s.runBackup))
 	mux.HandleFunc("/api/backups/download", s.authed(s.downloadBackup))
 	mux.HandleFunc("/api/backups/restore", s.authed(s.restoreBackup))
@@ -164,6 +164,25 @@ func (s *Server) headers(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// read is a handler that only looks at the state: the lock is taken for
+// reading, so the panel keeps answering while the monitor is writing.
+func (s *Server) read(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.store.RLock()
+		defer s.store.RUnlock()
+		next(w, r)
+	}
+}
+
+// write is a handler that changes the state: the lock is taken for writing.
+func (s *Server) write(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.store.Lock()
+		defer s.store.Unlock()
+		next(w, r)
+	}
 }
 
 // authed is a handler that needs the operator to be logged in.

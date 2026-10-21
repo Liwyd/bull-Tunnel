@@ -852,6 +852,35 @@ first `COPY` ("/go.mod: not found").
 * ✅ The image is built and it runs ✓: the panel answers ✓, the page is
   served ✓ and the health check of the container is green ✓.
 
+### Commit 31 — the panel does not fall over its own state  ✅ done
+
+The Go panel is two things at once: the monitor writes the state, and the
+web interface reads it. **Go does not forgive a map that is read and written
+at the same time** — the runtime stops the whole panel, and the dashboard
+takes the tunnels with it. The state was not behind any lock.
+
+* ✅ The state is behind a lock ✓ (`internal/panel/store` ✓): the reader
+  takes it for reading ✓, the writer for writing ✓, and the network calls
+  are made with it released ✓ — or the panel would answer nothing while a
+  slow server was being checked ✓.
+* ✅ The repairs and the discoveries run in the background ✓, the way the
+  Python panel does them ✓: a repair can take a minute ✓, and the check
+  cycle is what checks every tunnel and moves every domain ✓.
+* ✅ The maps of the forwarded ports have a lock of their own ✓: they are
+  worked out again when something they depend on changes ✓, so they are
+  written even by a reader ✓.
+* ✅ The test: the cycle runs while the dashboard asks for the state, over
+  and over ✓, under the race detector ✓
+  (`internal/panel/api/concurrency_test.go` ✓). It fails without the lock ✓.
+
+**WARNING — the CRUD of the API waits for the cycle.** A change made by the
+operator (adding a server, saving a tunnel) takes the lock of the state, and
+the cycle holds it while it checks the servers, so the change can wait for
+the check to finish — up to the time a slow server takes to answer. It is
+bounded and rare, and it is better than a panel that falls over; it is fixed
+by letting the cycle give the lock back between its phases, which is a
+bigger change than this commit.
+
 ### Phase 9 — the switchover
 
 * The Python panel is retired: `bulltunnel/`, `tests/` (the Python part)
@@ -925,8 +954,9 @@ already work ✓.
 | 28 | The Go rewrite — phase 8 (the command) | done |
 | 29 | The panel itself, in Go | done |
 | 30 | The image is built again | done |
-| 31 | The Go rewrite — phase 9 (the switchover) | **next** |
-| 32 | The Go rewrite — phase 10 (the dashboard) | later |
+| 31 | The panel does not fall over its own state | done |
+| 32 | The Go rewrite — phase 9 (the switchover) | **next** |
+| 33 | The Go rewrite — phase 10 (the dashboard) | later |
 
 **All the findings of the audit are closed, and the graph is the type-1
 design.** What is left is the Go rewrite above, and the work that never

@@ -7,6 +7,22 @@ only adds something.
 
 ## Unreleased
 
+### The panel does not fall over its own state
+
+The Go panel is two things at once: the monitor writes the state, and the
+web interface reads it. **Go does not forgive a map that is read and
+written at the same time** — the runtime stops the whole panel, and the
+dashboard takes the tunnels with it. The state was not behind any lock.
+
+- The state is behind a lock now: the reader takes it for reading, the
+  writer for writing, and the network calls are made with it released — or
+  the panel would answer nothing while a slow server was being checked.
+- The repairs and the discoveries run in the background, the way the Python
+  panel does them: a repair can take a minute, and the check cycle is what
+  checks every tunnel and moves every domain.
+- The test: the cycle runs while the dashboard asks for the state, over and
+  over, under the race detector. It fails without the lock.
+
 ### The image is built again
 
 The `.dockerignore` still excluded the Go module — it was written when the

@@ -216,7 +216,7 @@ func (o *Orchestrator) markUp(link *model.Link, transport string, latency *float
 	link.LastChange = now
 	link.Error = ""
 	link.Verified = true
-	o.prevOK[link.ID] = true
+	o.setPrevOK(link.ID, true)
 	link.Built = true
 	link.Record(latency, 120)
 }
@@ -284,6 +284,8 @@ func (o *Orchestrator) Discover(link *model.Link, transports []string) bool {
 
 	results := []*model.TestResult{}
 	for _, transport := range candidates {
+		// the test is made with the lock released: it talks to the
+		// servers, and the panel must keep answering while it waits
 		results = append(results, o.try(link, transport, []string{}))
 	}
 	good := []*model.TestResult{}
@@ -312,7 +314,7 @@ func (o *Orchestrator) Discover(link *model.Link, transports []string) bool {
 			link.Transport = candidates[0]
 		}
 		link.FailCount = o.settings().FailThreshold
-		o.repairAfter[link.ID] = model.Now() + RepairBackoff
+		o.setRepairAfter(link.ID, model.Now()+RepairBackoff)
 		if link.Managed && o.driver != nil {
 			o.driver.Stop(link, iran, kharej)
 		}
@@ -322,6 +324,8 @@ func (o *Orchestrator) Discover(link *model.Link, transports []string) bool {
 	}
 	final := o.try(link, best.Transport, o.store.LinkPorts(link))
 	if !final.OK {
+		o.store.Lock()
+		defer o.store.Unlock()
 		link.Status = model.StatusDown
 		link.Error = final.Error
 		if link.Error == "" {
@@ -332,7 +336,9 @@ func (o *Orchestrator) Discover(link *model.Link, transports []string) bool {
 			map[string]string{"link": link.ID})
 		return false
 	}
+	o.store.Lock()
 	o.markUp(link, best.Transport, final.LatencyMS)
+	o.store.Unlock()
 	ranking := []string{}
 	for i, result := range good {
 		if i >= 4 {
@@ -398,7 +404,9 @@ func (o *Orchestrator) SetTransport(link *model.Link, transport string, pin bool
 	}
 	result := o.try(link, transport, o.store.LinkPorts(link))
 	if result.OK {
+		o.store.Lock()
 		o.markUp(link, transport, result.LatencyMS)
+		o.store.Unlock()
 		o.Emit("success", "transport", fmt.Sprintf("the protocol of %s changed from %s to %s (%.0fms)",
 			o.LinkLabel(link), orUnknown(old, "—"), transport, latencyOf(result)), true,
 			map[string]string{"link": link.ID})
@@ -445,7 +453,7 @@ func (o *Orchestrator) Repair(link *model.Link) bool {
 			}
 		}
 		ranked = o.Supported(link, ranked)
-		probe := o.lastProbe[link.ID]
+		probe := o.lastProbeOf(link.ID)
 		crashed := probe != nil && probe.Active != "active" && probe.Active != ""
 		// a service that died only needs a restart; a blocked transport is
 		// better tried last
@@ -465,10 +473,14 @@ func (o *Orchestrator) Repair(link *model.Link) bool {
 
 	ports := o.store.LinkPorts(link)
 	for _, transport := range order {
+		// the test is made with the lock released: it talks to the
+		// servers, and the panel must keep answering while it waits
 		result := o.try(link, transport, ports)
 		if result.OK {
+			o.store.Lock()
 			o.markUp(link, transport, result.LatencyMS)
-			delete(o.repairAfter, link.ID)
+			o.clearRepairAfter(link.ID)
+			o.store.Unlock()
 			how := "with the same protocol"
 			if transport != current {
 				how = fmt.Sprintf("with the protocol %s (previous: %s)", transport, orUnknown(current, "—"))
@@ -502,7 +514,7 @@ func (o *Orchestrator) Repair(link *model.Link) bool {
 	if link.FailCount < o.settings().FailThreshold {
 		link.FailCount = o.settings().FailThreshold
 	}
-	o.repairAfter[link.ID] = model.Now() + RepairBackoff
+	o.setRepairAfter(link.ID, model.Now()+RepairBackoff)
 	o.Emit("error", "repair", fmt.Sprintf("rebuilding the tunnel %s failed; no protocol answered (retrying in %d minutes)",
 		o.LinkLabel(link), RepairBackoff/60), true,
 		map[string]string{"link": link.ID})
@@ -575,7 +587,7 @@ func (o *Orchestrator) ScheduleRepairs() {
 		if link.Status != model.StatusDown || o.Busy(link.ID) {
 			continue
 		}
-		if o.repairAfter[link.ID] > model.Now() {
+		if o.repairAfterAt(link.ID) > model.Now() {
 			continue
 		}
 		iran, kharej := o.Pair(link)
@@ -583,9 +595,14 @@ func (o *Orchestrator) ScheduleRepairs() {
 			// reserve the tunnel now, so the next tick does not start it
 			// twice
 			o.SetBusy(link.ID, true)
-			o.SetBusy(link.ID, false)
-			o.Repair(link)
-			o.evaluateDomains()
+			// the repair runs in the background: it can take a minute, and
+			// the check cycle must not wait for it — the cycle is what
+			// checks every tunnel and moves every domain.
+			go func(link *model.Link) {
+				defer o.SetBusy(link.ID, false)
+				o.Repair(link)
+				o.evaluateDomains()
+			}(link)
 		}
 	}
 }
@@ -608,7 +625,7 @@ func (o *Orchestrator) kick(group []*model.Link) {
 		case model.StatusPending:
 			o.Discover(link, nil)
 		case model.StatusDown:
-			if o.repairAfter[link.ID] <= model.Now() {
+			if o.repairAfterAt(link.ID) <= model.Now() {
 				o.SetBusy(link.ID, true)
 				o.SetBusy(link.ID, false)
 				o.Repair(link)

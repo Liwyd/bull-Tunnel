@@ -80,6 +80,8 @@ func (s *Server) discover(w http.ResponseWriter, r *http.Request) {
 func (s *Server) servers(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		s.store.RLock()
+		defer s.store.RUnlock()
 		out := []any{}
 		for _, server := range s.store.Servers.List() {
 			out = append(out, s.serverBody(server))
@@ -218,6 +220,8 @@ func (b serverBody) model() *model.Server {
 func (s *Server) links(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		s.store.RLock()
+		defer s.store.RUnlock()
 		out := []any{}
 		for _, link := range s.store.Links.List() {
 			out = append(out, s.linkBody(link))
@@ -403,6 +407,8 @@ func (b linkBody) model() *model.Link {
 func (s *Server) domains(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		s.store.RLock()
+		defer s.store.RUnlock()
 		out := []any{}
 		for _, domain := range s.store.Domains.List() {
 			out = append(out, s.domainBody(domain))
@@ -537,6 +543,8 @@ func (b domainBody) model() *model.Domain {
 func (s *Server) providers(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		s.store.RLock()
+		defer s.store.RUnlock()
 		out := []any{}
 		for _, provider := range s.store.Providers.List() {
 			out = append(out, s.providerBody(provider))
@@ -645,8 +653,12 @@ func (b providerBody) model() *model.DNSProvider {
 func (s *Server) settings(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		s.store.RLock()
+		defer s.store.RUnlock()
 		writeJSON(w, http.StatusOK, s.settingsPublic())
 	case http.MethodPut:
+		s.store.Lock()
+		defer s.store.Unlock()
 		var body map[string]any
 		if err := readBody(r, &body); err != nil {
 			writeError(w, http.StatusBadRequest, "the request is not readable")

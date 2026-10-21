@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/Liwyd/bull-Tunnel/internal/panel/model"
@@ -27,6 +28,14 @@ type Store struct {
 	// in memory only, which is what the tests and the demo do.
 	path string
 
+	// mu guards the state. The monitor writes it while the API reads it,
+	// and Go does not forgive a map that is read and written at the same
+	// time: the runtime stops the panel. So the caller takes the lock
+	// around the phase that touches the state, and nothing else: the
+	// network calls are made with the lock released, or the panel would
+	// answer nothing while a slow server is being checked.
+	mu sync.RWMutex
+
 	Servers   *Set[model.Server]
 	Links     *Set[model.Link]
 	Domains   *Set[model.Domain]
@@ -41,8 +50,11 @@ type Store struct {
 	// Meta is the panel's own bookkeeping.
 	Meta map[string]any
 
-	// portMaps and ownerMaps are the maps of the forwarded ports of the Iran
-	// servers, worked out again when something they depend on changes.
+	// cacheMu guards the maps of the forwarded ports of the Iran servers:
+	// they are worked out again when something they depend on changes, so
+	// they are written even by a reader — they need a lock of their own,
+	// and not the lock of the state.
+	cacheMu   sync.Mutex
 	portMaps  map[string]*portMap
 	ownerMaps map[string]*portMap
 
@@ -84,6 +96,24 @@ func defaultsSettings() *model.Settings {
 
 // Path is where the state is written.
 func (s *Store) Path() string { return s.path }
+
+// Lock takes the lock of the state for writing. The caller must release it.
+//
+// The methods of the store do not lock by themselves: the panel works in
+// phases, and a phase that reaches the network must not hold the lock while
+// it waits. A phase that only reads takes RLock, a phase that changes
+// something takes Lock, and a phase that does both takes Lock for the
+// shortest time it can.
+func (s *Store) Lock() { s.mu.Lock() }
+
+// Unlock releases the lock of the state.
+func (s *Store) Unlock() { s.mu.Unlock() }
+
+// RLock takes the lock of the state for reading.
+func (s *Store) RLock() { s.mu.RLock() }
+
+// RUnlock releases the read lock of the state.
+func (s *Store) RUnlock() { s.mu.RUnlock() }
 
 // Load reads the state file.
 //

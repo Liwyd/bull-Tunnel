@@ -287,6 +287,10 @@ type portMap struct {
 // time it builds its state, and working it out from scratch each time is
 // what made the panel slow with many servers.
 func (s *Store) PortMap(iranID string) map[int]*model.Link {
+	// the cache is written here, so it has a lock of its own: a reader
+	// must not write it while another reader reads it.
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
 	cached, there := s.portMaps[iranID]
 	if there && cached.key == s.portMapKey(iranID) {
 		return cached.ports
@@ -313,6 +317,8 @@ func (s *Store) Owner(iranID string, spec string) *model.Link {
 	if port < 0 {
 		return nil
 	}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
 	cached, there := s.ownerMaps[iranID]
 	if !there || cached.key != s.portMapKey(iranID) {
 		out := map[int]*model.Link{}

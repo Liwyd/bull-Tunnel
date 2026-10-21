@@ -114,7 +114,9 @@ func (o *Orchestrator) Emit(level string, kind string, message string, notify bo
 		ID:      model.NewID("e"),
 		TS:      model.Now(),
 	}
+	o.store.Lock()
 	o.store.AddEvent(event)
+	o.store.Unlock()
 	if notify && o.notify != nil {
 		icon := telegramIcon(level)
 		o.notify(icon + " " + escapeHTML(message))
@@ -155,7 +157,7 @@ func (o *Orchestrator) Changed() {
 func (o *Orchestrator) CheckAll() {
 	o.store.EnsureLinks()
 	o.checkServers()
-	if o.settings().AutoAdopt && model.Now()-o.lastScan >= float64(o.settings().ScanInterval) {
+	if o.settings().AutoAdopt && model.Now()-o.LastScan() >= float64(o.settings().ScanInterval) {
 		o.ScanAll(nil)
 	}
 	o.checkLinks()
@@ -164,7 +166,7 @@ func (o *Orchestrator) CheckAll() {
 	o.releaseHandovers()
 	o.ScheduleRepairs()
 	o.checkPropagation()
-	o.lastCheck = model.Now()
+	o.setLastCheck(model.Now())
 	o.Changed()
 }
 
@@ -197,6 +199,11 @@ func (o *Orchestrator) checkServers() {
 	}
 	wg.Wait()
 
+	// the answers are in; the state is changed under the lock, and the
+	// operator is told after it — the lock must not be held while the
+	// panel writes to Telegram.
+	o.store.Lock()
+	says := []string{}
 	for _, r := range results {
 		server := r.server
 		kind := "Iran"
@@ -213,8 +220,7 @@ func (o *Orchestrator) checkServers() {
 				was := server.Status
 				server.Status = model.Online
 				if was == model.Offline {
-					o.Emit("success", "server", fmt.Sprintf("%s server %s (%s) is reachable again", kind, server.Name, server.IP), true,
-						map[string]string{"server": server.ID})
+					says = append(says, fmt.Sprintf("%s server %s (%s) is reachable again", kind, server.Name, server.IP))
 				}
 			}
 			continue
@@ -228,11 +234,14 @@ func (o *Orchestrator) checkServers() {
 		server.SSHLatencyMS = nil
 		if server.FailCount >= o.settings().FailThreshold && server.Status != model.Offline {
 			server.Status = model.Offline
-			o.Emit("error", "server", fmt.Sprintf("%s server %s (%s) ran into trouble and went offline: %v", kind, server.Name, server.IP, r.err), true,
-				map[string]string{"server": server.ID})
+			says = append(says, fmt.Sprintf("%s server %s (%s) ran into trouble and went offline: %v", kind, server.Name, server.IP, r.err))
 		} else if server.Status == model.Unknown {
 			server.Status = model.Offline
 		}
+	}
+	o.store.Unlock()
+	for _, say := range says {
+		o.Emit("info", "server", say, true, map[string]string{})
 	}
 }
 
@@ -250,17 +259,22 @@ func (o *Orchestrator) checkLinks() {
 		probes := map[string]*engine.Probe{}
 		if o.Usable(iran) && o.driver != nil {
 			// one Iran server that cannot be reached must not stop the
-			// others from being checked
+			// others from being checked. The check talks to the network,
+			// so it is made with the lock released.
 			if found, err := o.driver.Check(iran, links); err == nil {
 				probes = found
 			}
 		}
+		o.store.Lock()
 		for _, link := range links {
 			// the carriers the engine on the Iran side speaks: what the
 			// tunnel may be built with, and what the panel shows
 			if iran != nil && len(iran.EngineTransports) > 0 {
 				link.EngineTransports = append([]string{}, iran.EngineTransports...)
 			}
+		}
+		o.store.Unlock()
+		for _, link := range links {
 			if o.Busy(link.ID) {
 				continue
 			}
@@ -270,14 +284,30 @@ func (o *Orchestrator) checkLinks() {
 }
 
 // applyProbe writes what the health check says in the state of the tunnel.
+//
+// The state is changed under the lock of the state, and the operator is
+// told after it: the lock must not be held while the panel writes to
+// Telegram.
 func (o *Orchestrator) applyProbe(link *model.Link, probe *engine.Probe) {
+	o.store.Lock()
+	says := o.applyProbeLocked(link, probe)
+	o.store.Unlock()
+	for _, say := range says {
+		o.Emit(say.level, "link", say.message, say.notify, map[string]string{"link": link.ID})
+	}
+}
+
+// applyProbeLocked is the change of the state of a tunnel, with the lock
+// held. It gives back what the operator has to be told.
+func (o *Orchestrator) applyProbeLocked(link *model.Link, probe *engine.Probe) []aSaying {
+	says := []aSaying{}
 	now := model.Now()
 	if probe != nil {
-		o.lastProbe[link.ID] = probe
+		o.setLastProbe(link.ID, probe)
 	}
 	if probe != nil && probe.OK {
 		was := link.Status
-		o.prevOK[link.ID] = true
+		o.setPrevOK(link.ID, true)
 		link.LatencyMS = probe.LatencyMS
 		link.FailCount = 0
 		link.LastOK = now
@@ -291,23 +321,26 @@ func (o *Orchestrator) applyProbe(link *model.Link, probe *engine.Probe) {
 				link.UpSince = now
 			}
 			if was == model.StatusDown {
-				o.Emit("success", "link", fmt.Sprintf("tunnel %s (%s) is back up and in service", o.LinkLabel(link), link.Transport), true,
-					map[string]string{"link": link.ID})
+				says = append(says, aSaying{
+					level:   "success",
+					message: fmt.Sprintf("tunnel %s (%s) is back up and in service", o.LinkLabel(link), link.Transport),
+					notify:  true,
+				})
 			}
 		}
-		if o.flapReported[link.ID] && !o.Flapping(link) {
-			delete(o.flapReported, link.ID)
+		if o.isFlapReported(link.ID) && !o.Flapping(link) {
+			o.unmarkFlapping(link.ID)
 		}
-		return
+		return says
 	}
 	// failed
-	if o.prevOK[link.ID] {
+	if o.prevOKOf(link.ID) {
 		link.Flaps = append(link.Flaps, now)
 		if len(link.Flaps) > 50 {
 			link.Flaps = link.Flaps[len(link.Flaps)-50:]
 		}
 	}
-	o.prevOK[link.ID] = false
+	o.setPrevOK(link.ID, false)
 	link.LastFail = now
 	link.FailCount++
 	link.Record(nil, 120)
@@ -322,17 +355,20 @@ func (o *Orchestrator) applyProbe(link *model.Link, probe *engine.Probe) {
 	default:
 		link.Error = "tunnel not connected"
 	}
-	if o.Flapping(link) && !o.flapReported[link.ID] {
-		o.flapReported[link.ID] = true
+	if o.Flapping(link) && !o.isFlapReported(link.ID) {
+		o.markFlapping(link.ID)
 		drops := 0
 		for _, t := range link.Flaps {
 			if t >= now-float64(o.settings().FlapWindow) {
 				drops++
 			}
 		}
-		o.Emit("warning", "flap", fmt.Sprintf("tunnel %s keeps flapping: %d drops in the last %s",
-			o.LinkLabel(link), drops, FormatDuration(float64(o.settings().FlapWindow))), true,
-			map[string]string{"link": link.ID})
+		says = append(says, aSaying{
+			level: "warning",
+			message: fmt.Sprintf("tunnel %s keeps flapping: %d drops in the last %s",
+				o.LinkLabel(link), drops, FormatDuration(float64(o.settings().FlapWindow))),
+			notify: true,
+		})
 	}
 	if link.FailCount >= o.settings().FailThreshold {
 		if link.Status != model.StatusDown {
@@ -342,15 +378,26 @@ func (o *Orchestrator) applyProbe(link *model.Link, probe *engine.Probe) {
 			// down with it are not worth a Telegram message each
 			_, kharej := o.Pair(link)
 			cascade := probe == nil || (kharej != nil && kharej.Status == model.Offline)
-			o.Emit("error", "link", fmt.Sprintf("tunnel %s (%s) went down: %s", o.LinkLabel(link), link.Transport, link.Error), !cascade,
-				map[string]string{"link": link.ID})
+			says = append(says, aSaying{
+				level:   "error",
+				message: fmt.Sprintf("tunnel %s (%s) went down: %s", o.LinkLabel(link), link.Transport, link.Error),
+				notify:  !cascade,
+			})
 		}
-		return
+		return says
 	}
 	if link.Status == model.StatusUp {
 		link.Status = model.StatusDegraded
 		link.LastChange = now
 	}
+	return says
+}
+
+// aSaying is something the operator has to be told.
+type aSaying struct {
+	level   string
+	message string
+	notify  bool
 }
 
 // ---------------------------------------------------------------- the exits
@@ -358,10 +405,10 @@ func (o *Orchestrator) applyProbe(link *model.Link, probe *engine.Probe) {
 // checkExits asks the kharejs where their forwarded ports go. It is only
 // shown and reported: no decision depends on it.
 func (o *Orchestrator) checkExits() {
-	if model.Now()-o.lastExits < float64(max(60, o.settings().CheckInterval)) {
+	if model.Now()-o.lastExitsAt() < float64(max(60, o.settings().CheckInterval)) {
 		return
 	}
-	o.lastExits = model.Now()
+	o.setLastExits(model.Now())
 	for _, kharej := range o.store.Kharejs() {
 		if !o.Usable(kharej) {
 			continue
@@ -393,7 +440,9 @@ func (o *Orchestrator) checkExits() {
 		if err != nil {
 			continue
 		}
+		o.store.Lock()
 		o.updateExits(kharej, ports, found, reach)
+		o.store.Unlock()
 	}
 }
 

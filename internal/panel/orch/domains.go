@@ -15,21 +15,29 @@ import (
 // cannot go there.
 
 // evaluateDomains looks at every domain and moves the ones that must move.
+//
+// The decisions are taken with the lock of the state released for the
+// actions: a record is changed over the network, and the panel must not
+// stop answering while the DNS service is slow.
 func (o *Orchestrator) evaluateDomains() {
 	for _, domain := range o.store.Domains.List() {
 		if domain.IranID == "" {
 			o.assignInitial(domain)
 			continue
 		}
+		o.store.RLock()
 		group := o.store.GroupOf(domain)
 		hard, soft := o.Cover(domain, domain.IranID, group, false)
+		o.store.RUnlock()
 		if len(hard) == 0 && len(soft) == 0 {
 			if domain.Status != "ok" {
+				o.store.Lock()
 				domain.Status = "ok"
 				domain.Error = ""
+				o.store.Unlock()
 			}
-			if _, there := o.suggested[domain.ID]; there {
-				delete(o.suggested, domain.ID)
+			if o.suggestedOf(domain.ID) != "" {
+				o.clearSuggested(domain.ID)
 				o.Emit("success", "observe", fmt.Sprintf("domain %s is healthy again (observe mode: nothing was changed)", domain.FQDN), true,
 					map[string]string{"domain": domain.ID})
 			}
@@ -42,7 +50,9 @@ func (o *Orchestrator) evaluateDomains() {
 		why := strings.Join(firstN(hard, 3), "; ")
 		if !domain.AutoFailover {
 			if domain.Status != "broken" {
+				o.store.Lock()
 				domain.Status = "broken"
+				o.store.Unlock()
 				o.Emit("error", "domain", fmt.Sprintf("domain %s: %s (automatic failover is off)", domain.FQDN, why), true,
 					map[string]string{"domain": domain.ID})
 			}
@@ -60,7 +70,9 @@ func (o *Orchestrator) evaluateDomains() {
 				continue // a tunnel of the group is being built or repaired right now
 			}
 			if domain.Status != "broken" {
+				o.store.Lock()
 				domain.Status = "broken"
+				o.store.Unlock()
 				o.Emit("error", "domain", fmt.Sprintf("domain %s: %s — and no other Iran server has all of its ports (%s) healthy; the record was left untouched",
 					domain.FQDN, why, strings.Join(o.store.DomainSpecs(domain), ", ")), true,
 					map[string]string{"domain": domain.ID})
@@ -69,7 +81,9 @@ func (o *Orchestrator) evaluateDomains() {
 			continue
 		}
 		if o.settings().ObserveOnly {
+			o.store.Lock()
 			domain.Status = "broken"
+			o.store.Unlock()
 			o.suggest(domain, plan, why)
 			continue
 		}
@@ -78,7 +92,9 @@ func (o *Orchestrator) evaluateDomains() {
 			continue
 		}
 		o.handOver(plan.Owner, plan.Target, fmt.Sprintf("domain %s, port %s: %s", domain.FQDN, plan.Spec, why))
+		o.store.Lock()
 		domain.LastSwitch = model.Now()
+		o.store.Unlock()
 	}
 }
 
@@ -86,10 +102,10 @@ func (o *Orchestrator) evaluateDomains() {
 // observe mode.
 func (o *Orchestrator) suggest(domain *model.Domain, plan *Plan, why string) {
 	key := plan.Key()
-	if o.suggested[domain.ID] == key {
+	if o.suggestedOf(domain.ID) == key {
 		return
 	}
-	o.suggested[domain.ID] = key
+	o.setSuggested(domain.ID, key)
 	would := ""
 	if plan.DNS {
 		iran := o.store.Servers.Get(plan.IranID)
@@ -122,21 +138,33 @@ func (o *Orchestrator) moveDomain(domain *model.Domain, iranID string, reason st
 	if domain.IranID == iranID && domain.CurrentIP == iran.IP {
 		return true
 	}
+	// the record is written over the network: the lock of the state is not
+	// held while the DNS service is asked
+	var dnsError error
 	if o.dnsFactory != nil {
 		client, err := o.dnsFactory(provider)
 		if err == nil {
 			err = client.SetA(domain.FQDN, iran.IP, domain.TTL)
 		}
 		if err != nil {
-			if domain.Error != err.Error() {
-				domain.Error = err.Error()
-				o.Emit("error", "dns", fmt.Sprintf("changing the record of %s to %s failed: %v", domain.FQDN, iran.IP, err), true,
-					map[string]string{"domain": domain.ID})
-			}
-			return false
+			dnsError = err
 		}
 	}
+	if dnsError != nil {
+		o.store.Lock()
+		changed := domain.Error != dnsError.Error()
+		if changed {
+			domain.Error = dnsError.Error()
+		}
+		o.store.Unlock()
+		if changed {
+			o.Emit("error", "dns", fmt.Sprintf("changing the record of %s to %s failed: %v", domain.FQDN, iran.IP, dnsError), true,
+				map[string]string{"domain": domain.ID})
+		}
+		return false
+	}
 	old := o.store.Servers.Get(domain.IranID)
+	o.store.Lock()
 	domain.IranID = iranID
 	domain.CurrentIP = iran.IP
 	domain.LastSwitch = model.Now()
@@ -144,7 +172,8 @@ func (o *Orchestrator) moveDomain(domain *model.Domain, iranID string, reason st
 	domain.PendingIP = iran.IP
 	domain.PendingSince = model.Now()
 	domain.Status = "ok"
-	delete(o.suggested, domain.ID)
+	o.clearSuggested(domain.ID)
+	o.store.Unlock()
 	from := "—"
 	if old != nil {
 		from = fmt.Sprintf("%s (%s)", old.Name, old.IP)
@@ -269,8 +298,8 @@ func (o *Orchestrator) assignInitial(domain *model.Domain) {
 		// The record of a domain behind a CDN points at the CDN, not at an
 		// Iran server: the panel cannot see which server it points at, and
 		// must not guess. The operator picks it by hand.
-		if o.suggested[domain.ID] != "proxied" {
-			o.suggested[domain.ID] = "proxied"
+		if o.suggestedOf(domain.ID) != "proxied" {
+			o.setSuggested(domain.ID, "proxied")
 			o.Emit("warning", "domain", fmt.Sprintf("domain %s is behind the CDN of %s: its record points at the CDN and not at an Iran server, "+
 				"so the panel cannot see which server it points at. Pick the Iran server by hand in the domain panel.",
 				domain.FQDN, provider.Name), true, map[string]string{"domain": domain.ID})
@@ -312,14 +341,14 @@ func (o *Orchestrator) assignInitial(domain *model.Domain) {
 	if strings.HasPrefix(domain.Error, "DNS read") {
 		// the provider refused; try again now and then (the fix is on its
 		// side)
-		if model.Now()-o.lastRead[domain.ID] >= 300 {
+		if model.Now()-o.lastReadAt(domain.ID) >= 300 {
 			o.ReadRecord(domain)
 		}
 		return
 	}
 	key := "init:" + domain.CurrentIP
 	if o.suggested[domain.ID] != key {
-		o.suggested[domain.ID] = key
+		o.setSuggested(domain.ID, key)
 		o.Emit("warning", "domain", fmt.Sprintf("domain %s points at %s, which is not one of the registered Iran servers; the record was left untouched. "+
 			"Pick the Iran server by hand in the domain panel.",
 			domain.FQDN, orUnknown(domain.CurrentIP, "no IP address")), true, map[string]string{"domain": domain.ID})
@@ -334,7 +363,7 @@ func (o *Orchestrator) ReadRecord(domain *model.Domain) {
 	if provider == nil {
 		return
 	}
-	o.lastRead[domain.ID] = model.Now()
+	o.setLastRead(domain.ID, model.Now())
 	if o.dnsFactory == nil {
 		return
 	}
@@ -485,7 +514,7 @@ func (o *Orchestrator) ScanAll(servers []*model.Server) int {
 		found[server.ID] = items
 		server.LastScan = model.Now()
 	}
-	o.lastScan = model.Now()
+	o.setLastScan(model.Now())
 
 	// Iran servers hold the [server] sections, kharejs the [client] ones;
 	// a pair is a matching (tunnel port, token)

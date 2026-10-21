@@ -115,12 +115,6 @@ func (o *Orchestrator) SetBroadcast(broadcast func(message map[string]any)) {
 	o.broadcast = broadcast
 }
 
-// LastCheck is when the last cycle ran.
-func (o *Orchestrator) LastCheck() float64 { return o.lastCheck }
-
-// LastScan is when the servers were looked at last.
-func (o *Orchestrator) LastScan() float64 { return o.lastScan }
-
 // BusyList are the tunnels with an operation in flight.
 func (o *Orchestrator) BusyList() []string {
 	o.mu.Lock()
@@ -159,6 +153,153 @@ func (o *Orchestrator) Reset() {
 	o.lastExits = 0
 	o.mu.Unlock()
 	o.Wake()
+}
+
+// LastCheck is when the last cycle ran.
+func (o *Orchestrator) LastCheck() float64 {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.lastCheck
+}
+
+// LastScan is when the servers were looked at last.
+func (o *Orchestrator) LastScan() float64 {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.lastScan
+}
+
+// setLastCheck says when the last cycle ran.
+func (o *Orchestrator) setLastCheck(when float64) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.lastCheck = when
+}
+
+// setLastScan says when the servers were looked at last.
+func (o *Orchestrator) setLastScan(when float64) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.lastScan = when
+}
+
+// setLastExits says when the exits were looked at last.
+func (o *Orchestrator) setLastExits(when float64) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.lastExits = when
+}
+
+// lastExitsAt is when the exits were looked at last.
+func (o *Orchestrator) lastExitsAt() float64 {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.lastExits
+}
+
+// repairAfterAt is when a tunnel may be repaired again.
+func (o *Orchestrator) repairAfterAt(linkID string) float64 {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.repairAfter[linkID]
+}
+
+// setRepairAfter says when a tunnel may be repaired again.
+func (o *Orchestrator) setRepairAfter(linkID string, when float64) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.repairAfter[linkID] = when
+}
+
+// clearRepairAfter forgets the repair of a tunnel.
+func (o *Orchestrator) clearRepairAfter(linkID string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	delete(o.repairAfter, linkID)
+}
+
+// lastProbeOf is what the last health check said about a tunnel.
+func (o *Orchestrator) lastProbeOf(linkID string) *engine.Probe {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.lastProbe[linkID]
+}
+
+// setLastProbe remembers what the health check said about a tunnel.
+func (o *Orchestrator) setLastProbe(linkID string, probe *engine.Probe) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.lastProbe[linkID] = probe
+}
+
+// setPrevOK says whether a tunnel was healthy at the last check.
+func (o *Orchestrator) setPrevOK(linkID string, ok bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.prevOK[linkID] = ok
+}
+
+// prevOKOf says whether a tunnel was healthy at the last check.
+func (o *Orchestrator) prevOKOf(linkID string) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.prevOK[linkID]
+}
+
+// markFlapping remembers that the panel complained about a flapping tunnel.
+func (o *Orchestrator) markFlapping(linkID string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.flapReported[linkID] = true
+}
+
+// unmarkFlapping forgets that the panel complained about a tunnel.
+func (o *Orchestrator) unmarkFlapping(linkID string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	delete(o.flapReported, linkID)
+}
+
+// isFlapReported says whether the panel already complained about a tunnel.
+func (o *Orchestrator) isFlapReported(linkID string) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.flapReported[linkID]
+}
+
+// suggestedOf is what the panel would have done, in observe mode.
+func (o *Orchestrator) suggestedOf(id string) string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.suggested[id]
+}
+
+// setSuggested remembers what the panel would have done.
+func (o *Orchestrator) setSuggested(id string, what string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.suggested[id] = what
+}
+
+// clearSuggested forgets what the panel would have done.
+func (o *Orchestrator) clearSuggested(id string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	delete(o.suggested, id)
+}
+
+// lastReadAt is when the record of a domain was last read.
+func (o *Orchestrator) lastReadAt(id string) float64 {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.lastRead[id]
+}
+
+// setLastRead says when the record of a domain was last read.
+func (o *Orchestrator) setLastRead(id string, when float64) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.lastRead[id] = when
 }
 
 // Store is the state the brain looks at.
