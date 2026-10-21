@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,8 @@ from .models import (
 )
 
 MAX_EVENTS = 1000
+
+log = logging.getLogger(__name__)
 
 
 def listen_key(mapping: str) -> str:
@@ -43,13 +47,34 @@ class Store:
         # dashboard canvas: node id -> [x, y]
         self.layout: dict[str, list[float]] = {}
         self.meta: dict[str, Any] = {}  # bookkeeping, e.g. when the last backup ran
+        # what went wrong with the state file, if anything. The panel shows
+        # it: a state file that cannot be read must not take the panel down.
+        self.load_error = ""
         if self.path and self.path.exists():
             self.load()
 
     # ---- persistence -------------------------------------------------
     def load(self) -> None:
         assert self.path
-        self.apply(json.loads(self.path.read_text()))
+        try:
+            raw = json.loads(self.path.read_text())
+        except (OSError, ValueError) as e:
+            # A state file that cannot be read must not stop the panel: it
+            # comes up empty, says so, and the file is moved aside rather
+            # than overwritten, so what was in it is still there to be looked
+            # at and put back. A backup restores it as well.
+            self.load_error = f"the state file could not be read: {e}"
+            log.error("%s", self.load_error)
+            try:
+                kept = self.path.with_name(f"{self.path.name}.broken-{int(time.time())}")
+                self.path.rename(kept)
+                self.load_error += f" — it was kept as {kept.name}"
+                log.error("%s", self.load_error)
+            except OSError:
+                pass
+            return
+        self.load_error = ""
+        self.apply(raw)
 
     def apply(self, raw: dict) -> None:
         """Replace everything with a saved state (a state file or a backup)."""
@@ -307,9 +332,15 @@ class Store:
 
     def iran_order(self, d: Domain) -> list[str]:
         """Iran servers in the order the domain prefers them: its primary
-        first, then the backups in the group's order (server priority)."""
+        first, then the backups in the group's order (server priority).
+
+        The primary comes first whether the group is automatic or chosen by
+        hand: it is the server the operator named, and the traffic comes back
+        to it once it is stable. A group that does not cover it says so by
+        the coverage check, not by silently preferring another server.
+        """
         out: list[str] = []
-        if d.primary_iran in self.servers and not d.group:
+        if d.primary_iran in self.servers:
             out.append(d.primary_iran)
         for x in self.group_of(d):
             if x.status != L_PENDING and x.iran_id not in out:
@@ -389,8 +420,10 @@ class Store:
             dd = d.to_dict()
             dd["effective_group"] = [x.id for x in self.group_of(d)]
             dd["specs"] = self.domain_specs(d)
-            order = self.iran_order(d)
-            dd["primary_iran"] = order[0] if order else ""
+            # The primary is the one the operator named. It is not replaced
+            # by the first server of the group: the panel shows it, and the
+            # failover comes back to it.
+            dd["primary_iran"] = d.primary_iran
             pm = self.port_map(d.iran_id) if d.iran_id else {}
             dd["routes"] = [
                 {"spec": spec, "link_id": pm[first_port(spec)].id if first_port(spec) in pm else ""}

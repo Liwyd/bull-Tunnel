@@ -41,7 +41,7 @@ from .models import (
 )
 from .orchestrator import Orchestrator
 from .ratelimit import LoginLimiter
-from .ssh import HostKeys, SSHError, SSHPool
+from .ssh import HostKeys, SSHPool
 from .store import Store
 from .telegram import TelegramBot
 
@@ -412,6 +412,7 @@ def create_app(
             "logged_in": auth.verify(request.cookies.get(COOKIE)),
             "username": auth.username if auth.configured else "",
             "version": __version__,
+            "error": auth.error,
         }
 
     def set_cookie(resp: Response, request: Request) -> None:
@@ -459,6 +460,11 @@ def create_app(
             d = store.domains.get(dd["id"])
             if d:
                 dd.update(orch.domain_info(d))
+        # what went wrong with the files the panel reads. The operator has to
+        # be told: a state file that could not be read means the panel came
+        # up empty, and a login file that could not be read means the
+        # password is not the one that is stored.
+        errors = [e for e in (store.load_error, auth.error) if e]
         return {
             **st,
             "settings": settings,
@@ -470,6 +476,7 @@ def create_app(
             "version": __version__,
             "demo": demo,
             "now": time.time(),
+            "errors": errors,
         }
 
     @app.get("/api/state", dependencies=A)
@@ -518,7 +525,11 @@ def create_app(
         try:
             srv.ssh_latency_ms = round(await driver.ping(srv), 1)
             srv.status, srv.fail_count, srv.last_seen, srv.error = ONLINE, 0, time.time(), ""
-        except (SSHError, OSError) as e:
+        except Exception as e:
+            # Anything at all: a private key the library refuses, a driver
+            # that raises something nobody expected. The server is marked as
+            # unreachable and the reason is shown — never an exception that
+            # leaves the panel without an answer.
             srv.status, srv.error = "offline", str(e)
         await orch.changed()
         if scan and srv.status == ONLINE and store.settings.auto_adopt:
@@ -542,15 +553,20 @@ def create_app(
     async def edit_server(sid: str, body: ServerIn):
         srv = get(store.servers, sid)
         old_conn = (srv.ip, srv.ssh_port, srv.ssh_user)
+        old_host_key = srv.host_key
         upd = body.model_dump()
         upd["ssh_password"] = keep_secret(body.ssh_password, srv.ssh_password)
         upd["ssh_key"] = keep_secret(body.ssh_key, srv.ssh_key)
         upd["role"] = srv.role  # role is fixed: links depend on it
         for k, v in upd.items():
             setattr(srv, k, v)
-        if not srv.host_key:
-            # the operator cleared the field: the panel pins the key it sees
-            # from now on, which is what a rebuilt server needs
+        if old_host_key and not srv.host_key:
+            # The operator had written a fingerprint and has now removed it:
+            # the panel pins the key it sees from now on, which is what a
+            # rebuilt server needs. A field that was empty all the time is
+            # not a removal — the key the panel pinned on the first contact
+            # stays pinned, or renaming a server would quietly open the door
+            # to a man in the middle.
             host_keys.forget(srv.id)
         if (srv.ip, srv.ssh_port, srv.ssh_user) != old_conn:
             pool.drop(srv.id)
@@ -568,9 +584,15 @@ def create_app(
 
         if any(uses(d) for d in store.domains.values()):
             raise HTTPException(409, "first remove or edit the domains that use this server")
-        links = store.remove_server(sid)
+        # The tunnels of this server are taken off the machines before it
+        # leaves the panel: the cleanup needs to know the servers, and once
+        # they are gone from the panel there is nothing left to look up. The
+        # files, the unit and the running process would stay on the server.
+        links = store.links_of(sid)
+        servers = dict(store.servers)
+        store.remove_server(sid)
         await orch.emit("warning", "server", f"Server {srv.name} removed from the panel", notify=False)
-        orch.spawn(orch.remove_links(links))
+        orch.spawn(orch.remove_links(links, servers))
         pool.drop(sid)
         return {"ok": True}
 
@@ -797,7 +819,11 @@ WantedBy=multi-user.target
         link = get(store.links, lid)
         if lid not in store.handover:
             raise HTTPException(400, "ports are not handed over")
-        dst = store.links[store.handover.pop(lid)]
+        dst = store.links.get(store.handover.pop(lid))
+        if dst is None:
+            # the tunnel that was carrying these ports is gone: there is
+            # nothing to give them back to
+            raise HTTPException(404, "the tunnel that was carrying these ports is gone")
         await orch.redeploy_iran_side(dst)
         await orch.redeploy_iran_side(link)
         await orch.emit("info", "handover", f"the ports of {orch.link_label(link)} were handed back to it by hand")

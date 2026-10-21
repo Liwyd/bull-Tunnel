@@ -164,19 +164,60 @@ them.
 
 **Findings closed by this commit:** 1, 2, 3, 4, 16, 17, 18, 53 (partly).
 
-### Commit 3 — the critical panel bugs
+### Commit 3 — the critical panel bugs  ✅ done
+
 Findings 5, 6, 7, 8, 9, 10, 11.
-* One place that turns anything into an `SSHError`, so no exception can ever
-  kill the check cycle again.
-* The cleanup of a deleted server runs before the server leaves the store.
-* The domain's primary is honoured with a manual group, and the snapshot no
-  longer lies about it.
-* The host key is only forgotten when the operator really cleared it.
-* A corrupt state/auth file is reported instead of crashing the panel.
-* The release endpoint answers 404 instead of 500.
+
+* ✅ **A malformed private key no longer kills the monitor.** `ssh.py` turns
+  anything the SSH library throws into an `SSHError`, and the checks of the
+  servers, of the links and of the scan catch *any* exception: one server can
+  never stop the cycle again.
+* ✅ **Deleting a server takes its tunnels off the machines.** The cleanup
+  now runs with the servers it needs, before the panel forgets them.
+* ✅ **The domain's primary is honoured with a manual group**, and the
+  snapshot reports the primary the operator named instead of the first server
+  of the group.
+* ✅ **The pinned host key survives a rename.** It is only forgotten when
+  the operator had written a fingerprint and then removed it.
+* ✅ **A broken state or login file does not take the panel down.** The state
+  file is moved aside (not thrown away), the login file is left untouched,
+  and both say so in the panel (`/api/state` → `errors`).
+* ✅ **The handover release answers 404**, not 500, when the tunnel that was
+  carrying the ports is gone.
+* ✅ Tests: `tests/test_critical.py` — ten regression tests, one for each of
+  the faults above.
+
+**Findings closed by this commit:** 5, 6, 7, 8, 9, 10, 11, 25 (partly).
 
 ### Commit 4 — the medium panel bugs
 Findings 12 to 35.
+
+* 12: the engine tarball is cached forever under the tag `latest` — a new
+  release is never picked up.
+* 13: `full_state()` is rebuilt on every event and runs `domain_info()` for
+  every domain × every Iran server.
+* 14: a wake-up that arrives between the timeout and `_wake.clear()` is lost.
+* 15: the engine refuses two mappings that overlap once the ranges are
+  expanded, while the panel's dedupe only compares the strings.
+* 19: `date +%s%N` is GNU-only: on BusyBox the health probe returns garbage.
+* 22: two backups in the same minute overwrite each other.
+* 23: clearing the bot token or the engine token in the UI wipes the secret
+  instead of keeping it.
+* 24: restoring a backup whose `auth` has no `secret` locks the panel out.
+* 26: `SSHPool.run()` keeps a connection that timed out in the pool.
+* 27: `PUT /api/layout` does not broadcast: the layout only shows up after
+  the next check.
+* 28: `ArvanDNS.get_a()` assumes `value` is a list (HTTP 500 otherwise).
+* 29: with a proxied provider the A record is the CDN's address, so the
+  panel can never match an Iran server.
+* 30: `validate_port_mapping()` does not validate the port numbers. — *done
+  in commit 2: the mappings are checked against the engine's grammar now.*
+* 31: `probe_target` is never validated and goes into the engine config.
+* 32: the login limiter's failure map grows without bound.
+* 33: `hand_over()` does not take the `busy` lock.
+* 34: a handover chain is not checked for cycles when it is written.
+* 35: `release_handovers()` and the failover path can race with a repair on
+  the same link.
 
 ### Commit 5 — the front-end
 Findings 36 to 48.
@@ -192,22 +233,35 @@ The whole suite, the README, the CHANGELOG and `docs/engine-schema.md`.
 |---|---|---|
 | 1 | `TODO.md` | done |
 | 2 | The engine is BackPack | done |
-| 3 | The critical panel bugs | pending |
+| 3 | The critical panel bugs | done |
 | 4 | The medium panel bugs | pending |
 | 5 | The front-end | pending |
 | 6 | Tests, docs, changelog | pending |
 
-**Next up (commit 3):** the critical panel bugs.
+**Next up (commit 4):** the medium panel bugs.
 
-1. `bulltunn/ssh.py`: a malformed private key must become an `SSHError`, and
-   the check cycle must survive any exception a server can throw.
-2. `bulltunn/store.py` + `bulltunn/orchestrator.py`: the cleanup of a deleted
-   server must run while the server is still known.
-3. `bulltunn/store.py`: the domain's primary must be honoured with a manual
-   group, and the snapshot must not overwrite it.
-4. `bulltunn/app.py`: the host key must only be forgotten when the operator
-   really cleared it.
-5. `bulltunn/auth.py` + `bulltunn/store.py`: a corrupt file must be reported,
-   not crash the panel.
-6. `bulltunn/app.py`: the handover release must answer 404, not 500.
+1. `bulltunn/engine.py`: the engine tarball must not be cached under the tag
+   `latest` for ever.
+2. `bulltunn/app.py` + `bulltunn/orchestrator.py`: the state the panel
+   broadcasts must not be rebuilt from scratch on every event.
+3. `bulltunn/orchestrator.py`: the wake-up must not be lost.
+4. `bulltunn/store.py`: two mappings that overlap once the ranges are
+   expanded must be refused by the panel, as the engine refuses them.
+5. `bulltunn/engine.py`: the health probe must work where `date` is not GNU.
+6. `bulltunn/backup.py`: two backups in the same minute must not overwrite
+   each other.
+7. `bulltunn/app.py`: clearing a secret in the panel must keep it.
+8. `bulltunn/app.py`: a restored login without a secret must not lock the
+   panel out.
+9. `bulltunn/ssh.py`: a connection that timed out must not stay in the pool.
+10. `bulltunn/app.py`: the layout must be broadcast.
+11. `bulltunn/dns/arvan.py`: the A record's value may not be a list.
+12. `bulltunn/orchestrator.py`: a proxied provider must not be read as an
+    Iran server.
+13. `bulltunn/models.py` + `bulltunn/app.py`: the probe target must be
+    checked before it goes into the engine's configuration.
+14. `bulltunn/ratelimit.py`: the failure map must not grow for ever.
+15. `bulltunn/orchestrator.py`: the handover must take the busy lock, and a
+    chain must not be written with a cycle in it.
+
 

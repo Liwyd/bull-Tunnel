@@ -517,11 +517,22 @@ class Orchestrator:
                     link=link.id,
                 )
 
-    async def remove_links(self, links: list[Link]) -> None:
+    async def remove_links(self, links: list[Link], servers: dict[str, Server] | None = None) -> None:
+        """Take the tunnels off the servers.
+
+        The servers may be passed in, because the panel can have forgotten
+        them by the time this runs: a server that is removed from the panel
+        must still have its tunnels deleted from the machine, and looking
+        them up afterwards would find nothing — the files, the unit and the
+        running process would stay there for ever.
+        """
         for link in links:
             if not link.managed:
                 continue  # adopted tunnels are only forgotten, never deleted
-            iran, kharej = self.pair(link)
+            if servers is None:
+                iran, kharej = self.pair(link)
+            else:
+                iran, kharej = servers.get(link.iran_id), servers.get(link.kharej_id)
             await self.driver.remove(link, iran, kharej)
 
     # ----------------------------------------------------------- adoption
@@ -535,7 +546,7 @@ class Orchestrator:
             try:
                 found[srv.id] = await self.driver.scan(srv)
                 srv.last_scan = time.time()
-            except (SSHError, OSError) as e:
+            except Exception as e:
                 log.info("scan %s: %s", srv.name, e)
 
         await asyncio.gather(*(one(s) for s in servers))
@@ -667,7 +678,11 @@ class Orchestrator:
                     srv.status = ONLINE
                     if was == OFFLINE:
                         await self.emit("success", "server", f"{kind} server {srv.name} ({srv.ip}) is reachable again", server=srv.id)
-            except (SSHError, OSError) as e:
+            except Exception as e:
+                # Anything at all: a server with a private key the library
+                # refuses, a driver that raises something nobody expected. One
+                # server must never be able to stop the cycle — the cycle is
+                # what checks every tunnel and moves every domain.
                 srv.fail_count += 1
                 srv.error = str(e)
                 srv.ssh_latency_ms = None
@@ -692,7 +707,9 @@ class Orchestrator:
             if self.usable(iran):
                 try:
                     probes = await self.driver.check(iran, links)  # type: ignore[arg-type]
-                except (SSHError, OSError) as e:
+                except Exception as e:
+                    # one Iran server that cannot be reached must not stop
+                    # the others from being checked
                     log.info("check %s: %s", iran_id, e)
             for link in links:
                 # the carriers the engine on the Iran side speaks: what the

@@ -6,10 +6,13 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import time
 from pathlib import Path
+
+log = logging.getLogger("bulltunn")
 
 COOKIE = "bt_session"
 SESSION_TTL = 7 * 24 * 3600
@@ -24,10 +27,19 @@ class Auth:
         self.path = path
         self.data: dict = {}
         self._mtime = 0.0
+        # what went wrong with the file, if anything. The panel shows it: a
+        # login file that cannot be read must not lock the operator out
+        # without saying why.
+        self.error = ""
         self._reload()
         if not self.data.get("secret"):
             self.data["secret"] = secrets.token_hex(32)
-            self._save()
+            # A file that exists but cannot be read is left alone: writing a
+            # new one over it would throw away the operator's password. The
+            # secret is kept in memory so the panel still works, and the
+            # reason is shown in the panel.
+            if not self.error:
+                self._save()
 
     def _reload(self) -> None:
         """Pick up a password changed from the command line (`passwd`) while
@@ -36,9 +48,22 @@ class Auth:
             mtime = self.path.stat().st_mtime
         except FileNotFoundError:
             return
-        if mtime != self._mtime:
+        if mtime == self._mtime:
+            return
+        try:
             self.data = json.loads(self.path.read_text())
+            self.error = ""
+        except (OSError, ValueError) as e:
+            # A file that cannot be read is not a reason to lock the operator
+            # out of the panel: what was read last stays, the file is left
+            # where it is for the operator to look at, and the reason is
+            # shown in the panel. A file that is fixed changes its time, and
+            # it is read again.
+            self.error = f"the login file could not be read: {e}"
+            log.error("%s", self.error)
             self._mtime = mtime
+            return
+        self._mtime = mtime
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,8 +93,17 @@ class Auth:
         self._reload()
         if not self.configured:
             return False
+        salt, want = self.data.get("salt"), self.data.get("hash")
+        if not salt or not want:
+            # a file that holds a hash but not the salt it was made with is
+            # not a login that can be checked
+            return False
+        try:
+            raw = bytes.fromhex(salt)
+        except ValueError:
+            return False
         ok_user = hmac.compare_digest(username, self.username)
-        ok_pass = hmac.compare_digest(_hash(password, bytes.fromhex(self.data["salt"])), self.data["hash"])
+        ok_pass = hmac.compare_digest(_hash(password, raw), want)
         return ok_user and ok_pass
 
     def _sig(self, payload: str) -> str:

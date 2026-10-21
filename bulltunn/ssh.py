@@ -113,15 +113,25 @@ class SSHPool:
                 keepalive_interval=15,
                 keepalive_count_max=2,
             )
-            if s.ssh_key:
-                kw["client_keys"] = [asyncssh.import_private_key(s.ssh_key)]
-            else:
-                kw["client_keys"] = None
-            if s.ssh_password:
-                kw["password"] = s.ssh_password
             try:
+                if s.ssh_key:
+                    # A private key that cannot be read is the operator's
+                    # mistake, not a fault of the network — but it must not
+                    # escape as anything but an SSHError: the check cycle
+                    # catches SSHError and carries on with the other servers,
+                    # while anything else would abort the whole cycle and
+                    # leave every tunnel and every domain unchecked.
+                    kw["client_keys"] = [asyncssh.import_private_key(s.ssh_key)]
+                else:
+                    kw["client_keys"] = None
+                if s.ssh_password:
+                    kw["password"] = s.ssh_password
                 c = await asyncssh.connect(**kw)
             except (OSError, asyncssh.Error, asyncio.TimeoutError) as e:
+                raise SSHError(f"SSH {s.ip}:{s.ssh_port}: {e or type(e).__name__}") from e
+            except Exception as e:
+                # a private key that is not a key, a password the library
+                # refuses, anything else the library throws
                 raise SSHError(f"SSH {s.ip}:{s.ssh_port}: {e or type(e).__name__}") from e
             self._check_host_key(s, c)
             self._conns[s.id] = c
