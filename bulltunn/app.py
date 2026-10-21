@@ -108,6 +108,21 @@ class ServerIn(BaseModel):
             raise ValueError("the host key must look like SHA256:...")
         return v
 
+    @field_validator("probe_target")
+    @classmethod
+    def _probe_target(cls, v):
+        # The target is written into the tunnel's configuration, where the
+        # engine reads it as "address:port". A target that is not one would
+        # be refused by the engine, on the server, with a message nobody
+        # would understand.
+        v = v.strip()
+        if not v:
+            return v
+        host, _, port = v.rpartition(":")
+        if not host or not port.isdigit() or not 1 <= int(port) <= 65535:
+            raise ValueError("the probe target must be an address and a port, like 127.0.0.1:22")
+        return v
+
 
 class LinkIn(BaseModel):
     ports: list[str] | None = None
@@ -511,7 +526,9 @@ def create_app(
         for k, v in body.positions.items():
             if len(v) == 2 and (k in store.servers or k in store.domains):
                 store.layout[k] = [round(float(v[0]), 1), round(float(v[1]), 1)]
-        store.save()
+        # the layout is part of what the panel shows: the other windows have
+        # to learn about it at once, not at the next check
+        await orch.changed()
         return {"ok": True}
 
     @app.delete("/api/layout", dependencies=A)
@@ -1047,6 +1064,12 @@ WantedBy=multi-user.target
             if body.restore_login and data_.get("auth", {}).get("hash"):
                 relogin = data_["auth"] != auth.data
                 auth.data = dict(data_["auth"])
+                # A backup of an older panel may hold a login without the key
+                # the sessions are signed with. Without one, every login
+                # would fail with an error the operator cannot do anything
+                # about — the panel would be locked out by the restore.
+                if not auth.data.get("secret"):
+                    auth.data["secret"] = secrets.token_hex(32)
                 auth._save()
             orch.reset()
             store.save()

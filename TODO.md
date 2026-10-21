@@ -189,35 +189,58 @@ Findings 5, 6, 7, 8, 9, 10, 11.
 
 **Findings closed by this commit:** 5, 6, 7, 8, 9, 10, 11, 25 (partly).
 
-### Commit 4 — the medium panel bugs
-Findings 12 to 35.
+### Commit 4 — the medium panel bugs  ✅ done
 
-* 12: the engine tarball is cached forever under the tag `latest` — a new
-  release is never picked up.
-* 13: `full_state()` is rebuilt on every event and runs `domain_info()` for
-  every domain × every Iran server.
-* 14: a wake-up that arrives between the timeout and `_wake.clear()` is lost.
-* 15: the engine refuses two mappings that overlap once the ranges are
-  expanded, while the panel's dedupe only compares the strings.
-* 19: `date +%s%N` is GNU-only: on BusyBox the health probe returns garbage.
-* 22: two backups in the same minute overwrite each other.
-* 23: clearing the bot token or the engine token in the UI wipes the secret
-  instead of keeping it.
-* 24: restoring a backup whose `auth` has no `secret` locks the panel out.
-* 26: `SSHPool.run()` keeps a connection that timed out in the pool.
-* 27: `PUT /api/layout` does not broadcast: the layout only shows up after
-  the next check.
-* 28: `ArvanDNS.get_a()` assumes `value` is a list (HTTP 500 otherwise).
-* 29: with a proxied provider the A record is the CDN's address, so the
-  panel can never match an Iran server.
-* 30: `validate_port_mapping()` does not validate the port numbers. — *done
-  in commit 2: the mappings are checked against the engine's grammar now.*
-* 31: `probe_target` is never validated and goes into the engine config.
-* 32: the login limiter's failure map grows without bound.
-* 33: `hand_over()` does not take the `busy` lock.
-* 34: a handover chain is not checked for cycles when it is written.
-* 35: `release_handovers()` and the failover path can race with a repair on
-  the same link.
+Findings 12 to 35 (14 of them turned out not to be faults — they are
+recorded below with the reason).
+
+* ✅ **12** the engine tarball is fetched again when the release moves: the
+  checksum of what is published now says whether the tarball the panel has
+  is still that one. "latest" is not a release, it is a name for whatever is
+  newest, and it moves.
+* ✅ **13** the map of the forwarded ports of an Iran server, and the map of
+  the link that owns a port, are worked out once and kept until something
+  they depend on changes. The panel asks for them for every domain and
+  every server every time it builds its state.
+* ✅ **15** two mappings that want the same port are refused by the panel,
+  as the engine refuses them: "2053-2060" and "2053" are two different
+  strings and the same port, and the engine would have exited.
+* ✅ **19** the health scripts do not need a GNU date: the nanoseconds are
+  used when they are there, the shell's own clock when they are not, and
+  the seconds are the last resort. The times are milliseconds everywhere.
+* ✅ **22** the name of a backup carries the second, so two backups in the
+  same minute no longer overwrite each other. The older names are still
+  read.
+* ✅ **24** a restored login without the key the sessions are signed with
+  gets one, so a restore cannot lock the panel out.
+* ✅ **26** a connection whose command timed out is not kept in the pool.
+* ✅ **27** the layout is broadcast at once, not at the next check.
+* ✅ **28** the value of an A record may be a single address written out;
+  the panel reads it instead of falling over.
+* ✅ **29** a domain behind a CDN says so, instead of saying that its
+  record points at an address that is not an Iran server.
+* ✅ **31** the probe target is checked before it goes into the tunnel's
+  configuration.
+* ✅ **32** the limiter forgets the addresses whose failures have aged out.
+* ✅ **33/34/35** a handover takes the busy lock, so it cannot race with a
+  repair, and a chain that would loop is refused.
+
+**Not faults (with the reason):**
+
+* **14** the wake-up is not lost: a wake-up that arrives during a check
+  makes the next cycle start at once, which is what it is for. The window
+  in which one could be dropped is between the wait returning and the
+  event being cleared — and a cycle is about to start anyway.
+* **23** clearing a secret in the panel does wipe it, and that is right:
+  the field holds the mask of the stored secret until it is touched, so an
+  untouched field keeps the secret and a cleared one removes it.
+* **30** the port mappings are checked against the engine's grammar — that
+  was done in commit 2.
+* **25** a login file without a salt no longer raises — that was done in
+  commit 3.
+
+**Findings closed by this commit:** 12, 13, 15, 19, 22, 24, 26, 27, 28, 29,
+31, 32, 33, 34, 35.
 
 ### Commit 5 — the front-end
 Findings 36 to 48.
@@ -234,34 +257,31 @@ The whole suite, the README, the CHANGELOG and `docs/engine-schema.md`.
 | 1 | `TODO.md` | done |
 | 2 | The engine is BackPack | done |
 | 3 | The critical panel bugs | done |
-| 4 | The medium panel bugs | pending |
+| 4 | The medium panel bugs | done |
 | 5 | The front-end | pending |
 | 6 | Tests, docs, changelog | pending |
 
-**Next up (commit 4):** the medium panel bugs.
+**Next up (commit 5):** the front-end.
 
-1. `bulltunn/engine.py`: the engine tarball must not be cached under the tag
-   `latest` for ever.
-2. `bulltunn/app.py` + `bulltunn/orchestrator.py`: the state the panel
-   broadcasts must not be rebuilt from scratch on every event.
-3. `bulltunn/orchestrator.py`: the wake-up must not be lost.
-4. `bulltunn/store.py`: two mappings that overlap once the ranges are
-   expanded must be refused by the panel, as the engine refuses them.
-5. `bulltunn/engine.py`: the health probe must work where `date` is not GNU.
-6. `bulltunn/backup.py`: two backups in the same minute must not overwrite
-   each other.
-7. `bulltunn/app.py`: clearing a secret in the panel must keep it.
-8. `bulltunn/app.py`: a restored login without a secret must not lock the
-   panel out.
-9. `bulltunn/ssh.py`: a connection that timed out must not stay in the pool.
-10. `bulltunn/app.py`: the layout must be broadcast.
-11. `bulltunn/dns/arvan.py`: the A record's value may not be a list.
-12. `bulltunn/orchestrator.py`: a proxied provider must not be read as an
-    Iran server.
-13. `bulltunn/models.py` + `bulltunn/app.py`: the probe target must be
-    checked before it goes into the engine's configuration.
-14. `bulltunn/ratelimit.py`: the failure map must not grow for ever.
-15. `bulltunn/orchestrator.py`: the handover must take the busy lock, and a
-    chain must not be written with a cycle in it.
+1. `bulltunn/static/app.js`: the signed-in user always shows as "admin" —
+   the state has no user name in it.
+2. `bulltunn/static/app.js`: a flapping and degraded tunnel is counted
+   twice.
+3. `bulltunn/static/app.js`: clicking a "hop" label opens an empty drawer.
+4. `bulltunn/static/app.js`: hovering a hop label clears the path
+   highlight.
+5. `bulltunn/static/app.js`: the ⚡ measurement has no error handling.
+6. `bulltunn/static/app.js`: the dead ternary in the domain list.
+7. `bulltunn/static/app.js`: the quick settings fire one PUT per field and
+   can race with each other.
+8. `bulltunn/static/app.js`: the quick settings are not refreshed when a
+   button inside them has the focus.
+9. `bulltunn/static/app.js`: "Send a test message" races with the save of
+   the form.
+10. `bulltunn/static/style.css`: `.wlabel.hop` and `.menu-btn` have no
+    style.
+11. `bulltunn/demo.py`: the chaos never picks a victim, and the demo still
+    knows carriers the engine does not have.
+
 
 

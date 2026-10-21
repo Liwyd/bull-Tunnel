@@ -148,8 +148,9 @@ def test_ufw_rules():
 
 
 def test_parsers():
-    p = parse_check("noise\n@@l1|active|true|1|4210|1\n@@l2|failed||0|3000012|0\n")
-    assert p["l1"].ok and p["l1"].latency_ms == 4.2 and p["l1"].connected is True
+    # the times in the scripts are milliseconds
+    p = parse_check("noise\n@@l1|active|true|1|4|1\n@@l2|failed||0|3000|0\n")
+    assert p["l1"].ok and p["l1"].latency_ms == 4.0 and p["l1"].connected is True
     assert not p["l2"].ok and p["l2"].active == "failed" and p["l2"].connected is None
     # no probe port: the engine's word, then the socket table
     tcp = Link(iran_id="i", kharej_id="k", tunnel_port=1, transport="tcpmux", id="a")
@@ -159,9 +160,31 @@ def test_parsers():
     assert p["a"].ok and not p["a"].verified and p["b"].ok
     p = parse_check("@@a|active||-|0|0\n@@b|active|false|-|0|0\n", links)
     assert not p["a"].ok and not p["b"].ok
-    w = parse_wait("OK 1830 4000 5000 3000\n")
+    w = parse_wait("OK 1830 4 5 3\n")
     assert w.ok and w.latency_ms == 4.0 and w.connect_s == 1.83
     assert not parse_wait("FAIL\n").ok
+
+
+def test_the_health_scripts_survive_a_date_without_nanoseconds():
+    """The clock of a small distribution has no nanoseconds, and the health
+    check of every tunnel would then read "it did not answer" on a system
+    whose clock is perfectly fine."""
+    script = check_script([Link(iran_id="i", kharej_id="k", tunnel_port=3080, probe_port=61000, id="l1")])
+    assert "now_ms" in script
+    assert "%N" in script  # it tries the nanoseconds first
+    assert "EPOCHREALTIME" in script  # and falls back to the shell's own clock
+    # the clock it uses really works, and the times it prints are
+    # milliseconds — which is what the parser reads them as
+    clock = script.split("a=$(systemctl")[0]
+    out = subprocess.run(["bash", "-c", f"{clock}\nnow_ms; now_ms"], capture_output=True, text=True)
+    times = [int(x) for x in out.stdout.split() if x.isdigit()]
+    assert len(times) == 2, out.stderr
+    assert times[1] >= times[0]
+    # a clock that has no nanoseconds still gives a usable answer
+    fake = clock.replace("n=$(date +%s%N 2>/dev/null)", "n=$(date +%s)N")
+    out = subprocess.run(["bash", "-c", f"{fake}\nnow_ms"], capture_output=True, text=True)
+    assert out.stdout.strip().isdigit(), out.stderr
+    assert int(out.stdout.strip()) > 0
 
 
 def test_the_check_reads_the_state_of_the_engine():

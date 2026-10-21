@@ -18,11 +18,32 @@ class LoginLimiter:
         self.block = block
         self.fails: dict[str, deque[float]] = defaultdict(deque)
         self.until: dict[str, float] = {}
+        self._seen = 0
 
     def _prune(self, who: str, now: float) -> None:
-        q = self.fails[who]
+        q = self.fails.get(who)
+        if not q:
+            return
         while q and now - q[0] > self.window:
             q.popleft()
+
+    def _prune_all(self, now: float) -> None:
+        """Forget the addresses that have not failed for a while.
+
+        The map of the failures grows with every address that is ever seen,
+        and an attacker can make it grow without end. Every so often the
+        addresses whose failures have all aged out are dropped.
+        """
+        self._seen += 1
+        if self._seen % 64:
+            return
+        for who in list(self.fails):
+            self._prune(who, now)
+            if not self.fails[who]:
+                del self.fails[who]
+        for who, until in list(self.until.items()):
+            if until <= now:
+                del self.until[who]
 
     def allowed(self, who: str) -> tuple[bool, int]:
         """Is this address allowed to try? Returns (allowed, seconds left)."""
@@ -30,6 +51,7 @@ class LoginLimiter:
         until = self.until.get(who, 0)
         if until > now:
             return False, int(until - now)
+        self._prune_all(now)
         self._prune(who, now)
         return True, 0
 

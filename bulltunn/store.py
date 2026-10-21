@@ -50,6 +50,12 @@ class Store:
         # what went wrong with the state file, if anything. The panel shows
         # it: a state file that cannot be read must not take the panel down.
         self.load_error = ""
+        # the map of the forwarded ports of each Iran server, worked out once
+        # and kept until something it depends on changes
+        self._port_maps: dict[str, tuple[tuple, dict[int, Link]]] = {}
+        # the same, for the link that owns a port (a handover does not change
+        # the owner, only the one that exposes it)
+        self._owner_map: dict[str, tuple[tuple, dict[int, Link]]] = {}
         if self.path and self.path.exists():
             self.load()
 
@@ -200,6 +206,26 @@ class Store:
             link_id = self.handover[link_id]
         return link_id
 
+    def set_handover(self, src_id: str, dst_id: str) -> bool:
+        """Hand the ports of one tunnel over to another.
+
+        A chain that would loop is refused: the ports of a tunnel would then
+        be exposed by two tunnels at once, and the engine would refuse to
+        start with two listeners on the same port.
+        """
+        if src_id == dst_id:
+            self.handover.pop(src_id, None)
+            return True
+        seen: set[str] = set()
+        cur: str = dst_id
+        while cur and cur not in seen:
+            if cur == src_id:
+                return False  # the chain would come back to where it started
+            seen.add(cur)
+            cur = self.handover.get(cur, "")
+        self.handover[src_id] = dst_id
+        return True
+
     def link_ports(self, link: Link) -> list[str]:
         """Forwarded ports the Iran end of a link exposes: its own (unless it
         handed them over) plus those of every link handed over to it."""
@@ -278,21 +304,51 @@ class Store:
     # ---- ports and routes ----------------------------------------------
     def port_map(self, iran_id: str) -> dict[int, Link]:
         """Which link exposes each forwarded port on an Iran server right now
-        (a port can only be bound once per server, so this is unambiguous)."""
+        (a port can only be bound once per server, so this is unambiguous).
+
+        The answer is worked out again whenever anything it depends on has
+        changed — the ports of a link, its state, the handover — and kept
+        until then. The panel asks for it for every domain and every Iran
+        server every time it builds its state, and working it out from
+        scratch each time is what made the panel slow with many servers.
+        """
+        key = self._port_map_key(iran_id)
+        cached = self._port_maps.get(iran_id)
+        if cached is not None and cached[0] == key:
+            return cached[1]
         out: dict[int, Link] = {}
         for x in self.links.values():
             if x.iran_id == iran_id and x.status != L_PENDING:
                 for p in listen_ports(self.link_ports(x)):
                     out.setdefault(p, x)
+        self._port_maps[iran_id] = (key, out)
         return out
+
+    def _port_map_key(self, iran_id: str) -> tuple:
+        """What the map of an Iran server depends on."""
+        return (
+            tuple(
+                (x.id, x.status, tuple(x.ports))
+                for x in self.links.values()
+                if x.iran_id == iran_id
+            ),
+            tuple(sorted(self.handover.items())),
+        )
 
     def owner(self, iran_id: str, spec: str) -> Link | None:
         """The link whose own port list holds this port (handover or not)."""
         port = first_port(spec)
-        for x in self.links.values():
-            if x.iran_id == iran_id and port in listen_ports(x.ports):
-                return x
-        return None
+        if port < 0:
+            return None
+        out = self._owner_map.get(iran_id)
+        if out is None or out[0] != self._port_map_key(iran_id):
+            out = (self._port_map_key(iran_id), {})
+            for x in self.links.values():
+                if x.iran_id == iran_id:
+                    for p in listen_ports(x.ports):
+                        out[1].setdefault(p, x)
+            self._owner_map[iran_id] = out
+        return out[1].get(port)
 
     def domain_specs(self, d: Domain) -> list[str]:
         if d.ports:

@@ -192,6 +192,11 @@ class SSHPool:
                     _text(r.stderr),
                 )
             except asyncio.TimeoutError as e:
+                # The command timed out. The connection may be in a state
+                # nobody can predict — a half-sent command, a stream the
+                # peer is still writing to — so it is not kept: the next
+                # command opens a fresh one.
+                self.drop(s.id)
                 raise SSHError(f"{s.name}: command timed out after {timeout}s") from e
             except (asyncssh.Error, OSError) as e:
                 # a cached connection that died under us: reconnect once

@@ -33,6 +33,18 @@ MAGIC = b"BTBK1"
 FORMAT = "bulltunn-backup"
 ENV_FILE = Path("/etc/default/bulltunn")
 NAME_RE = re.compile(r"^bt-backup-[0-9]{8}-[0-9]{4}(?:-[a-z]+)?\.(?:tmbk|json\.gz)$")
+# the names written since the second was added to the stamp
+NAME_RE_NEW = re.compile(r"^bt-backup-[0-9]{8}-[0-9]{6}(?:-[a-z]+)?\.(?:tmbk|json\.gz)$")
+
+
+def is_backup_name(name: str) -> bool:
+    """Is this the name of a backup file?
+
+    Both spellings count: the older one, with the minute, and the newer one,
+    with the second. A file whose name is not one of them is not read: the
+    name is what keeps a request from reaching outside the backup folder.
+    """
+    return bool(NAME_RE.match(name) or NAME_RE_NEW.match(name))
 
 
 class BackupError(Exception):
@@ -135,7 +147,11 @@ class Backups:
     def write(self, blob: bytes, encrypted: bool, tag: str = "") -> Path:
         self.dir.mkdir(parents=True, exist_ok=True)
         os.chmod(self.dir, 0o700)
-        stamp = time.strftime("%Y%m%d-%H%M")
+        # The name carries the second, not only the minute: two backups in
+        # the same minute — a manual one and the nightly one, or two manual
+        # ones — would otherwise be the same file, and the second would
+        # throw the first away.
+        stamp = time.strftime("%Y%m%d-%H%M%S")
         name = f"bt-backup-{stamp}{'-' + tag if tag else ''}.{'tmbk' if encrypted else 'json.gz'}"
         path = self.dir / name
         tmp = path.with_suffix(".tmp")
@@ -157,13 +173,13 @@ class Backups:
             return []
         out = []
         for p in self.dir.iterdir():
-            if NAME_RE.match(p.name):
+            if is_backup_name(p.name):
                 st = p.stat()
                 out.append({"name": p.name, "size": st.st_size, "mtime": st.st_mtime, "encrypted": p.name.endswith(".tmbk")})
         return sorted(out, key=lambda f: f["mtime"], reverse=True)
 
     def read(self, name: str) -> bytes:
-        if not NAME_RE.match(name):
+        if not is_backup_name(name):
             raise BackupError("invalid file name")
         try:
             return (self.dir / name).read_bytes()

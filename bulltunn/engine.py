@@ -320,6 +320,32 @@ WantedBy=multi-user.target
 
 
 # ------------------------------------------------------------- scripts
+def _now_ms() -> str:
+    """A shell function that prints the time in milliseconds.
+
+    ``date +%s%N`` is a GNU extension: on a small distribution the date
+    prints "N" instead of the nanoseconds, and the arithmetic that follows
+    turns into nonsense — the health check of every tunnel would then read
+    "the tunnel did not answer" on a system whose clock is perfectly fine.
+    So the nanoseconds are used when they are there, bash's own clock is
+    used when it is not, and the seconds are the last resort.
+    """
+    return """now_ms() {
+  n=$(date +%s%N 2>/dev/null)
+  case "$n" in
+    ''|*N)
+      if [ -n "${EPOCHREALTIME:-}" ]; then
+        e=${EPOCHREALTIME/./}
+        echo $((e / 1000))
+      else
+        echo $(( $(date +%s) * 1000 ))
+      fi
+      ;;
+    *) echo $(( n / 1000 ));;
+  esac
+}"""
+
+
 def _probe_snippet(port: int) -> str:
     # Opens the probe port and reads the first bytes the far end sends.
     return f"timeout 3 bash -c 'exec 3<>/dev/tcp/127.0.0.1/{port}; head -c 4 <&3' 2>/dev/null"
@@ -329,12 +355,12 @@ def check_script(links: list[Link]) -> str:
     """One round trip per Iran server: unit state, the engine's own view, an
     end-to-end probe where the tunnel has one, and established connections
     on the tunnel port (from /proc, no tools needed) as the last resort."""
-    parts = []
+    parts = [_now_ms(), ""]
     for x in links:
         n = shlex.quote(x.iran_name)
         u = shlex.quote(iran_unit(x))
         if x.probe_port:
-            probe = f't0=$(date +%s%N); b=$({_probe_snippet(x.probe_port)}); t1=$(date +%s%N); p=$( [ -n "$b" ] && echo 1 || echo 0)'
+            probe = f't0=$(now_ms); b=$({_probe_snippet(x.probe_port)}); t1=$(now_ms); p=$( [ -n "$b" ] && echo 1 || echo 0)'
         else:
             probe = "t0=0; t1=0; p=-"
         parts.append(
@@ -342,10 +368,10 @@ def check_script(links: list[Link]) -> str:
 c=$(grep -o '"connected": *[a-z]*' {CONF_DIR}/{n}.metrics.json 2>/dev/null | grep -o '[a-z]*$')
 {probe}
 e=$(cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk '{{ split($2,a,":"); if (a[2]=="{x.tunnel_port:04X}" && $4=="01") n++ }} END {{ print n+0 }}')
-echo "@@{x.id}|$a|$c|$p|$(( (t1-t0)/1000 ))|$e"
+echo "@@{x.id}|$a|$c|$p|$(( t1 - t0 ))|$e"
 """
         )
-    return "".join(parts)
+    return "\n".join(parts)
 
 
 def parse_check(out: str, links: dict[str, Link] | None = None) -> dict[str, Probe]:
@@ -365,7 +391,7 @@ def parse_check(out: str, links: dict[str, Link] | None = None) -> dict[str, Pro
                 ok=good,
                 active=active,
                 connected=connected,
-                latency_ms=round(int(us) / 1000, 1) if good and us.isdigit() else None,
+                latency_ms=round(float(us), 1) if good and us.isdigit() else None,
             )
             continue
         # no probe port: infer from the engine, then from the socket table
@@ -384,17 +410,18 @@ def parse_check(out: str, links: dict[str, Link] | None = None) -> dict[str, Pro
 
 
 def wait_script(port: int, timeout: int, samples: int = 5) -> str:
-    return f"""s=$(date +%s%N); end=$(( $(date +%s) + {timeout} ))
+    return f"""{_now_ms()}
+s=$(now_ms); end=$(( $(date +%s) + {timeout} ))
 while :; do
   b=$({_probe_snippet(port)})
   [ -n "$b" ] && break
   [ $(date +%s) -ge $end ] && {{ echo FAIL; exit 0; }}
   sleep 0.5
 done
-c=$(( ($(date +%s%N) - s) / 1000000 )); out="OK $c"
+c=$(( $(now_ms) - s )); out="OK $c"
 for i in $(seq 1 {samples}); do
-  t0=$(date +%s%N); b=$({_probe_snippet(port)}); t1=$(date +%s%N)
-  [ -n "$b" ] && out="$out $(( (t1-t0)/1000 ))"
+  t0=$(now_ms); b=$({_probe_snippet(port)}); t1=$(now_ms)
+  [ -n "$b" ] && out="$out $(( t1 - t0 ))"
 done
 echo "$out"
 """
@@ -405,7 +432,7 @@ def parse_wait(out: str) -> Probe:
     if not words or words[0] != "OK":
         return Probe(ok=False, error="tunnel did not carry traffic in time")
     connect_ms = int(words[1])
-    lats = [int(w) / 1000 for w in words[2:] if w.isdigit()]
+    lats = [int(w) for w in words[2:] if w.isdigit()]
     if not lats:
         return Probe(ok=False, error="tunnel came up but is unstable", connect_s=connect_ms / 1000)
     return Probe(ok=True, latency_ms=round(statistics.median(lats), 1), connect_s=round(connect_ms / 1000, 2))
@@ -481,6 +508,24 @@ def target_host(t: str) -> str:
     if t.startswith("["):
         return t[1:].split("]", 1)[0]
     return t.rsplit(":", 1)[0] if t.count(":") == 1 else t
+
+
+def ports_clash(mappings: list[str]) -> list[int]:
+    """The ports two of these mappings would both bind.
+
+    The engine expands a range into one listener per port and refuses a set
+    of mappings that ask for the same port twice — it exits, and the tunnel
+    never comes up. The panel has to see it first: "2053-2060" and "2053"
+    are two different strings and the same port.
+    """
+    seen: dict[int, str] = {}
+    clash: set[int] = set()
+    for m in mappings:
+        for p in listen_ports([m]):
+            if p in seen and seen[p] != m:
+                clash.add(p)
+            seen.setdefault(p, m)
+    return sorted(clash)
 
 
 def kharej_dest(mapping: str) -> tuple[str, int] | None:
@@ -806,23 +851,48 @@ class SSHDriver(Driver):
         tag = self.release
         path = self.cache_dir / tag / name
         async with self._dl_lock:
-            if not path.exists():
-                tar_url, sums_url = self._artifact_urls(name)
-                headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
-                async with httpx.AsyncClient(follow_redirects=True, timeout=120, headers=headers) as c:
-                    sums = (await c.get(sums_url)).raise_for_status().text
-                    blob = (await c.get(tar_url)).raise_for_status().content
-                want = next((ln.split()[0] for ln in sums.splitlines() if ln.strip().endswith(name)), None)
+            tar_url, sums_url = self._artifact_urls(name)
+            if path.exists() and tag not in ("", "latest"):
+                # A named release never moves: the tarball that was fetched
+                # for it is the right one, and it was checked when it was
+                # fetched.
+                return self._binary_from(path, name)
+            # "latest" is not a release: it is a name for whatever is newest,
+            # and it moves. The checksum of what is published now says
+            # whether the tarball we have is still that one — a tarball cached
+            # under the name "latest" would otherwise be handed out for ever,
+            # and a server would keep the build it had.
+            want = await self._published_checksum(sums_url, name)
+            if not path.exists() or not want or hashlib.sha256(path.read_bytes()).hexdigest() != want:
+                blob = await self._fetch(tar_url)
                 if want and hashlib.sha256(blob).hexdigest() != want:
                     raise DeployError(f"checksum mismatch for {name}")
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(blob)
-            with tarfile.open(fileobj=io.BytesIO(path.read_bytes())) as tar:
-                for m in tar.getmembers():
-                    if m.isfile() and Path(m.name).name == "bulltunn-engine":
-                        f = tar.extractfile(m)
-                        assert f
-                        return f.read()
+            return self._binary_from(path, name)
+
+    async def _published_checksum(self, sums_url: str, name: str) -> str:
+        """The checksum the release publishes for this file, if any."""
+        try:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=60) as c:
+                sums = (await c.get(sums_url)).raise_for_status().text
+        except Exception:
+            return ""
+        return next((ln.split()[0] for ln in sums.splitlines() if ln.strip().endswith(name)), "")
+
+    async def _fetch(self, url: str) -> bytes:
+        headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
+        async with httpx.AsyncClient(follow_redirects=True, timeout=120, headers=headers) as c:
+            return (await c.get(url)).raise_for_status().content
+
+    @staticmethod
+    def _binary_from(path: Path, name: str) -> bytes:
+        with tarfile.open(fileobj=io.BytesIO(path.read_bytes())) as tar:
+            for m in tar.getmembers():
+                if m.isfile() and Path(m.name).name == "bulltunn-engine":
+                    f = tar.extractfile(m)
+                    assert f
+                    return f.read()
         raise DeployError(f"no bulltunn-engine binary in {name}")
 
     async def ensure_installed(self, s: Server, install: bool = True) -> str:

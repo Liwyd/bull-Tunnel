@@ -54,7 +54,17 @@ class ArvanDNS(DNSClient):
     async def get_a(self, fqdn: str) -> list[str]:
         async with self._c() as c:
             recs = await self._records(c, fqdn)
-        return [v.get("ip") for r in recs for v in (r.get("value") or []) if v.get("ip")]
+        out: list[str] = []
+        for r in recs:
+            value = r.get("value")
+            # the value of an A record is a list of addresses; some accounts
+            # answer with a single one, written out
+            if isinstance(value, dict):
+                value = [value]
+            for v in value or []:
+                if isinstance(v, dict) and v.get("ip"):
+                    out.append(str(v["ip"]))
+        return out
 
     async def set_a(self, fqdn: str, ip: str, ttl: int = 60) -> None:
         name = self.relative(fqdn)

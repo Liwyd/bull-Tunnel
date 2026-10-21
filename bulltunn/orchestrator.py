@@ -36,7 +36,7 @@ from collections.abc import Awaitable, Callable
 
 from .dns import DNSClient
 from .dns.resolve import resolve_a
-from .engine import DeployError, Driver, Found, Probe, listen_ports, split_ports, target_host, unit_name
+from .engine import DeployError, Driver, Found, Probe, listen_ports, ports_clash, split_ports, target_host, unit_name
 from .models import (
     IRAN,
     KHAREJ,
@@ -269,6 +269,16 @@ class Orchestrator:
     async def _try(self, link: Link, transport: str, ports: list[str]) -> TestResult:
         iran, kharej = self.pair(link)
         assert iran and kharej
+        # The engine binds one listener per port and refuses a set of
+        # mappings that ask for the same port twice — it exits, and the
+        # tunnel never comes up. The panel sees it first.
+        clash = ports_clash(ports)
+        if clash:
+            msg = "two of these mappings want the same port: " + ", ".join(str(p) for p in clash[:8])
+            r = TestResult(transport=transport, ok=False, error=msg)
+            link.tests[transport] = r.to_dict()
+            await self.push({"type": "test", "link_id": link.id, "result": r.to_dict()})
+            return r
         await self._ensure_probe(link)
         try:
             await self.driver.deploy(link, iran, kharej, transport, ports)
@@ -905,27 +915,41 @@ class Orchestrator:
     async def hand_over(self, src: Link, dst: Link, reason: str) -> bool:
         """Expose src's forwarded ports on dst instead (same Iran server)."""
         st = self.store
-        old = st.links.get(st.carrier(src.id)) or src
-        if dst.id == src.id:
-            st.handover.pop(src.id, None)
-        else:
-            if st.carrier(dst.id) == src.id:
-                st.handover.pop(dst.id, None)  # never a loop
-            st.handover[src.id] = dst.id
-        # free the ports first, then bind them on the new carrier
-        ok = True
-        if old.id != dst.id:
-            ok = await self.redeploy_iran_side(old)
-        ok = await self.redeploy_iran_side(dst) and ok
-        await self.emit(
-            "warning",
-            "handover",
-            f"the ports of {self.link_label(src)} on the Iran server {self.name(src.iran_id)} were moved to the tunnel "
-            f"{self.link_label(dst)} (the DNS record was not touched) — {reason}",
-            link=src.id,
-            target=dst.id,
-        )
-        return ok
+        # The handover rewrites the configuration of two tunnels. A repair or
+        # a rebuild of either of them at the same time would write a
+        # configuration that the other one undoes.
+        if src.id in self.busy or dst.id in self.busy:
+            return False
+        self.busy.add(src.id)
+        self.busy.add(dst.id)
+        try:
+            old = st.links.get(st.carrier(src.id)) or src
+            if not st.set_handover(src.id, dst.id):
+                await self.emit(
+                    "error",
+                    "handover",
+                    f"the ports of {self.link_label(src)} cannot be moved to {self.link_label(dst)}: "
+                    "the two tunnels would end up carrying each other's ports",
+                    link=src.id,
+                )
+                return False
+            # free the ports first, then bind them on the new carrier
+            ok = True
+            if old.id != dst.id:
+                ok = await self.redeploy_iran_side(old)
+            ok = await self.redeploy_iran_side(dst) and ok
+            await self.emit(
+                "warning",
+                "handover",
+                f"the ports of {self.link_label(src)} on the Iran server {self.name(src.iran_id)} were moved to the tunnel "
+                f"{self.link_label(dst)} (the DNS record was not touched) — {reason}",
+                link=src.id,
+                target=dst.id,
+            )
+            return ok
+        finally:
+            self.busy.discard(src.id)
+            self.busy.discard(dst.id)
 
     async def release_handovers(self) -> None:
         st = self.store
@@ -938,16 +962,27 @@ class Orchestrator:
                 continue
             if not self.stable(src):
                 continue
-            st.handover.pop(src_id, None)
-            await self.redeploy_iran_side(dst)
-            await self.redeploy_iran_side(src)
-            await self.emit(
-                "success",
-                "failback",
-                f"tunnel {self.link_label(src)} was stable for {fmt_dur(self.s.failback_after)} without a drop; "
-                f"its ports came back from {self.link_label(dst)}",
-                link=src_id,
-            )
+            # the ports go back to the tunnel they belong to: its
+            # configuration is rewritten, so it must not be rewritten by
+            # something else at the same time
+            if src.id in self.busy or dst.id in self.busy:
+                continue
+            self.busy.add(src.id)
+            self.busy.add(dst.id)
+            try:
+                st.handover.pop(src_id, None)
+                await self.redeploy_iran_side(dst)
+                await self.redeploy_iran_side(src)
+                await self.emit(
+                    "success",
+                    "failback",
+                    f"tunnel {self.link_label(src)} was stable for {fmt_dur(self.s.failback_after)} without a drop; "
+                    f"its ports came back from {self.link_label(dst)}",
+                    link=src_id,
+                )
+            finally:
+                self.busy.discard(src.id)
+                self.busy.discard(dst.id)
 
     # ---------------------------------------------------------- domains
     def route(self, iran_id: str, spec: str) -> Link | None:
@@ -1172,6 +1207,22 @@ class Orchestrator:
         """A domain without an Iran server yet: take the one its record
         already points at, and the ports it serves there."""
         st = self.store
+        provider = st.providers.get(d.provider_id)
+        if provider is not None and provider.proxied:
+            # The record of a domain behind a CDN points at the CDN, not at
+            # an Iran server: the panel cannot see which server it points
+            # at, and must not guess. The operator picks it by hand.
+            if self.suggested.get(d.id) != "proxied":
+                self.suggested[d.id] = "proxied"
+                await self.emit(
+                    "warning",
+                    "domain",
+                    f"domain {d.fqdn} is behind the CDN of {provider.name}: its record points at the CDN and not at "
+                    "an Iran server, so the panel cannot see which server it points at. Pick the Iran server by hand "
+                    "in the domain panel.",
+                    domain=d.id,
+                )
+            return
         match = next((s for s in st.irans() if d.current_ip and s.ip == d.current_ip), None)
         if match:
             d.iran_id = match.id
