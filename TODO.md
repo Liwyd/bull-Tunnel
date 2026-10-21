@@ -292,12 +292,25 @@ Findings 36 to 48.
   the install and can fetch the panel itself, so the whole installation is
   one line.
 
-### Commit 8 — the release
+### Commit 8 — the release  ✅ done
 
 The release is published from the tag: the CI builds the panel and the
 engine for the four architectures, writes the checksums and attaches them
 to the release. The panel fetches the engine from there, so the tag has
 to exist before a fresh installation can install the engine.
+
+* ✅ The repository is **public** and is called **bull-Tunnel**.
+* ✅ The release **v1.1.0** carries the panel (the wheel and the sdist),
+  the engine for the four architectures and the checksums of all of them.
+* ✅ The first attempt carried the panel without the engine: the build
+  script made its output directory absolute *after* it had moved into the
+  engine, so a relative "dist" landed in `engine/dist`. Fixed.
+* ✅ The version had two homes (the pyproject said 1.0.0, the package said
+  1.1.0) and the wheel was built with the wrong one. The pyproject reads
+  it from the package now.
+* ✅ Verified end to end: the panel fetches the engine from the published
+  release, checks its checksum, takes the binary out of it — and the
+  binary that comes out reports its version and its nine carriers.
 
 ### Commit 6 — tests, docs and the changelog  ✅ done
 
@@ -328,7 +341,7 @@ to exist before a fresh installation can install the engine.
 | 5 | The front-end | done |
 | 6 | Tests, docs, changelog | done |
 | 7 | The rename and the management tool | done |
-| 8 | The release | in progress |
+| 8 | The release | done |
 
 **All the findings of the audit are closed.** The plan is finished; what
 follows is the work itself: watching the panel on a live server, and the
