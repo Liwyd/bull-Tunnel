@@ -7,6 +7,17 @@ only adds something.
 
 ## Unreleased
 
+### The time of a tunnel is the time it really took
+
+The health check of a tunnel measured the time in **microseconds** and the
+panel showed it as **milliseconds**: a tunnel that answered in 12 ms was
+shown as 12000 ms, and the time a tunnel took to come up was a thousand
+times too big.
+
+The clock of the script now counts milliseconds in all three of its
+branches — the nanoseconds of `date`, the clock of the shell and the plain
+seconds — so the number in the panel is the number the tunnel really took.
+
 ### The engine driver of the panel, in Go
 
 `internal/panel/engine` is everything the panel does with the tunnel engine

@@ -30,6 +30,12 @@ type Probe struct {
 // tunnel did not answer" on a system whose clock is perfectly fine. So the
 // nanoseconds are used when they are there, bash's own clock is used when
 // it is not, and the seconds are the last resort.
+//
+// The three branches must agree on the unit, or the panel would measure the
+// same thing in three different units: the nanoseconds of "date" are
+// divided by a million to reach the milliseconds, the microseconds of
+// EPOCHREALTIME by a thousand, and the seconds are multiplied by a
+// thousand. The time the panel shows is the time the tunnel really took.
 const nowMS = `now_ms() {
   n=$(date +%s%N 2>/dev/null)
   case "$n" in
@@ -41,7 +47,7 @@ const nowMS = `now_ms() {
         echo $(( $(date +%s) * 1000 ))
       fi
       ;;
-    *) echo $(( n / 1000 ));;
+    *) echo $(( n / 1000000 ));;
   esac
 }`
 

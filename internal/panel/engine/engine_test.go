@@ -365,6 +365,31 @@ func TestTheHealthScriptSurvivesADateWithoutNanoseconds(t *testing.T) {
 	}
 }
 
+// TestTheClockOfTheHealthScriptCountsMilliseconds: the panel shows the
+// time of a tunnel in milliseconds, and the clock of the script must count
+// them: a tenth of a second is a hundred milliseconds, not a hundred
+// thousand microseconds.
+func TestTheClockOfTheHealthScriptCountsMilliseconds(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("there is no bash here")
+	}
+	link := &model.Link{IranID: "i", KharejID: "k", TunnelPort: 3080, ProbePort: 61000, ID: "l1"}
+	link.Normalize()
+	clock := strings.SplitN(CheckScript([]*model.Link{link}), "a=$(systemctl", 2)[0]
+	out := exec.Command("bash", "-c", clock+"a=$(now_ms); sleep 0.1; b=$(now_ms); echo $(( b - a ))")
+	answer, err := out.Output()
+	if err != nil {
+		t.Fatalf("the clock of the script does not work: %v", err)
+	}
+	measured, err := atoi(strings.TrimSpace(string(answer)))
+	if err != nil {
+		t.Fatalf("the clock printed %q, it must print a number", answer)
+	}
+	if measured < 50 || measured > 500 {
+		t.Errorf("the clock counted %d for a tenth of a second, it must count the milliseconds", measured)
+	}
+}
+
 // TestTheConfigurationIsTheSameAsThePythonOne: the configuration the panel
 // writes must be the one the Python panel writes, byte for byte. The files
 // in tests/fixtures/ are the ones the Python panel writes.

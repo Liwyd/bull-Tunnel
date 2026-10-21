@@ -568,6 +568,26 @@ and read the host key of a server it has never seen ✓.
 and comes up ✓, and the Go panel writes a configuration the engine accepts
 ✓ (the same bytes ✓).
 
+### Commit 15 — the health script counts milliseconds, not microseconds  ✅ done
+
+A fault found while the driver of the engine was written in Go: the clock
+of the health script counted **microseconds** and the panel showed them as
+milliseconds. A tunnel that answered in 12 ms was shown as 12000 ms, and
+the time a tunnel took to come up was a thousand times too big.
+
+* ✅ The clock of the script divides the nanoseconds of `date` by a million
+  and not by a thousand, so that the three branches — the nanoseconds, the
+  clock of the shell and the seconds — agree on the unit ✓. The time the
+  panel shows is the time the tunnel really took ✓.
+* ✅ The same in both panels ✓: `bulltunnel/engine.py` and
+  `internal/panel/engine/scripts.go` ✓, and the scripts of the contract
+  (`tests/fixtures/`) with them ✓.
+* ✅ The tests: a tenth of a second must be a hundred milliseconds ✓ — in
+  the Python suite ✓ and in the Go one ✓.
+
+(The old measurements in the history of a tunnel are in the old unit and
+fade away by themselves; the numbers from now on are the real ones.)
+
 ### Phase 5 — the DNS, the Telegram and the backups
 
 * `internal/panel/dns`: the Cloudflare and the Arvan clients ✓ (the same
@@ -670,7 +690,8 @@ already work ✓.
 | 12 | The Go rewrite — phase 2 (the state) | done |
 | 13 | The Go rewrite — phase 3 (ssh) | done |
 | 14 | The Go rewrite — phase 4 (the engine driver) | done |
-| 15 | The Go rewrite — phase 5 (dns, telegram, backups) | **next** |
+| 15 | The health script counts milliseconds, not microseconds | done |
+| 16 | The Go rewrite — phase 5 (dns, telegram, backups) | **next** |
 | 16 | The Go rewrite — phase 6 (the orchestrator) | pending |
 | 17 | The Go rewrite — phase 7 (the api) | pending |
 | 18 | The Go rewrite — phase 8 (the command) | pending |

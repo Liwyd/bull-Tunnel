@@ -9,7 +9,7 @@ now_ms() {
         echo $(( $(date +%s) * 1000 ))
       fi
       ;;
-    *) echo $(( n / 1000 ));;
+    *) echo $(( n / 1000000 ));;
   esac
 }
 s=$(now_ms); end=$(( $(date +%s) + 30 ))

@@ -197,6 +197,21 @@ def test_the_health_scripts_survive_a_date_without_nanoseconds():
     assert int(out.stdout.strip()) > 0
 
 
+def test_the_clock_of_the_health_script_counts_milliseconds():
+    """The panel shows the time of a tunnel in milliseconds, and the clock of
+    the script must count them: a tenth of a second is a hundred
+    milliseconds, not a hundred thousand microseconds."""
+    script = check_script([Link(iran_id="i", kharej_id="k", tunnel_port=3080, probe_port=61000, id="l1")])
+    clock = script.split("a=$(systemctl")[0]
+    out = subprocess.run(
+        ["bash", "-c", f"{clock}\na=$(now_ms); sleep 0.1; b=$(now_ms); echo $(( b - a ))"],
+        capture_output=True,
+        text=True,
+    )
+    measured = int(out.stdout.strip())
+    assert 50 <= measured <= 500, f"the clock counted {measured} for a tenth of a second"
+
+
 def test_the_check_reads_the_state_of_the_engine():
     """The engine writes what it knows in its metrics file; the panel reads
     the connection state from there. The carriers it speaks come from the
