@@ -16,8 +16,9 @@ no step is taken "from memory".
    finished. The test must fail before the fix and pass after it.
 3. **The engine is this project's engine.** The tunnel engine is the
    BackPack engine (`github.com/AminMGMT/BackPack`, vendored under
-   `engine/`), and it stays the same code: anything in `engine/` that is
-   *not* BackPack must be either removed or reduced to the smallest possible
+   `internal/engine/`), and it stays the same code: anything in
+   `internal/engine/` that is *not* BackPack must be either removed or
+   reduced to the smallest possible
    addition with a clear reason written next to it. The panel side is what
    may be redesigned. The credit for the design and the code it started
    from is in the NOTICE, where the licence asks for it, and nowhere else
@@ -39,8 +40,9 @@ no step is taken "from memory".
    backup password stay masked in every API answer and in every log line.
 10. **Update this file in the same commit as the change.** A commit that does
     not update this file is incomplete.
-11. **The licences are not negotiable.** The `engine/` tree is AGPL-3.0 (it
-    is BackPack's code) and the panel is MIT. The attribution the AGPL's
+11. **The licences are not negotiable.** The `internal/engine/` tree is
+    AGPL-3.0 (it is BackPack's code) and the panel is MIT. The attribution
+    the AGPL's
     Section 7 asks for stays in the NOTICE and in the README, unaltered,
     and **the Go panel never imports a package of the engine**, so that the
     two stay separate works. See "The plan: the whole panel in Go" below.
@@ -152,7 +154,8 @@ them.
   `internal/socks`, `internal/web`, `internal/app`, `internal/debugserver`,
   `internal/snispoof`, `internal/testport` — unchanged, with the module path
   kept as `github.com/backpack/backpack` so the copy can be re-synced with a
-  plain `rsync`.
+  plain `rsync`. (The tree moved to `internal/engine/` in phase 1 ✓, and the
+  module path with it.)
 * ✅ `engine/main.go`: the `bull-tunnel-engine` binary — engine mode (`-c`),
   `-check`, `-v` (the version **and** the carriers), `probe` and `agent`.
 * ✅ `engine/internal/client/transport/probe.go`: the path measurement. It
@@ -432,42 +435,53 @@ Two things follow, and they are not optional:
 
 * ✅ `NOTICE` at the root: the line the AGPL's Section 7 asks for, unaltered,
   with the AGPL's own wording around it.
-* ✅ `engine/LICENSE`: the AGPL-3.0 text.
-* ✅ `engine/NOTICE`: the attribution of the engine's tree.
+* ✅ `internal/engine/LICENSE`: the AGPL-3.0 text.
+* ✅ `internal/engine/NOTICE`: the attribution of the engine's tree.
 * ✅ The root `LICENSE` stays MIT (the panel) and says in one line that the
-  `engine/` tree is AGPL-3.0.
+  `internal/engine/` tree is AGPL-3.0.
 * ✅ The README: the attribution line, the trademark note (the project has its
   own name and logo ✓), the split of the licences ✓, and the framing: the
   engine is **bull-Tunnel's own** ✓, the credit is in the NOTICE ✓.
-* ✅ `engine/README.md`: what the tree is, where it came from, that it is
+* ✅ `internal/engine/README.md`: what the tree is, where it came from, that it is
   AGPL-3.0 ✓, and that it is this project's engine ✓.
 * ✅ The engine's `-v` prints the attribution line ✓ (the AGPL asks for the
   notice to be visible to the users of the network service ✓).
 
 **Done when:** `grep -r "Based on BackPack by Amin Mohammadi (AminMGMT)" `
-finds the line in `NOTICE` and in `README.md` ✓, `engine/LICENSE` is the
+finds the line in `NOTICE` and in `README.md` ✓, `internal/engine/LICENSE` is the
 AGPL ✓, the panel's licence is still MIT ✓, and the README no longer
 introduces the engine as somebody else's ✓.
 
-### Phase 1 — one Go module
+### Phase 1 — one Go module  ✅ done
 
-* `go.mod`: `module github.com/Liwyd/bull-Tunnel`, `go 1.26.9` (what the
-  engine asks for ✓).
-* The engine's tree moves from `engine/` to `internal/engine/` and every
-  import path is rewritten (a mechanical `sed` over the tree ✓, the vendor
-  directory excepted ✓).
-* `cmd/bull-tunnel-engine/main.go`: the engine's binary ✓ (today's
+* ✅ `go.mod`: `module github.com/Liwyd/bull-Tunnel`, `go 1.26.9` (what the
+  engine asks for ✓). The requirements are the engine's own, and `vendor/`
+  came to the root with them, so the build still needs no network ✓.
+* ✅ The engine's tree moved from `engine/` to `internal/engine/`, and every
+  import path was rewritten with it (a mechanical `sed` over the tree ✓, the
+  vendor directory excepted ✓). BackPack's own `internal/` is one level
+  deeper now — its packages are `internal/engine/<name>` — because Go keeps
+  the packages of an `internal` directory to the tree they belong to, and
+  the engine's binary lives outside that tree.
+* ✅ `cmd/bull-tunnel-engine/main.go`: the engine's binary ✓ (today's
   `engine/main.go` ✓).
-* `engine/build.sh` becomes `build.sh` at the root: it builds **both**
+* ✅ `engine/build.sh` became `build.sh` at the root: it builds **both**
   binaries for the four architectures and writes the checksums ✓.
-* The release assets become:
+* ✅ The release assets are:
   * `bull-tunnel-engine_linux_<arch>.tar.gz` (the same name as today ✓ so
     the panel's install path does not change ✓),
-  * `bull-tunnel_linux_<arch>.tar.gz` (the panel ✓).
-* The CI: the Go build ✓, the Go tests ✓, the Python tests (until phase
-  9 ✓).
+  * `bull-tunnel_linux_<arch>.tar.gz` (the panel — it comes with the Go
+    panel itself, in phase 8; until then the build script says out loud
+    that the binary is not there yet, and the release carries the Python
+    wheel as it does today ✓).
+* ✅ The CI: the Go build ✓, the Go tests ✓ (the engine's own tests included,
+    under their new paths ✓), the Python tests (until phase 9 ✓).
+* ✅ `internal/panel/` is the tree the panel's Go code will live in, and
+  `internal/panel/separation_test.go` keeps the panel from importing a
+  package of the engine: the two are synchronized by contract, not by
+  linking, and that is what keeps the licences apart ✓.
 
-**Done when:** `go build ./...` and `go test ./...` pass at the root, the
+**Done when:** `go build ./...` and `go test ./...` pass at the root ✓, the
 engine's binary still prints its version and its nine carriers ✓, and a
 tunnel that the old engine brought up still comes up ✓ (the config format
 did not change ✓).
@@ -611,8 +625,8 @@ already work ✓.
 | 8 | The release | done |
 | 9 | The network graph follows the type-1 design | done |
 | 10 | The Go rewrite — phase 0 (the licence) | done |
-| 11 | The Go rewrite — phase 1 (one module) | **next** |
-| 12 | The Go rewrite — phase 2 (the state) | pending |
+| 11 | The Go rewrite — phase 1 (one module) | done |
+| 12 | The Go rewrite — phase 2 (the state) | **next** |
 | 13 | The Go rewrite — phase 3 (ssh) | pending |
 | 14 | The Go rewrite — phase 4 (the engine driver) | pending |
 | 15 | The Go rewrite — phase 5 (dns, telegram, backups) | pending |

@@ -1,16 +1,17 @@
 bull-Tunnel
 Copyright (C) 2026 bull-Tunnel contributors. All rights reserved.
 
-The control panel (everything outside the `engine/` directory) is licensed
-under the MIT licence; see the LICENSE file.
+The control panel (everything outside the `internal/engine/` directory) is
+licensed under the MIT licence; see the LICENSE file.
 
 --------------------------------------------------------------------------------
 The tunnel engine
 --------------------------------------------------------------------------------
 
-The tunnel engine in the `engine/` directory is licensed under the GNU Affero
-General Public License v3.0 (AGPL-3.0); see `engine/LICENSE` for the full
-text and `engine/NOTICE` for the notices that go with it.
+The tunnel engine in the `internal/engine/` directory is licensed under the GNU
+Affero General Public License v3.0 (AGPL-3.0); see `internal/engine/LICENSE`
+for the full text and `internal/engine/NOTICE` for the notices that go with
+it.
 
 It is this project's engine: the panel builds it, ships it, versions it and
 installs it on the servers that carry the tunnels. It started as the engine of

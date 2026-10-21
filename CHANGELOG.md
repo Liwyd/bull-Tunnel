@@ -7,6 +7,38 @@ only adds something.
 
 ## Unreleased
 
+### One Go module
+
+The panel and the engine are one Go module now —
+`github.com/Liwyd/bull-Tunnel` — with two binaries and one vendor directory:
+
+```
+cmd/bull-tunnel-engine/   the engine's binary
+cmd/bull-tunnel/           the panel's binary (with phase 8 of the rewrite)
+internal/engine/           the engine
+internal/panel/            the panel
+vendor/                    the dependencies: the build needs no network
+```
+
+The engine's tree moved from `engine/` to `internal/engine/` and its import
+paths were rewritten with it (`github.com/backpack/backpack/config` became
+`github.com/Liwyd/bull-Tunnel/internal/engine/config`). Nothing else of it
+changed: the same code, the same tests, and a binary that prints the same
+version and the same nine carriers.
+
+- **The build script is at the root** (`bash build.sh`) and builds both
+  binaries for the four architectures and writes the checksums next to them.
+  The engine's file keeps its name —
+  `bull-tunnel-engine_linux_<arch>.tar.gz` — so the panel installs it
+  exactly as before, with the same checksum and the same path.
+- **The dependencies are vendored at the root of the module**, so the build
+  needs no network and gives the same result everywhere.
+- **The engine stays AGPL-3.0 and the panel stays MIT.** They are two
+  programs that talk over SSH, and a test
+  (`internal/panel/separation_test.go`) keeps the panel from ever importing
+  a package of the engine: a program that links AGPL code is AGPL, whatever
+  else is in it.
+
 ### The network graph follows the type-1 design
 
 The graph of the network view is built from the type-1 design

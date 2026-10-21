@@ -436,7 +436,13 @@ The tunnel engine is **bull-Tunnel's own engine**. It is one static binary
 amd64, arm64, 386 and armv7, and the panel builds it, ships it, versions it
 and installs it on the servers that carry the tunnels. It started as the
 engine of BackPack and it is that engine, unchanged; what this project added
-to it is written down in [engine/README.md](engine/README.md).
+to it is written down in [internal/engine/README.md](internal/engine/README.md).
+
+The engine and the panel are one Go module — `github.com/Liwyd/bull-Tunnel` —
+with two binaries and the engine's own tree under `internal/engine/`. They are
+synchronized by contract, not by linking: the panel reads the engine's files
+and drives the engine over SSH, and never imports a package of it. That is
+what keeps the MIT licence of the panel and the AGPL-3.0 of the engine apart.
 
 What it brings:
 
@@ -478,8 +484,8 @@ Installing the engine on a server:
 - If the source is not reachable, put the file
   `bull-tunnel-engine_linux_<arch>.tar.gz` by hand in
   `<data>/cache/<version>/`; the panel picks it up.
-- Building from the source: `bash engine/build.sh` (without internet,
-  because the dependencies are inside `engine/vendor`).
+- Building from the source: `bash build.sh` (without internet,
+  because the dependencies are inside `vendor/`).
 
 ## The command channel (DNS)
 
@@ -630,7 +636,7 @@ Hub** and the releases stay **private**.
 | 2 | **The command channel over DNS** | When not even TCP is possible, the panel must be able to give orders to a server. With the DNS account the panel already has (TXT) and without any new infrastructure | ✅ Done |
 | 3 | **Pinning the host key in SSH** | `known_hosts=None` is used today; a device in the middle could steal the server | ✅ Done |
 | 4 | **Rate limiting on the login** and the security headers | Layered defence against a flood attack on the login form | ✅ Done |
-| 5 | **A real integration test** of the engine on the loopback | Today the live test only runs when there is an outside binary | ✅ Done (the engine's own tests, `engine/internal/client` and `engine/internal/server`) |
+| 5 | **A real integration test** of the engine on the loopback | Today the live test only runs when there is an outside binary | ✅ Done (the engine's own tests, `internal/engine/client` and `internal/engine/server`) |
 | 6 | **Automatic releases and images** | Public releases with the binaries and `SHA256SUMS`, a multi-architecture image on Docker Hub, installation and updating with one command | ✅ Done (CI) |
 
 The technical details of each item are in
@@ -648,13 +654,13 @@ every version: [CHANGELOG.md](CHANGELOG.md).
 
 ## Licences
 
-The **control panel** — everything outside the `engine/` directory — is MIT
-licensed.
+The **control panel** — everything outside the `internal/engine/` directory — is
+MIT licensed.
 
-The **tunnel engine** in the `engine/` directory is licensed under the GNU
-Affero General Public License v3.0 (`engine/LICENSE`, `engine/NOTICE`). It
-started as the engine of BackPack, and the credit for that belongs where the
-licence asks for it:
+The **tunnel engine** in the `internal/engine/` directory is licensed under the
+GNU Affero General Public License v3.0 (`internal/engine/LICENSE`,
+`internal/engine/NOTICE`). It started as the engine of BackPack, and the
+credit for that belongs where the licence asks for it:
 
 ```
 Based on BackPack by Amin Mohammadi (AminMGMT)

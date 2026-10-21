@@ -36,8 +36,13 @@ from bulltunnel.store import Store
 
 
 def engine_source(*parts: str) -> str:
-    """The source of the vendored engine, read from the tree."""
-    return (Path(__file__).parent.parent / "engine" / Path(*parts)).read_text()
+    """The source of the vendored engine, read from the tree.
+
+    The engine lives under internal/engine/ and its binary under
+    cmd/bull-tunnel-engine/ since the two became one Go module; the paths
+    are given from the root of the repository.
+    """
+    return (Path(__file__).parent.parent / Path(*parts)).read_text()
 
 
 def test_the_panel_offers_exactly_the_carriers_the_engine_speaks():
@@ -50,9 +55,14 @@ def test_the_panel_offers_exactly_the_carriers_the_engine_speaks():
     """
     import re
 
-    block = engine_source("main.go").split("var carriers = []string{")[1].split("}")[0]
+    block = engine_source("cmd", "bull-tunnel-engine", "main.go").split("var carriers = []string{")[1].split("}")[0]
     names = re.findall(r"string\(config\.(\w+)\)", block)
-    constants = dict(re.findall(r'(\w+)\s+TransportType = "([^"]+)"', engine_source("config", "config.go")))
+    constants = dict(
+        re.findall(
+            r'(\w+)\s+TransportType = "([^"]+)"',
+            engine_source("internal", "engine", "config", "config.go"),
+        )
+    )
     engine = [constants[n] for n in names]
     assert sorted(engine) == sorted(ALL_TRANSPORTS)
     # and every one of them is a carrier the engine really has

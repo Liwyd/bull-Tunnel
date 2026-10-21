@@ -10,3 +10,11 @@ venv
 .venv
 docs/*.png
 tests
+# the Go module: the image carries the Python panel, and the engine is
+# built by the release, not by the image
+go.mod
+go.sum
+build.sh
+cmd
+internal
+vendor
