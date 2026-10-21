@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from bulltunn import cmdchannel as cm
+from bulltunnel import cmdchannel as cm
 
 
 def test_the_signature_is_the_one_the_engine_computes():

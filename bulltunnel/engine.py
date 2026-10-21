@@ -1,15 +1,15 @@
 """Everything that touches the tunnel engine on the servers: config rendering,
 deploy, install, scanning for existing tunnels, and the health checks.
 
-The engine is a separate program that implements the Bull-Tunn tunnel schema
+The engine is a separate program that implements the bull-Tunnel tunnel schema
 (docs/engine-schema.md). The panel does not care which build of it runs on a
 server, as long as that build reads the schema, writes the metrics file and
 exits non-zero when it cannot. Every tunnel therefore looks the same on every
 server:
 
-    /etc/bulltunn/<name>.toml                 config
-    /etc/bulltunn/<name>.metrics.json         written by the engine
-    /etc/systemd/system/bulltunn-<name>.service
+    /etc/bull-tunnel/<name>.toml                 config
+    /etc/bull-tunnel/<name>.metrics.json         written by the engine
+    /etc/systemd/system/bull-tunnel-<name>.service
 
 Tunnels the panel builds are named ``bt-<link id>``. Tunnels it *adopts*
 (found already running) keep their names, and every key in their config the
@@ -49,15 +49,15 @@ from .ssh import SSHError, SSHPool
 
 log = logging.getLogger(__name__)
 
-BIN_PATH = "/usr/local/bin/bulltunn-engine"
-CONF_DIR = "/etc/bulltunn"
+BIN_PATH = "/usr/local/bin/bull-tunnel-engine"
+CONF_DIR = "/etc/bull-tunnel"
 UNIT_DIR = "/etc/systemd/system"
 # Where engine builds are fetched from. The default is this project's own
 # release page; a mirror or a private artifact host can be set in the panel
 # (Settings.engine_source), and a bearer token can be given for private
 # artifacts (Settings.engine_token).
-RELEASE_BASE = "https://github.com/Liwyd/Bull-Tunn/releases"
-ASSET = "bulltunn-engine_linux_{arch}.tar.gz"
+RELEASE_BASE = "https://github.com/Liwyd/bull-Tunnel/releases"
+ASSET = "bull-tunnel-engine_linux_{arch}.tar.gz"
 
 ARCH = {
     "x86_64": "amd64",
@@ -114,7 +114,7 @@ class Found:
 
     @property
     def token(self) -> str:
-        return str(self.data.get("token") or "bulltunn")  # the engine's built-in default
+        return str(self.data.get("token") or "bulltunnel")  # the engine's built-in default
 
     def port(self) -> int | None:
         addr = str(self.data.get("bind_addr" if self.role == "server" else "remote_addr", ""))
@@ -277,17 +277,17 @@ def client_section(link: Link, transport: str, iran: Server) -> dict[str, Any]:
 
 
 def render_server(link: Link, transport: str, ports: list[str], kharej: Server) -> str:
-    head = f"# Managed by Bull-Tunn (link {link.id}) - kharej {kharej.name} -> this Iran server"
+    head = f"# Managed by bull-Tunnel (link {link.id}) - kharej {kharej.name} -> this Iran server"
     return dump_section("server", server_section(link, transport, ports, kharej), head)
 
 
 def render_client(link: Link, transport: str, iran: Server) -> str:
-    head = f"# Managed by Bull-Tunn (link {link.id}) - this kharej server -> Iran {iran.name}"
+    head = f"# Managed by bull-Tunnel (link {link.id}) - this kharej server -> Iran {iran.name}"
     return dump_section("client", client_section(link, transport, iran), head)
 
 
 def unit_name(name: str) -> str:
-    return f"bulltunn-{name}.service"
+    return f"bulltunnel-{name}.service"
 
 
 def iran_unit(link: Link) -> str:
@@ -304,7 +304,7 @@ def conf_path(name: str) -> str:
 
 def render_unit(name: str) -> str:
     return f"""[Unit]
-Description=Bull-Tunn tunnel ({name})
+Description=bull-Tunnel tunnel ({name})
 After=network.target
 
 [Service]
@@ -441,7 +441,7 @@ def parse_wait(out: str) -> Probe:
 SCAN_SCRIPT = f"""for f in {CONF_DIR}/*.toml; do
   [ -f "$f" ] || continue
   n=$(basename "$f" .toml)
-  u="bulltunn-$n.service"
+  u="bull-tunnel-$n.service"
   if ! systemctl cat "$u" >/dev/null 2>&1; then
     u=$(grep -lsF -- "$f" /etc/systemd/system/*.service /lib/systemd/system/*.service /usr/lib/systemd/system/*.service 2>/dev/null | head -n1)
     u=${{u##*/}}
@@ -563,8 +563,8 @@ for p in @PORTS@; do
   echo "@@CMD $(tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null | head -c 600)"
   lp=$(ss -ltnpH 2>/dev/null | grep -F "((\"$c\"," | cols | awk '{n=split($1,a,":"); print a[n]}' | sort -u | tr '\n' ' ')
   ip=0
-  # a Bull-Tunn engine here: the next kharej dials in on its tunnel port
-  [ "$c" = bulltunn-engine ] && lp="$p" && ip=1
+  # a bull-Tunnel engine here: the next kharej dials in on its tunnel port
+  [ "$c" = bull-tunnel-engine ] && lp="$p" && ip=1
   echo "@@OUT"
   ss -tnpH state established 2>/dev/null | grep -F "((\"$c\"," | cols \
     | awk -v lp=" $lp " -v ip=$ip '{n=split($1,a,":"); if (index(lp, " " a[n] " ")) next; if (ip) sub(/:[0-9]+$/, "", $2); print $2}' \
@@ -699,7 +699,7 @@ def parse_exits(out: str, ports: list[int]) -> tuple[dict[int, dict[str, Any]], 
 
 
 def parse_scan(out: str) -> list[Found]:
-    """Reverse tunnels in a server's /etc/bulltunn. Direct/L3 tunnels and
+    """Reverse tunnels in a server's /etc/bull-tunnel. Direct/L3 tunnels and
     anything unparsable are skipped."""
     found: list[Found] = []
     chunks = out.split("@@FILE ")[1:]
@@ -898,11 +898,11 @@ class SSHDriver(Driver):
     def _binary_from(path: Path, name: str) -> bytes:
         with tarfile.open(fileobj=io.BytesIO(path.read_bytes())) as tar:
             for m in tar.getmembers():
-                if m.isfile() and Path(m.name).name == "bulltunn-engine":
+                if m.isfile() and Path(m.name).name == "bull-tunnel-engine":
                     f = tar.extractfile(m)
                     assert f
                     return f.read()
-        raise DeployError(f"no bulltunn-engine binary in {name}")
+        raise DeployError(f"no bull-tunnel-engine binary in {name}")
 
     async def ensure_installed(self, s: Server, install: bool = True) -> str:
         machine, ver, transports = await self.installed_version(s)

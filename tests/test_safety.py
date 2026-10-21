@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from bulltunn.engine import check_script, listen_ports, parse_listening, parse_scan
-from bulltunn.models import L_DEGRADED, L_DOWN, L_PENDING, L_UP, Link, Settings
+from bulltunnel.engine import check_script, listen_ports, parse_listening, parse_scan
+from bulltunnel.models import L_DEGRADED, L_DOWN, L_PENDING, L_UP, Link, Settings
 from tests.conftest import FakeDNS
 
 
@@ -61,7 +61,7 @@ async def test_observe_mode_never_points_a_record_somewhere_new(world):
 
 async def test_unreadable_record_is_retried_and_never_written(world):
     w = world
-    from bulltunn.dns.base import DNSError
+    from bulltunnel.dns.base import DNSError
 
     reads = []
 

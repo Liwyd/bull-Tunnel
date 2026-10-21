@@ -1,4 +1,4 @@
-// Package agent is the command channel of Bull-Tunn.
+// Package agent is the command channel of bull-Tunnel.
 //
 // When not even a TCP handshake is possible, the panel cannot reach a server
 // over SSH. The agent is the way out: it polls a TXT record over ordinary
@@ -10,7 +10,7 @@
 // and every name it is given is checked against the files of the tunnel
 // directory: there is no shell anywhere in this package.
 //
-// This is a Bull-Tunn addition to the BackPack engine: BackPack has no
+// This is a bull-Tunnel addition to the BackPack engine: BackPack has no
 // command channel. What it does share with BackPack is the rule that the two
 // ends of a protocol must agree on it byte for byte — the signature below is
 // the Python panel's, down to the last separator, and the test vector in

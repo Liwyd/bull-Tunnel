@@ -1,35 +1,35 @@
 # The tunnel engine contract
 
-Bull-Tunn is a **control plane**. The tunnels themselves are carried by a
+bull-Tunnel is a **control plane**. The tunnels themselves are carried by a
 separate program — the *tunnel engine* — that runs on both ends of every
 tunnel. The panel never sits in the traffic path.
 
 The panel does not care which build of the engine runs on a server, as long
-as that build obeys this contract. The engine that ships with Bull-Tunn is
+as that build obeys this contract. The engine that ships with bull-Tunnel is
 the **BackPack engine** ([github.com/AminMGMT/BackPack](https://github.com/AminMGMT/BackPack)),
 vendored under `engine/` and built into one static binary that runs on the
 servers of the tunnel, wherever they are.
 
 ```
-/etc/bulltunn/<name>.toml                 config
-/etc/bulltunn/<name>.metrics.json         written by the engine
-/etc/systemd/system/bulltunn-<name>.service
+/etc/bull-tunnel/<name>.toml                 config
+/etc/bull-tunnel/<name>.metrics.json         written by the engine
+/etc/systemd/system/bull-tunnel-<name>.service
 ```
 
 ## Command line
 
 ```
-bulltunn-engine -c /etc/bulltunn/name.toml     run the tunnel
-bulltunn-engine -c name.toml -check            read the file, report the problem, exit
-bulltunn-engine probe -c name.toml            measure the path, one line per carrier
-bulltunn-engine agent -c /etc/bulltunn/agent.toml   the command channel
-bulltunn-engine -v                             print the version and the carriers
+bull-tunnel-engine -c /etc/bull-tunnel/name.toml     run the tunnel
+bull-tunnel-engine -c name.toml -check            read the file, report the problem, exit
+bull-tunnel-engine probe -c name.toml            measure the path, one line per carrier
+bull-tunnel-engine agent -c /etc/bull-tunnel/agent.toml   the command channel
+bull-tunnel-engine -v                             print the version and the carriers
 ```
 
 `-v` prints two lines, and the panel reads both:
 
 ```
-bulltunn-engine 1.0.0
+bull-tunnel-engine 1.0.0
 transports: tcp,tcpmux,stealth,ws,wss,wsmux,wssmux,kcp,quic
 ```
 
@@ -193,7 +193,7 @@ The engine can measure the path to the other end, which is what the ⚡
 button of the panel shows:
 
 ```
-bulltunn-engine probe -c name.toml --samples 3
+bull-tunnel-engine probe -c name.toml --samples 3
 ```
 
 It runs on the side that dials out, opens every carrier in turn and writes

@@ -1,4 +1,4 @@
-// Command bulltunn-engine is the tunnel engine of Bull-Tunn.
+// Command bull-tunnel-engine is the tunnel engine of bull-Tunnel.
 //
 // The engine is BackPack's. Everything under this module — config/, cmd/,
 // internal/client, internal/server, internal/tunnel, internal/utils and the
@@ -6,15 +6,15 @@
 // unchanged; the module path is kept as github.com/backpack/backpack so the
 // copy can be re-synced with a plain rsync and never drifts.
 //
-// This file is the only Bull-Tunn addition at the top level. It gives the
+// This file is the only bull-Tunnel addition at the top level. It gives the
 // engine the three extra entry points the control panel needs, and nothing
 // else:
 //
-//	bulltunn-engine -c /etc/bulltunn/<name>.toml    run one tunnel
-//	bulltunn-engine -c <name>.toml -check           only read and check the file
-//	bulltunn-engine -v                              print the version and the carriers
-//	bulltunn-engine probe -c <client>.toml          measure the path, one line per carrier
-//	bulltunn-engine agent -c <agent>.toml            the command channel
+//	bull-tunnel-engine -c /etc/bull-tunnel/<name>.toml    run one tunnel
+//	bull-tunnel-engine -c <name>.toml -check           only read and check the file
+//	bull-tunnel-engine -v                              print the version and the carriers
+//	bull-tunnel-engine probe -c <client>.toml          measure the path, one line per carrier
+//	bull-tunnel-engine agent -c <agent>.toml            the command channel
 //
 // The tunnel itself is BackPack's, unmodified: the same control channel, the
 // same carriers, the same pool, the same metrics file.
@@ -95,12 +95,12 @@ func main() {
 	case *showVer:
 		// Two lines, and the panel reads both: the version, then the
 		// carriers this build speaks.
-		fmt.Printf("bulltunn-engine %s\n", Version())
+		fmt.Printf("bull-tunnel-engine %s\n", Version())
 		fmt.Printf("transports: %s\n", strings.Join(carriers, ","))
 		return
 
 	case *configPath == "":
-		fmt.Fprintln(os.Stderr, "usage: bulltunn-engine -c <config file>")
+		fmt.Fprintln(os.Stderr, "usage: bull-tunnel-engine -c <config file>")
 		os.Exit(2)
 	}
 
@@ -138,7 +138,7 @@ func runProbe(args []string) {
 	timeout := fs.Int("timeout", 15, "how long one carrier may take to come up, in seconds")
 	fs.Parse(args)
 	if *configPath == "" {
-		fmt.Fprintln(os.Stderr, "usage: bulltunn-engine probe -c <config file>")
+		fmt.Fprintln(os.Stderr, "usage: bull-tunnel-engine probe -c <config file>")
 		os.Exit(2)
 	}
 
@@ -166,7 +166,7 @@ func runAgent(args []string) {
 	configPath := fs.String("c", "", "path to the agent configuration file")
 	fs.Parse(args)
 	if *configPath == "" {
-		fmt.Fprintln(os.Stderr, "usage: bulltunn-engine agent -c <agent config file>")
+		fmt.Fprintln(os.Stderr, "usage: bull-tunnel-engine agent -c <agent config file>")
 		os.Exit(2)
 	}
 	if err := agent.Run(*configPath); err != nil {

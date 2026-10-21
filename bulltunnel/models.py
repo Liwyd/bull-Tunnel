@@ -27,7 +27,7 @@ L_DOWN = "down"
 # carries UDP and cannot be probed with TCP, so it is not offered.
 #
 # This list must be the carriers the engine speaks: the engine prints them
-# with `bulltunn-engine -v`, the panel reads them from the server and never
+# with `bull-tunnel-engine -v`, the panel reads them from the server and never
 # tests a carrier the engine does not have. The two lists are checked by
 # tests/test_engine.py.
 ALL_TRANSPORTS = ["tcpmux", "wsmux", "tcp", "ws", "stealth", "kcp", "quic", "wssmux", "wss"]
@@ -82,7 +82,7 @@ class Server(Model):
     ssh_latency_ms: float | None = None
     engine_version: str = ""
     # the carriers the engine on this server speaks, as it reports them with
-    # `bulltunn-engine -v`. Empty = not known yet, so everything may be tried.
+    # `bull-tunnel-engine -v`. Empty = not known yet, so everything may be tried.
     engine_transports: list[str] = field(default_factory=list)
     error: str = ""
     fail_count: int = 0
@@ -127,7 +127,7 @@ class Link(Model):
     probe_port: int = 0  # loopback probe on the Iran side; 0 = not added yet
     token: str = field(default_factory=lambda: secrets.token_hex(16))
     transport: str = ""
-    # forwarded ports, Bull-Tunn syntax. They live in the Iran side's config:
+    # forwarded ports, bull-Tunnel syntax. They live in the Iran side's config:
     # "443" = Iran :443 -> kharej 127.0.0.1:443, "8443=2096", "2053-2060"...
     ports: list[str] = field(default_factory=list)
     accept_udp: bool = False
@@ -142,7 +142,7 @@ class Link(Model):
     kharej_base: dict[str, Any] = field(default_factory=dict)  # original [client] keys
     allowed: list[str] = field(default_factory=list)  # transports repair may use; [] = global list
     pinned: bool = False  # never change the transport automatically
-    # systemd units running each side; "" = the engine's own "bulltunn-<name>.service"
+    # systemd units running each side; "" = the engine's own "bull-tunnel-<name>.service"
     iran_unit: str = ""
     kharej_unit: str = ""
     # the carriers the engine on the Iran side speaks, as it reports them in

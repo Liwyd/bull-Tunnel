@@ -6,8 +6,8 @@ import os
 
 from fastapi.testclient import TestClient
 
-from bulltunn import probe as pr
-from bulltunn.app import create_app
+from bulltunnel import probe as pr
+from bulltunnel.app import create_app
 from tests.conftest import FakeNet
 
 

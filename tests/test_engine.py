@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from bulltunn.engine import (
+from bulltunnel.engine import (
     _ufw_allow,
     check_script,
     parse_check,
@@ -31,8 +31,8 @@ from bulltunn.engine import (
     validate_port_mapping,
     wait_script,
 )
-from bulltunn.models import ALL_TRANSPORTS, IRAN, KHAREJ, Link, Server
-from bulltunn.store import Store
+from bulltunnel.models import ALL_TRANSPORTS, IRAN, KHAREJ, Link, Server
+from bulltunnel.store import Store
 
 
 def engine_source(*parts: str) -> str:
@@ -76,7 +76,7 @@ def test_render_server_and_client_are_valid_toml():
     cli = tomllib.loads(render_client(link, "tcpmux", i))["client"]
     assert cli["remote_addr"] == "1.2.3.4:3080"
     assert cli["token"] == link.token
-    assert f"-c /etc/bulltunn/bt-{link.id}.toml" in render_unit(link.iran_name)
+    assert f"-c /etc/bull-tunnel/bt-{link.id}.toml" in render_unit(link.iran_name)
 
 
 def test_adopted_tunnel_keeps_its_own_settings():
@@ -123,7 +123,7 @@ transport = "tcpmux"
     found = parse_scan(out)
     assert [(f.name, f.role, f.active) for f in found] == [("hetzner", "server", "active"), ("kh", "client", "inactive")]
     srv, cli = found
-    assert srv.port() == 3080 and srv.token == "abc" and cli.token == "bulltunn"
+    assert srv.port() == 3080 and srv.token == "abc" and cli.token == "bulltunnel"
     assert cli.host() == "1.2.3.4"
     assert split_ports(srv.data["ports"]) == (["443", "8443=2096"], 61003)
 
@@ -190,7 +190,7 @@ def test_the_health_scripts_survive_a_date_without_nanoseconds():
 def test_the_check_reads_the_state_of_the_engine():
     """The engine writes what it knows in its metrics file; the panel reads
     the connection state from there. The carriers it speaks come from the
-    engine itself (`bulltunn-engine -v`), not from the metrics file."""
+    engine itself (`bull-tunnel-engine -v`), not from the metrics file."""
     p = parse_check("@@l1|active|true|1|4210|1\n")
     assert p["l1"].ok
     assert p["l1"].connected is True

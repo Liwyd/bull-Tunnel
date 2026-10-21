@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hmac
 import ipaddress
 import logging
 import os
@@ -27,6 +28,7 @@ from . import probe as pr
 from .auth import COOKIE, SESSION_TTL, Auth
 from .dns import KINDS, DNSClient, client_for
 from .engine import CONF_DIR, Driver, SSHDriver, validate_port_mapping
+from .localauth import read_local_key
 from .models import (
     ALL_TRANSPORTS,
     IRAN,
@@ -45,9 +47,13 @@ from .ssh import HostKeys, SSHPool
 from .store import Store
 from .telegram import TelegramBot
 
-log = logging.getLogger("bulltunn")
+log = logging.getLogger("bulltunnel")
 STATIC = Path(__file__).parent / "static"
 MASK = "••••"
+
+# The header the management tool of the machine sends, and the file the key
+# is written in. See read_local_key in bulltunnel/localauth.py.
+LOCAL_HEADER = "X-Bull-Tunnel-Key"
 
 # The dashboard only loads its own files, the font of the text and its own
 # websocket. No inline script is allowed, so the theme bootstrap is a file
@@ -290,6 +296,11 @@ def create_app(
     pool = SSHPool(host_keys=host_keys)
     limiter = LoginLimiter()
     bot = TelegramBot(lambda: store.settings.tg())
+    # The key the management tool of this machine uses. It is written where
+    # only the owner of the file can read it, and it is only accepted from
+    # this machine: it is what lets "bull-tunnel" work on the panel's own
+    # server without the admin's password.
+    local_key = read_local_key(data / "management.key")
     resolver = None
     if demo:
         from .demo import SimDNS, SimNet, seed, sim_resolver
@@ -326,7 +337,7 @@ def create_app(
         store.meta["last_backup"] = time.time()
         title = {"nightly": "Nightly backup", "manual": "Manual backup", "pre": "Pre-restore backup"}.get(kind, "Backup")
         caption = (
-            f"🗄 <b>{title} — Bull-Tunn</b>\n{bk.summary(data_)}\n"
+            f"🗄 <b>{title} — bull-Tunnel</b>\n{bk.summary(data_)}\n"
             + ("🔒 Encrypted" if pw else "⚠️ Not encrypted: it holds SSH passwords and tokens. Set a backup password in the settings.")
         )
         result = {"name": path.name, "size": len(blob), "encrypted": bool(pw), "sent": 0, "error": ""}
@@ -370,7 +381,7 @@ def create_app(
             from .demo import chaos
 
             tasks.append(asyncio.create_task(chaos(orch, driver)))
-        await orch.emit("info", "panel", f"Bull-Tunn panel {__version__} started" + (" (demo mode)" if demo else ""))
+        await orch.emit("info", "panel", f"bull-Tunnel panel {__version__} started" + (" (demo mode)" if demo else ""))
         yield
         for task in tasks:
             task.cancel()
@@ -378,7 +389,7 @@ def create_app(
         await pool.close()
         store.save()
 
-    app = FastAPI(title="Bull-Tunn", version=__version__, lifespan=lifespan, docs_url=None, redoc_url=None)
+    app = FastAPI(title="bull-Tunnel", version=__version__, lifespan=lifespan, docs_url=None, redoc_url=None)
     app.state.store, app.state.orch, app.state.auth, app.state.bot = store, orch, auth, bot
 
     @app.middleware("http")
@@ -395,9 +406,22 @@ def create_app(
             h.setdefault("Strict-Transport-Security", "max-age=31536000")
         return response
 
+    def is_local(request: Request) -> bool:
+        """Is this request from this machine?"""
+        host = request.client.host if request.client else ""
+        return host in ("127.0.0.1", "::1", "localhost", "unix")
+
     def need_auth(request: Request) -> None:
-        if not auth.verify(request.cookies.get(COOKIE)):
-            raise HTTPException(401, "login required")
+        if auth.verify(request.cookies.get(COOKIE)):
+            return
+        # The management tool of the machine itself: it holds the key the
+        # panel wrote for it, and it is only accepted from this machine.
+        # That is what lets an operator run "bull-tunnel" on the panel's own
+        # server without knowing the admin's password.
+        key = request.headers.get(LOCAL_HEADER, "")
+        if key and local_key and hmac.compare_digest(key, local_key) and is_local(request):
+            return
+        raise HTTPException(401, "login required")
 
     A = [Depends(need_auth)]
 
@@ -673,7 +697,7 @@ def create_app(
         zone = p.zone.rstrip(".")
         return "\n".join(
             [
-                "# Managed by Bull-Tunn - the command channel of this server",
+                "# Managed by bull-Tunnel - the command channel of this server",
                 f'command_record = "{cm.command_record(srv.id, zone)}"',
                 f'answer_record = "{cm.answer_record(srv.id, zone)}"',
                 f'token = "{srv.command_key}"',
@@ -681,21 +705,21 @@ def create_app(
                 f'zone = "{zone}"',
                 f'api_key = "{p.api_token}"',
                 "poll_seconds = 30",
-                "tunnel_dir = /etc/bulltunn",
+                "tunnel_dir = /etc/bull-tunnel",
                 'allowed = ["status", "restart"]',
-                'unit_prefix = "bulltunn"',
+                'unit_prefix = "bulltunnel"',
                 "",
             ]
         )
 
     AGENT_UNIT = """[Unit]
-Description=Bull-Tunn command channel
+Description=bull-Tunnel command channel
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/bulltunn-engine agent -c /etc/bulltunn/agent.toml
+ExecStart=/usr/local/bin/bull-tunnel-engine agent -c /etc/bull-tunnel/agent.toml
 Restart=always
 RestartSec=10
 
@@ -712,11 +736,11 @@ WantedBy=multi-user.target
             raise HTTPException(400, "the command channel is only for the servers the panel dials out to")
         body = agent_config(srv, p)
         await driver.put_file(srv, f"{CONF_DIR}/agent.toml", body.encode(), 0o600)
-        await driver.put_file(srv, "/etc/systemd/system/bulltunn-agent.service", AGENT_UNIT.encode(), 0o644)
+        await driver.put_file(srv, "/etc/systemd/system/bull-tunnel-agent.service", AGENT_UNIT.encode(), 0o644)
         code, out, err = await driver.run(
             srv,
-            "systemctl daemon-reload && systemctl enable bulltunn-agent >/dev/null 2>&1; "
-            "systemctl restart bulltunn-agent",
+            "systemctl daemon-reload && systemctl enable bull-tunnel-agent >/dev/null 2>&1; "
+            "systemctl restart bull-tunnel-agent",
         )
         if code != 0:
             raise HTTPException(502, (err or out).strip() or "the agent did not start")

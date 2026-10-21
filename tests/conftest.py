@@ -4,11 +4,11 @@ import asyncio
 
 import pytest
 
-from bulltunn.demo import SimDNS as FakeDNS
-from bulltunn.demo import SimNet as FakeNet
-from bulltunn.models import IRAN, KHAREJ, DNSProvider, Domain, Server
-from bulltunn.orchestrator import Orchestrator
-from bulltunn.store import Store
+from bulltunnel.demo import SimDNS as FakeDNS
+from bulltunnel.demo import SimNet as FakeNet
+from bulltunnel.models import IRAN, KHAREJ, DNSProvider, Domain, Server
+from bulltunnel.orchestrator import Orchestrator
+from bulltunnel.store import Store
 
 __all__ = ["FakeDNS", "FakeNet", "World"]
 

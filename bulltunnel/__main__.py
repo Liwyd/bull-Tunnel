@@ -1,4 +1,4 @@
-"""python -m bulltunn [serve | demo | passwd | backup | restore]"""
+"""python -m bulltunnel [serve | demo | passwd | backup | restore]"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 
 from . import __version__
 
-SERVICE_USER = "bulltunn"
+SERVICE_USER = "bulltunnel"
 
 
 def hand_over_to_service_user(data: Path) -> None:
@@ -33,9 +33,9 @@ def hand_over_to_service_user(data: Path) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(prog="bulltunn")
+    ap = argparse.ArgumentParser(prog="bulltunnel")
     ap.add_argument("--data", default=os.environ.get("BT_DATA_DIR", "data"), help="data directory")
-    ap.add_argument("--version", action="version", version=f"bulltunn {__version__}")
+    ap.add_argument("--version", action="version", version=f"bulltunnel {__version__}")
     sub = ap.add_subparsers(dest="cmd")
     sv = sub.add_parser("serve", help="run the panel (default)")
     sv.add_argument("--host", default=os.environ.get("BT_HOST", "0.0.0.0"))
@@ -52,7 +52,7 @@ def main() -> None:
     rs = sub.add_parser("restore", help="restore a backup file (stop the service first)")
     rs.add_argument("file")
     rs.add_argument("--password", default="")
-    rs.add_argument("--with-env", action="store_true", help="also restore /etc/default/bulltunn (port, HTTPS)")
+    rs.add_argument("--with-env", action="store_true", help="also restore /etc/default/bull-tunnel (port, HTTPS)")
     rs.add_argument("--keep-mode", action="store_true", help="keep the backup's observe/auto mode instead of starting in observe mode")
     rs.add_argument("--force", action="store_true", help="even if the service is running")
     args = ap.parse_args()
@@ -133,12 +133,12 @@ def backup_cli(args) -> None:
 
     if not args.force and shutil.which("systemctl"):
         running = subprocess.run(
-            ["systemctl", "is-active", "--quiet", "bulltunn"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
+            ["systemctl", "is-active", "--quiet", "bull-tunnel"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False
         ).returncode == 0
         if running:
             raise SystemExit(
-                "the panel is running; stop it first:  systemctl stop bulltunn\n"
-                "The panel is running; stop it first: systemctl stop bulltunn"
+                "the panel is running; stop it first:  systemctl stop bull-tunnel\n"
+                "The panel is running; stop it first: systemctl stop bull-tunnel"
             )
     try:
         d = bk.unpack(Path(args.file).read_bytes(), args.password or store.settings.backup_password)
@@ -159,7 +159,7 @@ def backup_cli(args) -> None:
         print(f"{bk.ENV_FILE} restored")
     hand_over_to_service_user(data)
     print(f"restored: {bk.summary(d)}")
-    print("start the panel again:  systemctl start bulltunn" + ("" if args.keep_mode else "   (it starts in observe mode)"))
+    print("start the panel again:  systemctl start bull-tunnel" + ("" if args.keep_mode else "   (it starts in observe mode)"))
 
 
 if __name__ == "__main__":

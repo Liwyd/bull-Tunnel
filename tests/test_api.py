@@ -4,7 +4,7 @@ import os
 
 from fastapi.testclient import TestClient
 
-from bulltunn.app import create_app
+from bulltunnel.app import create_app
 from tests.conftest import FakeNet
 
 
@@ -82,7 +82,7 @@ def test_setup_login_and_crud(tmp_path):
 
 
 def test_password_changed_from_cli_works_without_restart(tmp_path):
-    from bulltunn.auth import Auth
+    from bulltunnel.auth import Auth
 
     with client(tmp_path) as c:
         assert c.post("/api/setup", json={"username": "admin", "password": "first1"}).status_code == 200

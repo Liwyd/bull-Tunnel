@@ -1,15 +1,19 @@
 <p align="center">
-  <img src="docs/logo.svg" width="289" alt="Bull-Tunn">
+  <img src="docs/logo.svg" width="289" alt="bull-Tunnel">
 </p>
 
 **The control panel for reverse tunnels between Iranian and foreign servers.**
-Bull-Tunn builds the tunnels, measures their health end to end, moves the
+bull-Tunnel builds the tunnels, measures their health end to end, moves the
 domain record to a healthy server when one dies, and reports everything to
 **Telegram**.
 
-Bull-Tunn is an independent tool: the tunnel engine, the panel and the
-contract between them are all defined in this repository, and it depends on
-no outside project.
+bull-Tunnel is an independent tool: the tunnel engine, the panel, the
+management command and the contract between them are all defined in this
+repository, and it depends on no outside project.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Liwyd/bull-Tunnel/main/deploy/install.sh | sudo bash
+```
 
 ![The network view of the panel](docs/dashboard-dark.png)
 
@@ -20,6 +24,7 @@ no outside project.
 - [Architecture](#architecture)
 - [Features](#features)
 - [Installation](#installation)
+- [The management tool](#the-management-tool)
 - [Installation with Docker](#installation-with-docker)
 - [The panel on a domain with HTTPS](#the-panel-on-a-domain-with-https)
 - [Migrating from the previous version](#migrating-from-the-previous-version)
@@ -37,7 +42,7 @@ no outside project.
 
 ## What it is
 
-Bull-Tunn keeps two things apart:
+bull-Tunnel keeps two things apart:
 
 | | What it is | Where it runs | If it breaks |
 |---|---|---|---|
@@ -100,7 +105,7 @@ explanation: [docs/architecture.md](docs/architecture.md).
   domains, the servers and the settings, each with its own counters, so
   that nothing is hidden behind a drawer.
 - **Finding the tunnels that already exist:** add the servers with their IP
-  address and SSH access. The panel reads `/etc/bulltunn` and adds the
+  address and SSH access. The panel reads `/etc/bull-tunnel` and adds the
   running tunnels with the same name, protocol and ports.
 - **A domain is an Iran server plus ports:** every port of a domain can go
   through its own tunnel to a different foreign server. The domain is only
@@ -162,43 +167,79 @@ or a separate one. The panel must be able to reach the Telegram API, the
 ArvanCloud and Cloudflare APIs, the source of the tunnel engine and every
 server over SSH. Ubuntu 22.04 or later, with Python 3.10 or later.
 
-The repository is **private**, so a token is needed to clone it:
+### One line
 
 ```bash
-# with a token (scope: repo, access: contents)
-git clone https://<user>:<token>@github.com/Liwyd/Bull-Tunn.git
-cd Bull-Tunn
+curl -fsSL https://raw.githubusercontent.com/Liwyd/bull-Tunnel/main/deploy/install.sh | sudo bash
+```
+
+That is the whole installation. The script fetches the panel, puts it in
+`/opt/bull-tunnel`, makes a `bulltunnel` user for it, starts the service,
+opens the management tool and prints the address of the panel and the
+password of the `admin` user.
+
+The default port is 8080. If the port is taken, the script stops before it
+changes anything. To choose another port:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Liwyd/bull-Tunnel/main/deploy/install.sh | sudo BT_PORT=9090 bash
+```
+
+The script is safe to run again on a live panel: the code is swapped while
+the service is stopped, and the data directory (the state, the logins, the
+backups) is never touched.
+
+### From a checkout
+
+```bash
+git clone https://github.com/Liwyd/bull-Tunnel.git
+cd bull-Tunnel
 sudo bash deploy/install.sh
 ```
 
-Or with an SSH key (better):
+### The management tool
+
+The installer puts **`bull-tunnel`** on the path, the way BackPack's
+installer puts its menu there. It runs on the machine the panel runs on
+and needs no password: the panel wrote a key for it, in a file only the
+owner of the machine can read, and the panel accepts that key only from
+this machine.
 
 ```bash
-git clone git@github.com:Liwyd/Bull-Tunn.git
-cd Bull-Tunn
-sudo bash deploy/install.sh
+bull-tunnel              # the menu
+bull-tunnel status       # the state of the panel in one screen
+bull-tunnel doctor       # is everything where it should be
 ```
 
-The script prints the address of the panel and a random password for the
-`admin` user. The default port is 8080. If the port is taken, the script
-stops before it changes anything. To choose another port:
-
-```bash
-sudo BT_PORT=9090 bash deploy/install.sh
 ```
+bull-Tunnel 1.1.0
+─────────────────
+  panel              http://127.0.0.1:8080
+  servers            3 of 3 online
+  tunnels            4 up, 0 unstable, 0 down, 1 not built
+  domains            2 of 2 healthy
+  mode               acting
+```
+
+The menu has everything an operator does day to day: the servers (add,
+test, remove), the tunnels (build, rebuild, remove), the domains (add,
+switch, sync), the DNS accounts, the tunnel engine on the servers, the
+backups, the service, the log and the admin password.
+
+### By hand
 
 To change the password:
 
 ```bash
-sudo -u bulltunn /opt/bulltunn/venv/bin/python -m bulltunn --data /var/lib/bulltunn passwd
+sudo -u bulltunnel /opt/bull-tunnel/venv/bin/python -m bulltunnel --data /var/lib/bull-tunnel passwd
 ```
 
 Installing with pip works as well (if you want to run the panel inside
 your own venv or container):
 
 ```bash
-pip install "bulltunn @ git+https://github.com/Liwyd/Bull-Tunn.git@main"
-bulltunn --data /var/lib/bulltunn serve
+pip install "bull-tunnel @ git+https://github.com/Liwyd/bull-Tunnel.git@main"
+bull-tunnel --data /var/lib/bull-tunnel serve
 ```
 
 > Installing on a server that has tunnels of its own is not a problem. The
@@ -209,26 +250,25 @@ bulltunn --data /var/lib/bulltunn serve
 ## Installation with Docker
 
 ```bash
-docker run -d --name bulltunn \
+docker run -d --name bull-tunnel \
   -p 8080:8080 \
-  -v bulltunn-data:/data \
+  -v bull-tunnel-data:/data \
   -e BT_PORT=8080 \
-  liwyd/bulltunn:latest
+  liwyd/bull-tunnel:latest
 ```
 
-The image is built by the CI and published on Docker Hub (`liwyd/bulltunn`,
+The image is built by the CI and published on Docker Hub (`liwyd/bull-tunnel`,
 several architectures: amd64 and arm64). For the other versions:
-`liwyd/bulltunn:v1.0.0`. The data stays in the volume named
-`bulltunn-data`; to look at and change the settings:
+`liwyd/bull-tunnel:v1.0.0`. The data stays in the volume named
+`bull-tunnel-data`; to look at and change the settings:
 
 ```bash
-docker exec -it bulltunn bulltunn --data /data passwd
+docker exec -it bull-tunnel bull-tunnel --data /data passwd
 ```
 
-> If the image is not on Docker Hub (the repository is private and the
-> tokens have to be added to the repository settings), build it yourself:
-> `docker build -t bulltunn:local .` — or install the panel directly on a
-> server.
+> If the image is not on Docker Hub, build it yourself:
+> `docker build -t bull-tunnel:local .` — or install the panel directly on a
+> server, which is what the one-line installer does.
 
 ## The panel on a domain with HTTPS
 
@@ -240,7 +280,7 @@ docker exec -it bulltunn bulltunn --data /data passwd
 3. Run:
 
 ```bash
-cd ~/Bull-Tunn
+cd ~/bull-Tunnel
 sudo bash deploy/https.sh panel.example.com you@example.com
 ```
 
@@ -263,12 +303,12 @@ Nothing is deleted and everything can be undone.
 **1) On the panel server** (from the new checkout):
 
 ```bash
-git clone https://<user>:<token>@github.com/Liwyd/Bull-Tunn.git && cd Bull-Tunn
+git clone https://<user>:<token>@github.com/Liwyd/bull-Tunnel.git && cd bull-Tunnel
 sudo bash deploy/migrate.sh
 ```
 
 The data (servers, tunnels, domains, DNS accounts, the login) is moved, the
-name of the variables changes from `TM_` to `BT_` and the `bulltunn`
+name of the variables changes from `TM_` to `BT_` and the `bulltunnel`
 service is started. The previous service stays disabled until you are sure.
 
 **2) On each tunnel server** (the Iran and the foreign servers):
@@ -282,9 +322,9 @@ This script only moves and rewrites files; it does not delete anything:
 
 | Before | After |
 |---|---|
-| `/etc/backpack/` | `/etc/bulltunn/` |
-| `backpack-<name>.service` | `bulltunn-<name>.service` |
-| `/usr/local/bin/backpack` | `/usr/local/bin/bulltunn-engine` |
+| `/etc/backpack/` | `/etc/bull-tunnel/` |
+| `backpack-<name>.service` | `bull-tunnel-<name>.service` |
+| `/usr/local/bin/backpack` | `/usr/local/bin/bull-tunnel-engine` |
 
 After this, press "Find tunnels" in the panel: the existing tunnels are
 accepted and managed with the same names and settings as before.
@@ -311,7 +351,7 @@ keep working as before.
 The guards that are always on:
 
 - The first rewrite of the config of an existing tunnel keeps the original
-  in `/etc/bulltunn/<name>.toml.bt-orig`.
+  in `/etc/bull-tunnel/<name>.toml.bt-orig`.
 - No tunnel is built on a port that is in use.
 - "Test & connect" only builds the tunnels that are not built yet or are
   completely down; it never touches a healthy or an unstable tunnel.
@@ -423,7 +463,7 @@ What that brings:
   the control channel, so it never takes the tunnel away from the client
   that is carrying the traffic.
 
-Two things are Bull-Tunn's own and are not in BackPack: the `probe` and
+Two things are bull-Tunnel's own and are not in BackPack: the `probe` and
 `agent` entry points, and the command channel below.
 
 The full contract of the engine (config, unit, metrics file, health probe,
@@ -438,7 +478,7 @@ Installing the engine on a server:
   for example). For a private repository, the token goes in the same
   place.
 - If the source is not reachable, put the file
-  `bulltunn-engine_linux_<arch>.tar.gz` by hand in
+  `bull-tunnel-engine_linux_<arch>.tar.gz` by hand in
   `<data>/cache/<version>/`; the panel picks it up.
 - Building from the source: `bash engine/build.sh` (without internet,
   because the dependencies are inside `engine/vendor`).
@@ -457,7 +497,7 @@ panel ◄──HTTPS── DNS account ◄── TXT record ◄──DNS── a
 - The panel writes the command into a TXT record and **signs it with a key
   that only the panel and the agent know** (HMAC-SHA256). An account that
   can write in that zone still cannot forge a command.
-- The "agent" on the server (`bulltunn-engine agent`) reads that record
+- The "agent" on the server (`bull-tunnel-engine agent`) reads that record
   every 30 seconds with an ordinary DNS request, checks the signature and
   runs the command.
 - There are only two commands: `status` (the state of the tunnels and the
@@ -479,7 +519,7 @@ its DNS account. Then, in the panel of each foreign server, press
 
 Every night at **3 a.m. Tehran time** a full backup is sent to the
 Telegram chats. The last 14 copies also stay in
-`/var/lib/bulltunn/backups`. The time, the time zone and the number of
+`/var/lib/bull-tunnel/backups`. The time, the time zone and the number of
 copies are configurable in Settings → Backups.
 
 The backup holds everything: the servers with their SSH passwords, the
@@ -501,12 +541,12 @@ copy of the password somewhere else as well.
   lost):
 
 ```bash
-git clone https://<user>:<token>@github.com/Liwyd/Bull-Tunn.git && cd Bull-Tunn
+git clone https://<user>:<token>@github.com/Liwyd/bull-Tunnel.git && cd bull-Tunnel
 sudo bash deploy/install.sh
-sudo systemctl stop bulltunn
-sudo -u bulltunn /opt/bulltunn/venv/bin/python -m bulltunn --data /var/lib/bulltunn \
+sudo systemctl stop bull-tunnel
+sudo -u bulltunnel /opt/bull-tunnel/venv/bin/python -m bulltunnel --data /var/lib/bull-tunnel \
      restore bt-backup-XXXXXXXX-XXXX.tmbk --password 'the backup password'
-sudo systemctl start bulltunn
+sudo systemctl start bull-tunnel
 ```
 
 With `--with-env` the port and the HTTPS settings come back as well. If
@@ -532,7 +572,7 @@ given as well.
 ## Updating
 
 ```bash
-cd ~/Bull-Tunn && git pull && sudo bash deploy/install.sh
+cd ~/bull-Tunnel && git pull && sudo bash deploy/install.sh
 ```
 
 Only the panel service is restarted. The tunnels, the users and the
@@ -542,16 +582,16 @@ settings are not touched.
 
 | Path | What it holds |
 |---|---|
-| `/opt/bulltunn` | The program and the python environment |
-| `/var/lib/bulltunn/state.json` | All the information of the panel (mode 600) |
-| `/var/lib/bulltunn/backups/` | The copies of the backups |
-| `/etc/default/bulltunn` | The port, the address and the path of the HTTPS certificate |
-| `journalctl -u bulltunn` | The log of the panel |
+| `/opt/bull-tunnel` | The program and the python environment |
+| `/var/lib/bull-tunnel/state.json` | All the information of the panel (mode 600) |
+| `/var/lib/bull-tunnel/backups/` | The copies of the backups |
+| `/etc/default/bull-tunnel` | The port, the address and the path of the HTTPS certificate |
+| `journalctl -u bull-tunnel` | The log of the panel |
 
 - The tunnels the panel builds are named `bt-<id>`, and the existing
   tunnels keep their own name. The layout of the files on the servers: the
-  config in `/etc/bulltunn/<name>.toml` and the service
-  `bulltunn-<name>.service`.
+  config in `/etc/bull-tunnel/<name>.toml` and the service
+  `bull-tunnel-<name>.service`.
 - When an existing tunnel is rewritten, only the protocol, the token, the
   ports and the probe port are changed. The other keys, such as `mux_*` and
   `bind_addr`, are left alone.
@@ -572,7 +612,7 @@ watched live:
 
 ```bash
 python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
-./venv/bin/python -m bulltunn demo --port 8080
+./venv/bin/python -m bulltunnel demo --port 8080
 ./venv/bin/pip install pytest pytest-asyncio && ./venv/bin/python -m pytest
 ```
 
@@ -580,7 +620,7 @@ python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
 
 ## Roadmap
 
-The work that turns Bull-Tunn from a good panel into a completely
+The work that turns bull-Tunnel from a good panel into a completely
 independent tool. The decisions that were taken: the engine is written in
 **Go**, the **command channel over DNS** is built in this round (without
 carrying the data over DNS), the Docker image is published on **Docker
@@ -593,7 +633,7 @@ Hub** and the releases stay **private**.
 | 3 | **Pinning the host key in SSH** | `known_hosts=None` is used today; a device in the middle could steal the server | ✅ Done |
 | 4 | **Rate limiting on the login** and the security headers | Layered defence against a flood attack on the login form | ✅ Done |
 | 5 | **A real integration test** of the engine on the loopback | Today the live test only runs when there is an outside binary | ✅ Done (the engine's own tests, `engine/internal/client` and `engine/internal/server`) |
-| 6 | **Automatic releases and images** | Private releases with the binaries and `SHA256SUMS`, a multi-architecture image on Docker Hub, installation and updating with one command | ✅ Done (CI) |
+| 6 | **Automatic releases and images** | Public releases with the binaries and `SHA256SUMS`, a multi-architecture image on Docker Hub, installation and updating with one command | ✅ Done (CI) |
 
 The technical details of each item are in
 [docs/architecture.md](docs/architecture.md). The list of the changes of

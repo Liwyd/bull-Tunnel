@@ -7,8 +7,8 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from bulltunn import backup as bk
-from bulltunn.app import create_app
+from bulltunnel import backup as bk
+from bulltunnel.app import create_app
 from tests.conftest import FakeNet
 
 STATE = {"servers": [{"id": "s1", "name": "K", "role": "kharej", "ip": "10.0.0.1", "ssh_password": "pw"}], "settings": {}}
@@ -90,8 +90,8 @@ def test_backup_and_restore_through_the_api(tmp_path):
 async def test_backup_file_goes_to_every_chat():
     import httpx
 
-    from bulltunn.models import Telegram
-    from bulltunn.telegram import TelegramBot
+    from bulltunnel.models import Telegram
+    from bulltunnel.telegram import TelegramBot
 
     seen = []
 

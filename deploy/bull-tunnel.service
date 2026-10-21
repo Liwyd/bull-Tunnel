@@ -1,15 +1,15 @@
 [Unit]
-Description=Bull-Tunn - reverse tunnel control panel
+Description=bull-Tunnel - reverse tunnel control panel
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=bulltunn
-Group=bulltunn
-WorkingDirectory=/opt/bulltunn
-EnvironmentFile=-/etc/default/bulltunn
-ExecStart=/opt/bulltunn/venv/bin/python -m bulltunn --data /var/lib/bulltunn serve
+User=bulltunnel
+Group=bulltunnel
+WorkingDirectory=/opt/bull-tunnel
+EnvironmentFile=-/etc/default/bull-tunnel
+ExecStart=/opt/bull-tunnel/venv/bin/python -m bulltunnel --data /var/lib/bull-tunnel serve
 Restart=always
 RestartSec=3
 
@@ -31,7 +31,7 @@ ProtectControlGroups=yes
 RestrictSUIDSGID=yes
 RestrictNamespaces=yes
 LockPersonality=yes
-ReadWritePaths=/var/lib/bulltunn
+ReadWritePaths=/var/lib/bull-tunnel
 
 [Install]
 WantedBy=multi-user.target

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- The Bull-Tunn mark and wordmark, taken from the type-2 design. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96.18 32" width="289" height="96" role="img" aria-label="Bull-Tunn">
-  <title>Bull-Tunn</title>
+<!-- The bull-Tunnel mark and wordmark, taken from the type-2 design. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96.18 32" width="289" height="96" role="img" aria-label="bull-Tunnel">
+  <title>bull-Tunnel</title>
   <style>
     .wm { fill: #202726; }
     .mk { fill: #BE2F28; }

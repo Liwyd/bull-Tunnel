@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-STATIC = Path(__file__).parent.parent / "bulltunn" / "static"
+STATIC = Path(__file__).parent.parent / "bulltunnel" / "static"
 NODE = shutil.which("node")
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="node is not installed")

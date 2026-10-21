@@ -7,8 +7,8 @@ import os
 
 from fastapi.testclient import TestClient
 
-from bulltunn import cmdchannel as cm
-from bulltunn.app import create_app
+from bulltunnel import cmdchannel as cm
+from bulltunnel.app import create_app
 from tests.conftest import FakeDNS, FakeNet
 
 

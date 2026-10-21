@@ -1,4 +1,4 @@
-/* Bull-Tunn panel — vanilla JS, live over WebSocket.
+/* bull-Tunnel panel — vanilla JS, live over WebSocket.
 
    The layout follows the type-2 design ("Precision Routing"): a left
    sidebar, a breadcrumb bar, numbered sections, square corners and a
@@ -269,7 +269,7 @@ function route() {
   for (const p of $$(".page")) p.hidden = p.id !== `view-${view}`;
   for (const a of $$("#nav a")) a.classList.toggle("on", a.dataset.view === view);
   $("#crumb-page").textContent = VIEWS[view].title;
-  document.title = `Bull-Tunn · ${VIEWS[view].title}`;
+  document.title = `bull-Tunnel · ${VIEWS[view].title}`;
   if (view === "network") requestAnimationFrame(() => { drawWires(); fit(); });
 }
 window.addEventListener("hashchange", route);
@@ -1134,7 +1134,7 @@ function renderSettings() {
         <label>How often to look for tunnels (minutes)<input data-set="scan_interval" type="number" min="1" value="${Math.round(s.scan_interval / 60)}"></label>
         <label>Tunnel engine version<input data-set="engine_release" class="mono" value="${esc(s.engine_release)}" placeholder="latest"></label>
       </div>
-      <label>Tunnel engine source URL<input data-set="engine_source" class="mono" value="${esc(s.engine_source || "")}" placeholder="https://github.com/Liwyd/Bull-Tunn/releases"></label>
+      <label>Tunnel engine source URL<input data-set="engine_source" class="mono" value="${esc(s.engine_source || "")}" placeholder="https://github.com/Liwyd/bull-Tunnel/releases"></label>
       <div class="grid2">
         <label>First tunnel port<input data-set="tunnel_port_base" type="number" value="${s.tunnel_port_base}"></label>
         <label>First probe port (local)<input data-set="probe_port_base" type="number" value="${s.probe_port_base}"></label>
@@ -1610,7 +1610,7 @@ function settingsForm() {
       <label class="check"><input type="checkbox" name="auto_mesh" ${s.auto_mesh ? "checked" : ""}> Suggest a tunnel for every Iran/foreign pair that has none</label>
       <div class="grid2"><label>How often to look for tunnels (minutes)<input name="scan_interval" type="number" min="1" value="${Math.round(s.scan_interval / 60)}"></label>
       <label>Tunnel engine version<input name="engine_release" class="mono" value="${esc(s.engine_release)}" placeholder="latest"></label></div>
-      <label>Tunnel engine source URL<input name="engine_source" class="mono" value="${esc(s.engine_source || "")}" placeholder="https://github.com/Liwyd/Bull-Tunn/releases"></label>
+      <label>Tunnel engine source URL<input name="engine_source" class="mono" value="${esc(s.engine_source || "")}" placeholder="https://github.com/Liwyd/bull-Tunnel/releases"></label>
       <label>Source token (for a private repository)<input name="engine_token" type="password" class="mono" autocomplete="off" value="${esc(s.engine_token || "")}" placeholder="empty = no token"></label>
       <div class="grid2"><label>First tunnel port<input name="tunnel_port_base" type="number" value="${s.tunnel_port_base}"></label>
       <label>First probe port (local)<input name="probe_port_base" type="number" value="${s.probe_port_base}"></label></div>

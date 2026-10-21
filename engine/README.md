@@ -2,7 +2,7 @@
 
 This is **the BackPack engine**, vendored.
 
-The engine that carries the tunnels is not a Bull-Tunn re-implementation: it is
+The engine that carries the tunnels is not a bull-Tunnel re-implementation: it is
 the engine of [BackPack](https://github.com/AminMGMT/BackPack), the project
 this one grew out of. Everything under this directory is that code, and the
 module path is kept as `github.com/backpack/backpack` so the copy is
@@ -45,7 +45,7 @@ the engine:
 
 Three additions, and nothing else:
 
-* **`main.go`** — the `bulltunn-engine` binary. It is BackPack's engine mode
+* **`main.go`** — the `bull-tunnel-engine` binary. It is BackPack's engine mode
   (`-c <config>`), plus the two entry points the control panel needs and
   BackPack does not have: `probe` (measure the path, one line per carrier)
   and `agent` (the command channel). It also prints the version and the
@@ -55,7 +55,7 @@ Three additions, and nothing else:
   without claiming the control channel: a claim would take the tunnel away
   from the client that is carrying the traffic. See the note at the top of
   that file.
-* **`internal/agent/`** — the command channel. It is a Bull-Tunn idea, not a
+* **`internal/agent/`** — the command channel. It is a bull-Tunnel idea, not a
   BackPack one: the panel writes a signed command into a TXT record and the
   agent runs it. Its signature is the panel's, byte for byte, and both sides
   are checked against the same vector.
@@ -73,7 +73,7 @@ panel does not offer it. The experimental carriers (`xdi`, `pck`, `spoof`)
 need raw sockets and root, so they are never offered to an unattended
 repair.
 
-The list is printed by `bulltunn-engine -v` and read by the panel, which
+The list is printed by `bull-tunnel-engine -v` and read by the panel, which
 therefore never tests a carrier this build does not have.
 
 ## Building

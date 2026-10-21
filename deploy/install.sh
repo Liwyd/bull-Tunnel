@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
-# Installs Bull-Tunn as a systemd service.
-#   bash deploy/install.sh            (from a checkout)
+# Installs bull-Tunnel as a systemd service.
+#
+# In one line, from anywhere:
+#
+#   curl -fsSL https://raw.githubusercontent.com/Liwyd/bull-Tunnel/main/deploy/install.sh | sudo bash
+#
+# or from a checkout:
+#
+#   sudo bash deploy/install.sh
 #
 # Run it on a server OUTSIDE Iran: the panel needs to reach the Telegram API,
 # the Cloudflare/Arvan APIs, the artifact host that serves the tunnel engine,
@@ -12,11 +19,10 @@
 set -euo pipefail
 
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
-SRC="$(cd "$(dirname "$0")/.." && pwd)"
-DEST=/opt/bulltunn
-DATA=/var/lib/bulltunn
-ENV_FILE=/etc/default/bulltunn
-UNIT=/etc/systemd/system/bulltunn.service
+DEST=/opt/bull-tunnel
+DATA=/var/lib/bull-tunnel
+ENV_FILE=/etc/default/bull-tunnel
+UNIT=/etc/systemd/system/bull-tunnel.service
 PORT="${BT_PORT:-8080}"
 if [ -f "$ENV_FILE" ]; then
   PORT="$(sed -n 's/^BT_PORT=//p' "$ENV_FILE" | tail -n1)"; PORT="${PORT:-8080}"
@@ -24,6 +30,30 @@ fi
 
 say() { printf '\n== %s\n' "$*"; }
 die() { printf '\n!! %s\n' "$*" >&2; exit 1; }
+
+# The source of the panel: the checkout this script lives in, or — when the
+# script is piped from the network — the release it belongs to.
+REPO="${BT_REPO:-Liwyd/bull-Tunnel}"
+VERSION="${BT_VERSION:-latest}"
+here="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo .)"
+if [ -d "$here/../bulltunnel" ]; then
+  SRC="$(cd "$here/.." && pwd)"
+elif [ -d "$here/bulltunnel" ]; then
+  SRC="$here"
+else
+  TMP="$(mktemp -d)"
+  if [ "$VERSION" = "latest" ]; then
+    url="https://github.com/$REPO/archive/refs/heads/main.tar.gz"
+  else
+    url="https://github.com/$REPO/archive/refs/tags/v$VERSION.tar.gz"
+  fi
+  say "fetching the panel from $url"
+  command -v curl >/dev/null || die "curl is needed to fetch the panel"
+  curl -fsSL "$url" | tar -xz -C "$TMP"
+  SRC="$(find "$TMP" -maxdepth 1 -mindepth 1 -type d | head -n1)"
+  [ -d "$SRC/bulltunnel" ] || die "the fetched archive does not hold the panel"
+  CLEAN="$TMP"
+fi
 
 # Never take a port from something already running here (a live tunnel server
 # may have xray, nginx or another panel on it). Checked before anything is
@@ -33,7 +63,7 @@ port_owner() {
   awk -v p="$(printf '%04X' "$1")" '$4=="0A" {split($2,a,":"); if (a[2]==p) {print "in use"; exit}}' /proc/net/tcp /proc/net/tcp6 2>/dev/null
 }
 OWNER="$(port_owner "$PORT")"
-if [ -n "$OWNER" ] && ! echo "$OWNER" | grep -q bulltunn && ! systemctl is-active --quiet bulltunn; then
+if [ -n "$OWNER" ] && ! echo "$OWNER" | grep -q bulltunnel && ! systemctl is-active --quiet bull-tunnel; then
   echo "Port $PORT is already in use on this server:"
   echo "  $OWNER"
   echo "Nothing was changed. Pick a free port, e.g.:  BT_PORT=9090 bash deploy/install.sh"
@@ -50,10 +80,10 @@ say "preparing $DEST and $DATA"
 mkdir -p "$DEST" "$DATA"
 chmod 700 "$DATA"
 # the service runs as its own unprivileged user
-if ! id -u bulltunn >/dev/null 2>&1; then
-  useradd --system --home-dir "$DATA" --shell /usr/sbin/nologin bulltunn
+if ! id -u bulltunnel >/dev/null 2>&1; then
+  useradd --system --home-dir "$DATA" --shell /usr/sbin/nologin bulltunnel
 fi
-chown -R bulltunn:bulltunn "$DATA"
+chown -R bulltunnel:bulltunnel "$DATA"
 
 say "python environment"
 # Ubuntu ships the venv module without ensurepip until python3-venv (or
@@ -71,13 +101,20 @@ say "installing the code"
 # Stage the new code next to the old one and swap it in one move, with the
 # service stopped: a half-written package can never be imported.
 STAGE="$(mktemp -d "$DEST/.stage-XXXXXX")"
-trap 'rm -rf "$STAGE"' EXIT
-cp -r "$SRC/bulltunn" "$STAGE/"
+# everything this run made is removed when it ends, however it ends
+trap 'rm -rf "$STAGE" ${CLEAN:-}' EXIT
+cp -r "$SRC/bulltunnel" "$STAGE/"
 if [ -f "$SRC/README.md" ]; then cp "$SRC/README.md" "$STAGE/"; fi
-systemctl stop bulltunn 2>/dev/null || true
-rm -rf "$DEST/bulltunn"
-mv "$STAGE/bulltunn" "$DEST/bulltunn"
-chmod -R a+rX "$DEST/bulltunn"
+systemctl stop bull-tunnel 2>/dev/null || true
+rm -rf "$DEST/bulltunnel"
+mv "$STAGE/bulltunnel" "$DEST/bulltunnel"
+chmod -R a+rX "$DEST/bulltunnel"
+
+say "the management command"
+# The command is put where every shell finds it, the way BackPack's is: the
+# operator runs "bull-tunnel" and the menu opens.
+ln -sf "$DEST/venv/bin/bull-tunnel" /usr/local/bin/bull-tunnel
+echo "bull-tunnel -> $DEST/venv/bin/bull-tunnel"
 
 if [ ! -f "$ENV_FILE" ]; then
   cat > "$ENV_FILE" <<CONF
@@ -92,34 +129,45 @@ fi
 
 if [ ! -f "$DATA/auth.json" ] || ! grep -q '"hash"' "$DATA/auth.json"; then
   PASS="$(head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 16)"
-  (cd "$DEST" && "$DEST/venv/bin/python" -m bulltunn --data "$DATA" passwd --username admin --password "$PASS")
+  (cd "$DEST" && "$DEST/venv/bin/python" -m bulltunnel --data "$DATA" passwd --username admin --password "$PASS")
   CREATED=1
 fi
 
 say "starting the service"
-cp "$SRC/deploy/bulltunn.service" "$UNIT"
+cp "$SRC/deploy/bull-tunnel.service" "$UNIT"
 systemctl daemon-reload
-systemctl enable bulltunn >/dev/null 2>&1 || true
-systemctl restart bulltunn
+systemctl enable bull-tunnel >/dev/null 2>&1 || true
+systemctl restart bull-tunnel
 
 sleep 3
-if ! systemctl is-active --quiet bulltunn; then
+if ! systemctl is-active --quiet bull-tunnel; then
   echo "The panel did not start. Last log lines:"
-  journalctl -u bulltunn -n 20 --no-pager
+  journalctl -u bull-tunnel -n 20 --no-pager
   exit 1
 fi
 if ! curl -fsS --max-time 8 "http://127.0.0.1:$PORT/api/session" >/dev/null 2>&1; then
   echo "The service is up but did not answer on port $PORT. Last log lines:"
-  journalctl -u bulltunn -n 20 --no-pager
+  journalctl -u bull-tunnel -n 20 --no-pager
   exit 1
 fi
 
 IP="$(curl -fsS4 --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
 echo
-echo "Bull-Tunn is running:  http://$IP:$PORT"
+echo "bull-Tunnel is running:  http://$IP:$PORT"
 if [ "${CREATED:-0}" = 1 ]; then
   echo "  username: admin"
   echo "  password: $PASS"
-  echo "  (change it any time: $DEST/venv/bin/python -m bulltunn --data $DATA passwd)"
+  echo "  (change it any time: bull-tunnel passwd)"
 fi
-echo "  logs: journalctl -u bulltunn -f"
+echo "  the management tool:  bull-tunnel"
+echo "  logs: journalctl -u bull-tunnel -f"
+
+# Open the menu straight away, the way BackPack's installer does: people
+# miss the "now run bull-tunnel" step. Only on a terminal, and only when the
+# panel answers.
+if [ -t 0 ] && [ -t 1 ] && [ "${BT_NO_MENU:-0}" != 1 ]; then
+  echo
+  echo "Opening the management tool… (press ctrl-c to leave)"
+  echo
+  exec /usr/local/bin/bull-tunnel
+fi

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from bulltunn.engine import exits_script, kharej_dest, listen_ports, parse_exits
-from bulltunn.models import L_UP
+from bulltunnel.engine import exits_script, kharej_dest, listen_ports, parse_exits
+from bulltunnel.models import L_UP
 from tests.conftest import FakeDNS
 
 # captured from a real run of exits_script: socat with its target on the
@@ -148,5 +148,5 @@ async def test_static_engine_target_is_an_exit(world):
     link.status, link.transport = L_UP, "tcpmux"
     link.ports = ["443=10.7.7.7:443"]
     e = w.store.exit_of(link, 443)
-    assert e["method"] == "bulltunn" and e["targets"][0]["addr"] == "10.7.7.7:443"
+    assert e["method"] == "bulltunnel" and e["targets"][0]["addr"] == "10.7.7.7:443"
     assert w.store.kharej_ports(w.k1.id) == ([], ["10.7.7.7:443"])

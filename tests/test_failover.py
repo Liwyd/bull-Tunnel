@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from bulltunn.models import L_DOWN, L_UP, OFFLINE, ONLINE
+from bulltunnel.models import L_DOWN, L_UP, OFFLINE, ONLINE
 from tests.conftest import FakeDNS
 
 

@@ -442,7 +442,7 @@ class Store:
             kport = port  # "2053-2060": each port goes to the same port
         if host:
             t = f"[{host}]:{kport}" if ":" in host else f"{host}:{kport}"
-            hop = {"method": "bulltunn", "targets": [t], "via": "", "inferred": False}
+            hop = {"method": "bulltunnel", "targets": [t], "via": "", "inferred": False}
         else:
             hop = k.exits.get(str(kport))
         if not hop:

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Moves one tunnel server from the legacy layout to the Bull-Tunn layout.
+# Moves one tunnel server from the legacy layout to the bull-Tunnel layout.
 #   bash remote-migrate.sh [--dry-run]
 #
 # Run it as root on every server that carries tunnels. It only renames and
 # rewrites files, never deletes: the old config directory and the old unit
 # files are kept next to the new ones so the change can be undone by hand.
 #
-#   /etc/backpack                     -> /etc/bulltunn
-#   backpack-<name>.service           -> bulltunn-<name>.service
-#   /usr/local/bin/backpack           -> /usr/local/bin/bulltunn-engine
+#   /etc/backpack                     -> /etc/bull-tunnel
+#   backpack-<name>.service           -> bull-tunnel-<name>.service
+#   /usr/local/bin/backpack           -> /usr/local/bin/bull-tunnel-engine
 #
 # The tunnel names themselves are left alone: the panel adopts them as they
 # are, exactly like any tunnel it did not create itself.
@@ -19,9 +19,9 @@ DRY=0
 [ "${1:-}" = "--dry-run" ] && DRY=1
 
 LEGACY_CONF=/etc/backpack
-NEW_CONF=/etc/bulltunn
+NEW_CONF=/etc/bull-tunnel
 LEGACY_BIN=/usr/local/bin/backpack
-NEW_BIN=/usr/local/bin/bulltunn-engine
+NEW_BIN=/usr/local/bin/bull-tunnel-engine
 UNIT_DIR=/etc/systemd/system
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
@@ -65,7 +65,7 @@ say "systemd units"
 shopt -s nullglob
 for old in "$UNIT_DIR"/backpack-*.service; do
   name="$(basename "$old")"          # backpack-<tunnel>.service
-  new="bulltunn-${name#backpack-}"   # bulltunn-<tunnel>.service
+  new="bull-tunnel-${name#backpack-}"   # bull-tunnel-<tunnel>.service
   echo "$name -> $new"
   if [ "$DRY" = 0 ]; then
     sed -e "s#$LEGACY_BIN#$NEW_BIN#g" -e "s#$LEGACY_CONF#$NEW_CONF#g" "$old" > "$UNIT_DIR/$new"

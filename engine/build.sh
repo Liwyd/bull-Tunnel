@@ -2,10 +2,10 @@
 # Builds the tunnel engine for every platform we ship and makes the release
 # files the control panel expects:
 #
-#   bulltunn-engine_linux_amd64.tar.gz   the binary for the amd64 servers
-#   bulltunn-engine_linux_arm64.tar.gz   the binary for the arm64 servers
-#   bulltunn-engine_linux_386.tar.gz     the binary for the old 32 bit servers
-#   bulltunn-engine_linux_armv7.tar.gz   the binary for the arm servers
+#   bull-tunnel-engine_linux_amd64.tar.gz   the binary for the amd64 servers
+#   bull-tunnel-engine_linux_arm64.tar.gz   the binary for the arm64 servers
+#   bull-tunnel-engine_linux_386.tar.gz     the binary for the old 32 bit servers
+#   bull-tunnel-engine_linux_armv7.tar.gz   the binary for the arm servers
 #   SHA256SUMS                           the checksums of all of them
 #
 # The engine is the BackPack engine (github.com/AminMGMT/BackPack), vendored
@@ -22,8 +22,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="${1:-$HERE/dist}"
 # the engine and the panel are released together and carry the same version
-VERSION="$(grep -oE '__version__ = "[^"]+"' "$HERE/../bulltunn/__init__.py" | head -n1 | cut -d'"' -f2)"
-[ -n "$VERSION" ] || { echo "cannot read the version from bulltunn/__init__.py"; exit 1; }
+VERSION="$(grep -oE '__version__ = "[^"]+"' "$HERE/../bulltunnel/__init__.py" | head -n1 | cut -d'"' -f2)"
+[ -n "$VERSION" ] || { echo "cannot read the version from bulltunnel/__init__.py"; exit 1; }
 
 export CGO_ENABLED=0
 export GOFLAGS=-mod=vendor
@@ -45,18 +45,18 @@ for t in "${TARGETS[@]}"; do
   rest="${t#*:}"
   goarch="${rest%%:*}"
   goarm="${rest##*:}"
-  binary="bulltunn-engine"
+  binary="bull-tunnel-engine"
   if [ "$goarch" = "arm" ]; then
     GOARM="$goarm" GOOS=linux GOARCH=arm go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$OUT/$binary" .
   else
     GOOS=linux GOARCH="$goarch" go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$OUT/$binary" .
   fi
-  tar -C "$OUT" -czf "$OUT/bulltunn-engine_linux_${name}.tar.gz" "$binary"
+  tar -C "$OUT" -czf "$OUT/bull-tunnel-engine_linux_${name}.tar.gz" "$binary"
   rm -f "$OUT/$binary"
-  echo "  bulltunn-engine_linux_${name}.tar.gz"
+  echo "  bull-tunnel-engine_linux_${name}.tar.gz"
 done
 
-(cd "$OUT" && sha256sum bulltunn-engine_linux_*.tar.gz > SHA256SUMS)
+(cd "$OUT" && sha256sum bull-tunnel-engine_linux_*.tar.gz > SHA256SUMS)
 echo
 echo "the release files are in $OUT:"
 ls -la "$OUT"

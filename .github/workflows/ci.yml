@@ -120,7 +120,7 @@ jobs:
         # the panel looks for SHA256SUMS next to the engine files
         run: |
           cd dist
-          sha256sum bulltunn-[0-9]*.whl bulltunn-[0-9]*.tar.gz >> SHA256SUMS
+          sha256sum bull_tunnel-[0-9]*.whl bull_tunnel-[0-9]*.tar.gz >> SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
           files: |

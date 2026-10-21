@@ -15,14 +15,14 @@ import time
 
 from fastapi.testclient import TestClient
 
-from bulltunn.app import create_app
-from bulltunn.backup import Backups, is_backup_name
-from bulltunn.dns.arvan import ArvanDNS
-from bulltunn.engine import ports_clash
-from bulltunn.models import IRAN, KHAREJ, DNSProvider, Link, Server
-from bulltunn.orchestrator import Orchestrator
-from bulltunn.ratelimit import LoginLimiter
-from bulltunn.store import Store
+from bulltunnel.app import create_app
+from bulltunnel.backup import Backups, is_backup_name
+from bulltunnel.dns.arvan import ArvanDNS
+from bulltunnel.engine import ports_clash
+from bulltunnel.models import IRAN, KHAREJ, DNSProvider, Link, Server
+from bulltunnel.orchestrator import Orchestrator
+from bulltunnel.ratelimit import LoginLimiter
+from bulltunnel.store import Store
 from tests.conftest import FakeNet
 
 
@@ -40,20 +40,20 @@ def test_the_engine_is_fetched_again_when_the_release_moves(tmp_path):
     import hashlib
     import io
 
-    from bulltunn.engine import SSHDriver
+    from bulltunnel.engine import SSHDriver
 
     # a tarball with a binary in it
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         blob = b"#!/bin/sh\necho engine\n"
-        info = tarfile.TarInfo("bulltunn-engine")
+        info = tarfile.TarInfo("bull-tunnel-engine")
         info.size = len(blob)
         tar.addfile(info, io.BytesIO(blob))
     first = buf.getvalue()
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         blob = b"#!/bin/sh\necho engine v2\n"
-        info = tarfile.TarInfo("bulltunn-engine")
+        info = tarfile.TarInfo("bull-tunnel-engine")
         info.size = len(blob)
         tar.addfile(info, io.BytesIO(blob))
     second = buf.getvalue()
@@ -81,7 +81,7 @@ def test_the_engine_is_fetched_again_when_the_release_moves(tmp_path):
     def publish(tarball: bytes) -> None:
         state["tarball"] = tarball
         digest = hashlib.sha256(tarball).hexdigest()
-        state["sums"] = f"{digest}  bulltunn-engine_linux_amd64.tar.gz\n"
+        state["sums"] = f"{digest}  bull-tunnel-engine_linux_amd64.tar.gz\n"
 
     try:
         publish(first)
@@ -197,7 +197,7 @@ def test_a_restored_login_without_a_secret_does_not_lock_the_panel_out(tmp_path)
         c.post("/api/setup", json={"username": "admin", "password": "secret1"})
         state = c.app.state.store.raw()
         auth = {"username": "admin", "salt": "00" * 16, "hash": "deadbeef"}  # no secret
-        blob = gzip.compress(json.dumps({"format": "bulltunn-backup", "version": 1, "app": "1.0.0",
+        blob = gzip.compress(json.dumps({"format": "bull-tunnel-backup", "version": 1, "app": "1.0.0",
                                           "created": time.time(), "state": state, "auth": auth, "env": ""}).encode())
         r = c.post(
             "/api/backups/restore",

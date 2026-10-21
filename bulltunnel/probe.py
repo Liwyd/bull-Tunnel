@@ -21,9 +21,9 @@ from .engine import BIN_PATH
 from .models import L_PENDING, Link, Server
 from .store import Store
 
-log = logging.getLogger("bulltunn")
+log = logging.getLogger("bulltunnel")
 
-PROBE_CONFIG = "/tmp/bulltunn-probe.toml"
+PROBE_CONFIG = "/tmp/bull-tunnel-probe.toml"
 PROBE_TIMEOUT = 90
 
 
@@ -54,7 +54,7 @@ def build_config(addr: str, token: str) -> str:
     if ":" in addr and not addr.startswith("["):
         addr = f"[{addr}]"
     return (
-        "# Written by the Bull-Tunn panel for a connection test.\n"
+        "# Written by the bull-Tunnel panel for a connection test.\n"
         '[client]\n'
         f'remote_addr = "{addr}"\n'
         'transport = "tcp"\n'

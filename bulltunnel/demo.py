@@ -1,5 +1,5 @@
 """Demo mode: a simulated network so the panel can be explored (and its
-failover watched) without real servers. ``python -m bulltunn demo``"""
+failover watched) without real servers. ``python -m bulltunnel demo``"""
 
 from __future__ import annotations
 
@@ -162,7 +162,7 @@ class SimNet(Driver):
     def plant(self, iran: Server, kharej: Server, name: str, transport: str, port: int, ports: list[str],
               token: str = "secret", active: str = "active", unit: str = ""):
         """Pretend a tunnel was set up by hand before the panel existed."""
-        unit = unit or f"bulltunn-{name}.service"
+        unit = unit or f"bulltunnel-{name}.service"
         self.existing.setdefault(iran.id, []).append(
             Found(name=name, role="server", active=active, unit=unit, data={
                 "bind_addr": f"0.0.0.0:{port}", "transport": transport, "token": token, "ports": list(ports),

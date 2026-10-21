@@ -2,7 +2,7 @@
 
 ## Two planes
 
-Bull-Tunn is a **control plane**. It never carries a user's traffic.
+bull-Tunnel is a **control plane**. It never carries a user's traffic.
 
 ```
    user ──► Iran server ──► tunnel ──► foreign server ──► the real service
@@ -26,12 +26,12 @@ traffic down.
 ## How the panel controls tunnels on different servers
 
 Everything the panel does on a server goes through **one SSH connection per
-server**, kept open and reused (`bulltunn/ssh.py`):
+server**, kept open and reused (`bulltunnel/ssh.py`):
 
 | Action | How |
 |---|---|
 | is the server alive? | `true` over the existing connection, timed |
-| which tunnels run there? | one script that lists `/etc/bulltunn/*.toml` and asks systemd for the state of the matching unit |
+| which tunnels run there? | one script that lists `/etc/bull-tunnel/*.toml` and asks systemd for the state of the matching unit |
 | is a tunnel healthy? | one script per Iran server that reads the unit state, the engine's metrics file, opens the loopback probe and counts the established sockets |
 | write a config | SFTP (with a `cat > file` fallback for images without an SFTP subsystem) |
 | start / stop a tunnel | `systemctl enable/restart/disable` |
@@ -123,7 +123,7 @@ the data inside ordinary DNS queries, which almost every network lets
 through, and they can reassemble a stream out of a few hundred small
 responses.
 
-**Bull-Tunn does not tunnel the traffic over DNS**, but it does keep the
+**bull-Tunnel does not tunnel the traffic over DNS**, but it does keep the
 **control plane** alive there:
 
 ```

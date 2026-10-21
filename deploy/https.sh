@@ -17,7 +17,7 @@ set -euo pipefail
 DOMAIN="$(echo "${1:-}" | tr 'A-Z' 'a-z')"
 EMAIL="${2:-}"
 [ -n "$DOMAIN" ] || { echo "usage: bash deploy/https.sh panel.example.com [email]"; exit 1; }
-ENV=/etc/default/bulltunn
+ENV=/etc/default/bull-tunnel
 [ -f "$ENV" ] || { echo "install the panel first: bash deploy/install.sh"; exit 1; }
 
 say() { printf '\n== %s\n' "$*"; }
@@ -27,7 +27,7 @@ port_owner() {
   if command -v ss >/dev/null; then ss -ltnpH "( sport = :$1 )" 2>/dev/null | head -n1; return; fi
   awk -v p="$(printf '%04X' "$1")" '$4=="0A" {split($2,a,":"); if (a[2]==p) {print "in use"; exit}}' /proc/net/tcp /proc/net/tcp6 2>/dev/null
 }
-OURPID="$(systemctl show -p MainPID --value bulltunn 2>/dev/null || echo 0)"
+OURPID="$(systemctl show -p MainPID --value bull-tunnel 2>/dev/null || echo 0)"
 ours() { [ "${OURPID:-0}" != 0 ] && echo "$1" | grep -q "pid=$OURPID,"; }
 
 say "checking ports"
@@ -73,11 +73,11 @@ KEY="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
 
 # renewals happen by themselves (certbot.timer); restart the panel to load them
 mkdir -p /etc/letsencrypt/renewal-hooks/deploy
-cat > /etc/letsencrypt/renewal-hooks/deploy/bulltunn.sh <<'HOOK'
+cat > /etc/letsencrypt/renewal-hooks/deploy/bull-tunnel.sh <<'HOOK'
 #!/bin/sh
-systemctl restart bulltunn
+systemctl restart bull-tunnel
 HOOK
-chmod +x /etc/letsencrypt/renewal-hooks/deploy/bulltunn.sh
+chmod +x /etc/letsencrypt/renewal-hooks/deploy/bull-tunnel.sh
 
 say "switching the panel to https://$DOMAIN"
 cp "$ENV" "$ENV.bak"
@@ -88,16 +88,16 @@ set_env BT_HOST 0.0.0.0
 set_env BT_PORT 443
 set_env BT_SSL_CERT "$CERT"
 set_env BT_SSL_KEY "$KEY"
-systemctl restart bulltunn
+systemctl restart bull-tunnel
 sleep 4
-if ! systemctl is-active --quiet bulltunn || ! curl -fsS --max-time 8 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/api/session" >/dev/null; then
+if ! systemctl is-active --quiet bull-tunnel || ! curl -fsS --max-time 8 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/api/session" >/dev/null; then
   echo "the panel did not come up on 443; putting the previous settings back"
-  journalctl -u bulltunn -n 15 --no-pager || true
+  journalctl -u bull-tunnel -n 15 --no-pager || true
   mv "$ENV.bak" "$ENV"
-  systemctl restart bulltunn
+  systemctl restart bull-tunnel
   exit 1
 fi
 
 echo
-echo "Bull-Tunn:  https://$DOMAIN"
+echo "bull-Tunnel:  https://$DOMAIN"
 echo "(the certificate renews itself; the old http port is no longer used)"

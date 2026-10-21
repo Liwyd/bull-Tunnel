@@ -1,11 +1,44 @@
 # Changelog
 
-All the versions of Bull-Tunn. The project follows
+All the versions of bull-Tunnel. The project follows
 [semantic versioning](https://semver.org): the number before the dot is a
 change that may break a configuration, the one after it is a change that
 only adds something.
 
 ## Unreleased
+
+### bull-Tunnel, and a management tool
+
+The project is **bull-Tunnel** now, and it has a **management command**
+the way BackPack has a menu: `bull-tunnel`, installed on the path by the
+installer, opens a menu with everything an operator does day to day — the
+servers, the tunnels, the domains, the DNS accounts, the tunnel engine on
+the servers, the backups, the service, the log and the admin password.
+
+The command runs on the machine the panel runs on and needs no password:
+the panel writes a key for it, in a file only the owner of the machine can
+read, and the panel accepts that key only from this machine.
+
+```
+bull-Tunnel 1.1.0
+─────────────────
+  panel              http://127.0.0.1:8080
+  servers            3 of 3 online
+  tunnels            4 up, 0 unstable, 0 down, 1 not built
+  domains            2 of 2 healthy
+  mode               acting
+```
+
+### The installation is one line
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Liwyd/bull-Tunnel/main/deploy/install.sh | sudo bash
+```
+
+The script fetches the panel, puts it in place, makes a user for it,
+starts the service, opens the management tool and prints the address and
+the password. It is safe to run again on a live panel: the code is swapped
+while the service is stopped, and the data directory is never touched.
 
 ### The engine is BackPack
 
@@ -25,12 +58,12 @@ timeout to find out.
 
 Two things are added on top of BackPack, and nothing else:
 
-- **`bulltunn-engine probe`** measures the path between two servers, one
+- **`bull-tunnel-engine probe`** measures the path between two servers, one
   line per carrier. It opens a carrier the way the tunnel's own client
   opens it and closes it again **without claiming the control channel**: a
   claim would make the server take the tunnel away from the client that
   is carrying the traffic. Measuring the path never disturbs a tunnel.
-- **`bulltunn-engine agent`** is the command channel, which BackPack does
+- **`bull-tunnel-engine agent`** is the command channel, which BackPack does
   not have. Its signature is now the panel's, byte for byte, and the TXT
   record it writes is escaped the way Cloudflare wants it. Every command
   used to be refused with "not signed with the right token", because the
@@ -127,7 +160,7 @@ English. Nothing else changed:
 
 ## 1.0.0 — 2026-10-20
 
-The first release of Bull-Tunn: the panel, the tunnel engine and the
+The first release of bull-Tunnel: the panel, the tunnel engine and the
 command channel, with nothing left over from the project it grew out of.
 
 ### The tunnel engine
@@ -150,7 +183,7 @@ installed on the servers that carry the tunnels.
   20 seconds and a reconnect with backoff.
 - A metrics file with the state of the tunnel and the carriers the build
   speaks, so the panel never tests a carrier the engine does not have.
-- `bulltunn-engine -c <file> -check` reads a configuration and reports the
+- `bull-tunnel-engine -c <file> -check` reads a configuration and reports the
   problem instead of crash looping.
 
 ### The command channel
@@ -171,9 +204,9 @@ server.
 
 - The package, the service, the data directory, the environment variables
   and the config directory on the managed servers are all renamed:
-  `tunnelmanager` becomes `bulltunn`, `/etc/backpack` becomes
-  `/etc/bulltunn`, `backpack-<name>.service` becomes
-  `bulltunn-<name>.service`.
+  `tunnelmanager` becomes `bulltunnel`, `/etc/backpack` becomes
+  `/etc/bull-tunnel`, `backpack-<name>.service` becomes
+  `bull-tunnel-<name>.service`.
 - The engine is installed from the release of this project, with the
   SHA-256 of the file checked, or from a mirror, or from a tarball dropped
   in the cache by hand.
@@ -186,7 +219,7 @@ server.
 - The login is rate limited, and the dashboard sends a strict content
   security policy with no inline script.
 - `deploy/migrate.sh` moves an installation of the previous version to
-  Bull-Tunn, `deploy/remote-migrate.sh` does the same for the servers that
+  bull-Tunnel, `deploy/remote-migrate.sh` does the same for the servers that
   carry the tunnels. Neither deletes anything.
 - The Docker image is published for amd64 and arm64, and a tagged release
   carries the panel and the engine with its checksums.

@@ -1,6 +1,6 @@
 """Full backups of the panel: every server, tunnel, domain, DNS account and
 setting (state.json), the admin login (auth.json) and the service config
-(/etc/default/bulltunn).
+(/etc/default/bull-tunnel).
 
 A backup is gzipped JSON. With a backup password it is encrypted
 (AES-256-GCM, key from scrypt), which matters because it holds SSH passwords
@@ -30,8 +30,8 @@ from . import __version__
 log = logging.getLogger(__name__)
 
 MAGIC = b"BTBK1"
-FORMAT = "bulltunn-backup"
-ENV_FILE = Path("/etc/default/bulltunn")
+FORMAT = "bull-tunnel-backup"
+ENV_FILE = Path("/etc/default/bull-tunnel")
 NAME_RE = re.compile(r"^bt-backup-[0-9]{8}-[0-9]{4}(?:-[a-z]+)?\.(?:tmbk|json\.gz)$")
 # the names written since the second was added to the stamp
 NAME_RE_NEW = re.compile(r"^bt-backup-[0-9]{8}-[0-9]{6}(?:-[a-z]+)?\.(?:tmbk|json\.gz)$")
@@ -93,9 +93,9 @@ def unpack(blob: bytes, password: str = "") -> dict[str, Any]:
             blob = gzip.decompress(blob)
         data = json.loads(blob)
     except (OSError, ValueError):
-        raise BackupError("this is not a Bull-Tunn backup file") from None
+        raise BackupError("this is not a bull-Tunnel backup file") from None
     if not isinstance(data, dict) or data.get("format") != FORMAT or not isinstance(data.get("state"), dict):
-        raise BackupError("this is not a Bull-Tunn backup file")
+        raise BackupError("this is not a bull-Tunnel backup file")
     return data
 
 

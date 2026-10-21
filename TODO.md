@@ -1,6 +1,6 @@
-# Bull-Tunn — Fix Plan (TODO)
+# bull-Tunnel — Fix Plan (TODO)
 
-This file is the working plan for the repair of Bull-Tunn. It is updated before
+This file is the working plan for the repair of bull-Tunnel. It is updated before
 every commit, and it records **what the next commit does, in detail**, so that
 no step is taken "from memory".
 
@@ -49,8 +49,8 @@ them.
 
 | # | Finding |
 |---|---|
-| 1 | `bulltunn/engine/` is a hand-written re-implementation of the tunnel engine. It supports only `tcp, tcpmux, ws, wsmux, wss, wssmux, stealth` while the panel offers `kcp` and `quic` too (`bulltunn/models.py:28`). Every discovery therefore burns two full test timeouts on protocols the engine refuses (`engine/internal/config/config.go:200`). |
-| 2 | The command channel can never work: the panel signs `id\|action\|\|ts` for an empty argument list, the Go agent signs `id\|action\|{}\|ts` (`bulltunn/cmdchannel.py:51` vs `engine/internal/agent/protocol.go:45`). Every command is refused. |
+| 1 | `bulltunnel/engine/` is a hand-written re-implementation of the tunnel engine. It supports only `tcp, tcpmux, ws, wsmux, wss, wssmux, stealth` while the panel offers `kcp` and `quic` too (`bulltunnel/models.py:28`). Every discovery therefore burns two full test timeouts on protocols the engine refuses (`engine/internal/config/config.go:200`). |
+| 2 | The command channel can never work: the panel signs `id\|action\|\|ts` for an empty argument list, the Go agent signs `id\|action\|{}\|ts` (`bulltunnel/cmdchannel.py:51` vs `engine/internal/agent/protocol.go:45`). Every command is refused. |
 | 3 | The Go agent writes the TXT record without escaping the quotes of the JSON command (`engine/internal/agent/publisher.go:83`); Cloudflare rejects it. |
 | 4 | The hand-written engine's session/carrier layer is a simplified copy of BackPack's (no KCP, no QUIC, no smux, no Noise record layer, no control channel, no pool). It is not the engine the project is supposed to ship. |
 
@@ -60,31 +60,31 @@ them.
 
 | # | Finding |
 |---|---|
-| 5 | A malformed SSH private key raises `asyncssh.KeyImportError` (a `ValueError`), which is not an `SSHError`: it escapes `bulltunn/ssh.py:124`, `bulltunn/orchestrator.py:657` and `bulltunn/app.py:521` and **aborts the whole check cycle** — no server is checked, no tunnel is checked, no failover ever happens. |
-| 6 | Deleting a server removes it from the store *before* the cleanup runs (`bulltunn/store.py:248`), so `orchestrator.remove_links()` gets `None` for that side and `SSHDriver._stop_side()` returns at once: the tunnel's config, unit and process stay on the server forever. |
-| 7 | The domain's "primary" server is ignored as soon as a manual group is set (`bulltunn/store.py:312`), so "Make it primary" silently does nothing and the failback goes to the wrong server. |
-| 8 | `bulltunn/store.py:393` overwrites `primary_iran` in the snapshot with the group's first Iran server, so the panel shows the wrong primary. |
-| 9 | Editing a server drops the pinned host key whenever the host-key field is empty (`bulltunn/app.py:551`): renaming a server silently disables the MITM protection. |
-| 10 | A corrupt `auth.json` or `state.json` makes the panel crash at start-up (`bulltunn/auth.py:40`, `bulltunn/store.py:52`). |
-| 11 | `POST /api/links/{id}/release` raises `KeyError` (HTTP 500) when the handover target is gone (`bulltunn/app.py:800`). |
+| 5 | A malformed SSH private key raises `asyncssh.KeyImportError` (a `ValueError`), which is not an `SSHError`: it escapes `bulltunnel/ssh.py:124`, `bulltunnel/orchestrator.py:657` and `bulltunnel/app.py:521` and **aborts the whole check cycle** — no server is checked, no tunnel is checked, no failover ever happens. |
+| 6 | Deleting a server removes it from the store *before* the cleanup runs (`bulltunnel/store.py:248`), so `orchestrator.remove_links()` gets `None` for that side and `SSHDriver._stop_side()` returns at once: the tunnel's config, unit and process stay on the server forever. |
+| 7 | The domain's "primary" server is ignored as soon as a manual group is set (`bulltunnel/store.py:312`), so "Make it primary" silently does nothing and the failback goes to the wrong server. |
+| 8 | `bulltunnel/store.py:393` overwrites `primary_iran` in the snapshot with the group's first Iran server, so the panel shows the wrong primary. |
+| 9 | Editing a server drops the pinned host key whenever the host-key field is empty (`bulltunnel/app.py:551`): renaming a server silently disables the MITM protection. |
+| 10 | A corrupt `auth.json` or `state.json` makes the panel crash at start-up (`bulltunnel/auth.py:40`, `bulltunnel/store.py:52`). |
+| 11 | `POST /api/links/{id}/release` raises `KeyError` (HTTP 500) when the handover target is gone (`bulltunnel/app.py:800`). |
 
 ### C. Medium panel bugs
 
 | # | Finding |
 |---|---|
-| 12 | The engine tarball is cached forever under the tag `latest` (`bulltunn/engine.py:713`): a new release is never picked up. |
-| 13 | `full_state()` is rebuilt on every event and runs `domain_info()` for every domain × every Iran server (`bulltunn/app.py:449`). |
-| 14 | A wake-up that arrives between the timeout and `_wake.clear()` is lost (`bulltunn/orchestrator.py:1286`). |
-| 15 | The engine refuses two mappings that overlap once the ranges are expanded (`2053-2060` + `2053`), while the panel's dedupe only compares the strings (`bulltunn/store.py:178`). |
-| 16 | `probe.measure()` ignores the transport filter; the engine is always asked for every carrier (`bulltunn/probe.py:106`). |
-| 17 | The probe does not bracket an IPv6 address (`bulltunn/probe.py:47`). |
-| 18 | The probe leaves `/tmp/bulltunn-probe.toml` on the foreign server. |
+| 12 | The engine tarball is cached forever under the tag `latest` (`bulltunnel/engine.py:713`): a new release is never picked up. |
+| 13 | `full_state()` is rebuilt on every event and runs `domain_info()` for every domain × every Iran server (`bulltunnel/app.py:449`). |
+| 14 | A wake-up that arrives between the timeout and `_wake.clear()` is lost (`bulltunnel/orchestrator.py:1286`). |
+| 15 | The engine refuses two mappings that overlap once the ranges are expanded (`2053-2060` + `2053`), while the panel's dedupe only compares the strings (`bulltunnel/store.py:178`). |
+| 16 | `probe.measure()` ignores the transport filter; the engine is always asked for every carrier (`bulltunnel/probe.py:106`). |
+| 17 | The probe does not bracket an IPv6 address (`bulltunnel/probe.py:47`). |
+| 18 | The probe leaves `/tmp/bull-tunnel-probe.toml` on the foreign server. |
 | 19 | `date +%s%N` is GNU-only: on BusyBox the health probe returns garbage. |
 | 20 | The Go server handshake reads its first frame with no deadline. |
 | 21 | The `stealth`/`ws`/`wss` carriers never shut their `http.Server` down. |
-| 22 | Two backups in the same minute overwrite each other (`bulltunn/backup.py:138`). |
+| 22 | Two backups in the same minute overwrite each other (`bulltunnel/backup.py:138`). |
 | 23 | Clearing the bot token or the engine token in the UI wipes the secret instead of keeping it. |
-| 24 | Restoring a backup whose `auth` has no `secret` locks the panel out (`bulltunn/app.py:1021`, `bulltunn/auth.py:76`). |
+| 24 | Restoring a backup whose `auth` has no `secret` locks the panel out (`bulltunnel/app.py:1021`, `bulltunnel/auth.py:76`). |
 | 25 | `Auth.check()` does `self.data["salt"]` without a guard (HTTP 500 on a half-written file). |
 | 26 | `SSHPool.run()` keeps a connection that timed out in the pool. |
 | 27 | `PUT /api/layout` does not broadcast: the layout only shows up after the next check. |
@@ -97,7 +97,7 @@ them.
 | 34 | A handover chain is not checked for cycles when it is written. |
 | 35 | `release_handovers()` and the failover path can race with a repair on the same link. |
 
-### D. Front-end (`bulltunn/static/app.js`)
+### D. Front-end (`bulltunnel/static/app.js`)
 
 | # | Finding |
 |---|---|
@@ -145,7 +145,7 @@ them.
   `internal/snispoof`, `internal/testport` — unchanged, with the module path
   kept as `github.com/backpack/backpack` so the copy can be re-synced with a
   plain `rsync`.
-* ✅ `engine/main.go`: the `bulltunn-engine` binary — engine mode (`-c`),
+* ✅ `engine/main.go`: the `bull-tunnel-engine` binary — engine mode (`-c`),
   `-check`, `-v` (the version **and** the carriers), `probe` and `agent`.
 * ✅ `engine/internal/client/transport/probe.go`: the path measurement. It
   opens a carrier the way the tunnel's own client opens it and closes it
@@ -277,6 +277,28 @@ Findings 36 to 48.
 **Findings closed by this commit:** 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
 46, 47, 48.
 
+### Commit 7 — the rename and the management tool  ✅ done
+
+* ✅ The project is **bull-Tunnel**: the package is `bulltunnel`, the
+  binary is `bull-tunnel-engine`, the service is `bull-tunnel.service`,
+  the directories are `/opt/bull-tunnel`, `/var/lib/bull-tunnel` and
+  `/etc/bull-tunnel`, and the release assets are
+  `bull-tunnel-engine_linux_<arch>.tar.gz`.
+* ✅ **`bull-tunnel`**: the management command, the way BackPack has a
+  menu. It runs on the machine the panel runs on and needs no password:
+  the panel writes a key for it, in a file only the owner of the machine
+  can read, and the panel accepts that key only from this machine.
+* ✅ The installer puts the command on the path, opens it at the end of
+  the install and can fetch the panel itself, so the whole installation is
+  one line.
+
+### Commit 8 — the release
+
+The release is published from the tag: the CI builds the panel and the
+engine for the four architectures, writes the checksums and attaches them
+to the release. The panel fetches the engine from there, so the tag has
+to exist before a fresh installation can install the engine.
+
 ### Commit 6 — tests, docs and the changelog  ✅ done
 
 * ✅ `docs/engine-schema.md` is the contract of the engine that is actually
@@ -305,6 +327,8 @@ Findings 36 to 48.
 | 4 | The medium panel bugs | done |
 | 5 | The front-end | done |
 | 6 | Tests, docs, changelog | done |
+| 7 | The rename and the management tool | done |
+| 8 | The release | in progress |
 
 **All the findings of the audit are closed.** The plan is finished; what
 follows is the work itself: watching the panel on a live server, and the
@@ -313,11 +337,6 @@ complete and self-describing.
 
 ### What is left to do, and is not a fault
 
-* **Publish a release.** The panel fetches the engine from the releases of
-  this project (`bulltunn-engine_linux_<arch>.tar.gz` and `SHA256SUMS`).
-  There is no tag yet, so "Install the tunnel engine" has nothing to
-  fetch until a `v*` tag is pushed. The CI builds the four architectures
-  and the checksums and puts them in the release.
 * **Try it on the real servers.** Everything here was verified against the
   simulated network and against a tunnel on the loopback: the panel comes
   up, the demo adopts the tunnels that are already running, moves a record
@@ -327,7 +346,9 @@ complete and self-describing.
   and a real foreign server, with the panel talking to them over SSH.
 * **The dashboard is to be rewritten in Go.** The API carries the whole
   truth — the servers, the links, the domains, the coverage, the failback,
-  the errors — so the new front-end needs no change on the server.
+  the errors — so the new front-end needs no change on the server. The
+  management command is written against the same API, which is the proof
+  that it is complete.
 * **The engine's experimental carriers** (`xdi`, `pck`, `spoof`) are not
   offered to the panel: they need raw sockets and root, and an unattended
   repair must not ask for either.

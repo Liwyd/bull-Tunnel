@@ -12,11 +12,11 @@ import os
 
 from fastapi.testclient import TestClient
 
-from bulltunn.app import create_app
-from bulltunn.auth import Auth
-from bulltunn.models import IRAN, KHAREJ, L_UP, Link, Server
-from bulltunn.orchestrator import Orchestrator
-from bulltunn.store import Store
+from bulltunnel.app import create_app
+from bulltunnel.auth import Auth
+from bulltunnel.models import IRAN, KHAREJ, L_UP, Link, Server
+from bulltunnel.orchestrator import Orchestrator
+from bulltunnel.store import Store
 from tests.conftest import FakeNet
 
 
@@ -143,12 +143,12 @@ def test_the_primary_of_a_domain_is_kept_with_a_manual_group(tmp_path):
     l2 = Link(iran_id=i2.id, kharej_id=k1.id, tunnel_port=3081, ports=["443"], transport="tcp", status=L_UP, built=True)
     st.links[l1.id], st.links[l2.id] = l1, l2
     p = DNSProvider = None  # noqa: F841 - the domain needs no provider here
-    from bulltunn.models import DNSProvider as P
+    from bulltunnel.models import DNSProvider as P
 
     prov = P(name="p", kind="arvan", api_token="x", zone="example.ir")
     st.providers[prov.id] = prov
     d = Domain = None  # noqa: F841
-    from bulltunn.models import Domain as D
+    from bulltunnel.models import Domain as D
 
     dom = D(fqdn="a.example.ir", provider_id=prov.id, kharej_id=k1.id, ports=["443"], iran_id=i1.id, primary_iran=i1.id)
     dom.group = [l2.id, l1.id]  # the group was chosen by hand
@@ -168,7 +168,7 @@ def test_renaming_a_server_keeps_the_pinned_host_key(tmp_path):
     The key the panel pinned on the first contact was dropped on every save
     that left the host-key field empty — and renaming a server is a save.
     """
-    import bulltunn.ssh as sshmod
+    import bulltunnel.ssh as sshmod
 
     captured: dict = {}
     original = sshmod.HostKeys.__init__
@@ -198,7 +198,7 @@ def test_renaming_a_server_keeps_the_pinned_host_key(tmp_path):
 def test_clearing_the_host_key_field_lets_the_panel_pin_it_again(tmp_path):
     """A server that was rebuilt has a new key. When the operator clears the
     fingerprint, the panel pins the one it sees from now on."""
-    import bulltunn.ssh as sshmod
+    import bulltunnel.ssh as sshmod
 
     captured: dict = {}
     original = sshmod.HostKeys.__init__

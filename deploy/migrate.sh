@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Moves an existing TunnelManager panel to Bull-Tunn, on the panel server.
-#   bash deploy/migrate.sh            (from a Bull-Tunn checkout)
+# Moves an existing TunnelManager panel to bull-Tunnel, on the panel server.
+#   bash deploy/migrate.sh            (from a bull-Tunnel checkout)
 #
 # What it does:
 #   * stops the old service and keeps it disabled (rollback: re-enable it)
 #   * copies the data directory (state, logins, backups) and renames the
 #     settings keys of the old state file
-#   * rewrites /etc/default/tunnelmanager into /etc/default/bulltunn
+#   * rewrites /etc/default/tunnelmanager into /etc/default/bull-tunnel
 #   * installs and starts the new panel
 #
 # The tunnels on the managed servers are not touched here: run
@@ -16,9 +16,9 @@ set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 OLD_DATA=/var/lib/tunnelmanager
-NEW_DATA=/var/lib/bulltunn
+NEW_DATA=/var/lib/bull-tunnel
 OLD_ENV=/etc/default/tunnelmanager
-NEW_ENV=/etc/default/bulltunn
+NEW_ENV=/etc/default/bull-tunnel
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
 say() { printf '\n== %s\n' "$*"; }
@@ -84,9 +84,9 @@ bash "$SRC/deploy/install.sh"
 
 say "done"
 cat <<EOF
-The panel now runs as the "bulltunn" service. The old one is still on disk
+The panel now runs as the "bulltunnel" service. The old one is still on disk
 and can be brought back with:
-    systemctl disable bulltunn && systemctl enable --now tunnelmanager
+    systemctl disable bull-tunnel && systemctl enable --now tunnelmanager
 
 Next: move the tunnel servers to the new layout, one by one:
     scp deploy/remote-migrate.sh root@<server>:/tmp/

@@ -61,10 +61,10 @@ func LoadConfig(path string) (*Config, error) {
 		c.PollSeconds = 30
 	}
 	if c.TunnelDir == "" {
-		c.TunnelDir = "/etc/bulltunn"
+		c.TunnelDir = "/etc/bull-tunnel"
 	}
 	if c.UnitPrefix == "" {
-		c.UnitPrefix = "bulltunn"
+		c.UnitPrefix = "bulltunnel"
 	}
 	if len(c.Allowed) == 0 {
 		c.Allowed = []string{"status", "restart"}

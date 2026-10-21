@@ -157,7 +157,7 @@ class TelegramBot:
     async def test(self, cfg: Telegram) -> None:
         me = await self.call("getMe", cfg)
         for chat in cfg.chat_ids:
-            await self.send_to(chat, f"🔌 The Bull-Tunn panel is connected to the bot <b>@{esc(me.get('username'))}</b>.", cfg)
+            await self.send_to(chat, f"🔌 The bull-Tunnel panel is connected to the bot <b>@{esc(me.get('username'))}</b>.", cfg)
 
     def start(self) -> None:
         self._tasks = [asyncio.create_task(self._sender()), asyncio.create_task(self._poller())]

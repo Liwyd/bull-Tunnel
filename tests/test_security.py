@@ -6,8 +6,8 @@ import time
 
 from fastapi.testclient import TestClient
 
-from bulltunn.ratelimit import LoginLimiter
-from bulltunn.ssh import HostKeys
+from bulltunnel.ratelimit import LoginLimiter
+from bulltunnel.ssh import HostKeys
 
 
 def test_the_limiter_blocks_after_too_many_failures():
@@ -52,7 +52,7 @@ def test_the_host_keys_are_kept_on_disk(tmp_path):
 
 
 def test_the_headers_are_sent(tmp_path):
-    from bulltunn.app import create_app
+    from bulltunnel.app import create_app
 
     app = create_app(tmp_path)
     with TestClient(app) as client:
@@ -65,7 +65,7 @@ def test_the_headers_are_sent(tmp_path):
 
 
 def test_the_login_is_limited(tmp_path):
-    from bulltunn.app import create_app
+    from bulltunnel.app import create_app
 
     app = create_app(tmp_path)
     with TestClient(app) as client:

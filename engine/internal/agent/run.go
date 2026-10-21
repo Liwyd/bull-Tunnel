@@ -13,7 +13,7 @@ import (
 // configuration, opens the publisher and polls until the process is asked to
 // stop.
 //
-// It is what "bulltunn-engine agent -c /etc/bulltunn/agent.toml" runs.
+// It is what "bull-tunnel-engine agent -c /etc/bull-tunnel/agent.toml" runs.
 func Run(configPath string) error {
 	cfg, err := LoadConfig(configPath)
 	if err != nil {

@@ -180,7 +180,7 @@ class Orchestrator:
     def supported(self, link: Link, candidates: list[str]) -> list[str]:
         """Never test a carrier the engine on the Iran side does not speak.
 
-        The engine prints the carriers it has with `bulltunn-engine -v`, and
+        The engine prints the carriers it has with `bull-tunnel-engine -v`, and
         the panel reads them from the server. A carrier this build does not
         have would be written to the config, refused by the engine, and every
         discovery would waste a full test timeout on it.
@@ -1381,7 +1381,7 @@ class Orchestrator:
     # ------------------------------------------------------------ bot output
     def summary(self) -> str:
         st = self.store
-        lines = ["<b>📊 Bull-Tunn status</b>", ""]
+        lines = ["<b>📊 bull-Tunnel status</b>", ""]
         for role, title in ((KHAREJ, "🌍 Foreign"), (IRAN, "🇮🇷 Iran")):
             lines.append(f"<b>{title}</b>")
             for srv in st.by_role(role):

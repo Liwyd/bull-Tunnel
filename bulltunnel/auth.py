@@ -12,7 +12,7 @@ import secrets
 import time
 from pathlib import Path
 
-log = logging.getLogger("bulltunn")
+log = logging.getLogger("bulltunnel")
 
 COOKIE = "bt_session"
 SESSION_TTL = 7 * 24 * 3600

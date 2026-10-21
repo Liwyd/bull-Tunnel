@@ -5,10 +5,10 @@ import json
 import httpx
 import pytest
 
-from bulltunn.dns import DNSError
-from bulltunn.dns.arvan import ArvanDNS
-from bulltunn.dns.cloudflare import CloudflareDNS
-from bulltunn.models import DNSProvider
+from bulltunnel.dns import DNSError
+from bulltunnel.dns.arvan import ArvanDNS
+from bulltunnel.dns.cloudflare import CloudflareDNS
+from bulltunnel.models import DNSProvider
 
 pytestmark = pytest.mark.asyncio
 
