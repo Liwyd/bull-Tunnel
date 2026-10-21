@@ -313,15 +313,32 @@ complete and self-describing.
 
 ### What is left to do, and is not a fault
 
-* The dashboard is to be rewritten in Go. The API carries the whole truth
-  — the servers, the links, the domains, the coverage, the failback, the
-  errors — so the new front-end needs no change on the server.
-* The engine's experimental carriers (`xdi`, `pck`, `spoof`) are not
+* **Publish a release.** The panel fetches the engine from the releases of
+  this project (`bulltunn-engine_linux_<arch>.tar.gz` and `SHA256SUMS`).
+  There is no tag yet, so "Install the tunnel engine" has nothing to
+  fetch until a `v*` tag is pushed. The CI builds the four architectures
+  and the checksums and puts them in the release.
+* **Try it on the real servers.** Everything here was verified against the
+  simulated network and against a tunnel on the loopback: the panel comes
+  up, the demo adopts the tunnels that are already running, moves a record
+  when a tunnel dies and repairs the tunnel with another carrier, and the
+  engine measures all nine carriers without disturbing the tunnel that is
+  carrying the traffic. What has not happened yet is a real Iran server
+  and a real foreign server, with the panel talking to them over SSH.
+* **The dashboard is to be rewritten in Go.** The API carries the whole
+  truth — the servers, the links, the domains, the coverage, the failback,
+  the errors — so the new front-end needs no change on the server.
+* **The engine's experimental carriers** (`xdi`, `pck`, `spoof`) are not
   offered to the panel: they need raw sockets and root, and an unattended
   repair must not ask for either.
-* The panel does not manage the layer-3 and the direct tunnels of the
+* **The panel does not manage the layer-3 and the direct tunnels** of the
   engine: they are not reverse tunnels, and the panel's model has no place
   for them.
+* **Two upstream tests are timing sensitive** and fail from time to time
+  under the race detector — the same tests fail the same way in the
+  BackPack repository itself, which is where the code comes from. The CI
+  skips them there and runs them on their own, without the detector.
+
 
 
 

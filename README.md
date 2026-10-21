@@ -407,8 +407,8 @@ What that brings:
   exchange stretched with HKDF-SHA256 (so a recording of the traffic
   cannot be read later), and every frame is sealed with AES-256-GCM.
 - **Several streams over one connection:** every opened port is an
-  independent stream with a window of 256 KiB, so that one slow reader
-  cannot make the memory grow without a bound.
+  independent stream with a window of 64 KB (4 MB for the session), so
+  that one slow reader cannot make the memory grow without a bound.
 - **The carriers:** `tcp`, `tcpmux`, `stealth` (a Noise record layer with
   no fingerprint for inspection to match), `ws` and `wss` (websockets over
   HTTP and over TLS), `wsmux` and `wssmux` (the same, multiplexed), `kcp`
@@ -592,7 +592,7 @@ Hub** and the releases stay **private**.
 | 2 | **The command channel over DNS** | When not even TCP is possible, the panel must be able to give orders to a server. With the DNS account the panel already has (TXT) and without any new infrastructure | ✅ Done |
 | 3 | **Pinning the host key in SSH** | `known_hosts=None` is used today; a device in the middle could steal the server | ✅ Done |
 | 4 | **Rate limiting on the login** and the security headers | Layered defence against a flood attack on the login form | ✅ Done |
-| 5 | **A real integration test** of the engine on the loopback | Today the live test only runs when there is an outside binary | ✅ Done (`engine/internal/tunnel`) |
+| 5 | **A real integration test** of the engine on the loopback | Today the live test only runs when there is an outside binary | ✅ Done (the engine's own tests, `engine/internal/client` and `engine/internal/server`) |
 | 6 | **Automatic releases and images** | Private releases with the binaries and `SHA256SUMS`, a multi-architecture image on Docker Hub, installation and updating with one command | ✅ Done (CI) |
 
 The technical details of each item are in

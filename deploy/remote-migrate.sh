@@ -47,8 +47,16 @@ say "engine binary"
 if [ -x "$NEW_BIN" ]; then
   echo "$NEW_BIN is already there"
 elif [ -x "$LEGACY_BIN" ]; then
-  echo "$LEGACY_BIN -> $NEW_BIN (the official engine replaces it on the next install)"
+  echo "$LEGACY_BIN -> $NEW_BIN (the tunnel keeps working: it is the same engine)"
   [ "$DRY" = 1 ] || { cp -a "$LEGACY_BIN" "$NEW_BIN"; chmod 755 "$NEW_BIN"; }
+  cat <<'NOTE'
+
+  The engine that was here is the same one this project ships, so the
+  tunnels keep working. It does not have the two entry points the panel
+  needs — the path measurement and the command channel — so install the
+  engine of this project from the panel (server -> "Install the tunnel
+  engine") before you use them.
+NOTE
 else
   echo "no engine binary found: install one from the panel (server -> install engine)"
 fi

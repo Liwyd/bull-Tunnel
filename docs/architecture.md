@@ -83,25 +83,25 @@ The carriers the engine can use are listed in
 
 ### How low-level is it?
 
-Honest answer: **the framing is low-level, the security of the payload is
-not**.
+Honest answer: **the framing is low-level, and the payload is encrypted**.
 
 * The framing is a length-prefixed stream with a multiplexing layer, and
   the engine speaks it directly on a socket. There is no userspace
   "framework" between the socket and the tunnel: one `read()` gives the
   bytes of one frame, and the engine never copies more than it has to.
-* On `tcp`/`tcpmux` the payload between the two servers is **not
-  encrypted**: anyone on the path between the two servers can read and
-  change the traffic. The same is true of the health probe, which is why
-  the probe is bound to the loopback and never exposed.
-* `wss`/`quic` do carry TLS, but then the *engine* terminates TLS. The
-  panel cannot read the payload either way, and the engine has to be the
-  one that holds the certificate.
-
-So the current stack is "low-level and fast", not "low-level and safe".
-The engine Bull-Tunn ships with (the roadmap in the README) changes that:
-every carrier runs inside one session layer that is authenticated and
-encrypted, no matter which carrier is underneath.
+* **Every carrier runs inside one session layer that is authenticated and
+  encrypted**, whatever the carrier is underneath. The two ends prove they
+  hold the same token before a byte of the user's traffic moves, the
+  traffic keys come from an ephemeral X25519 exchange stretched with
+  HKDF-SHA256 — so a recording of the traffic cannot be read later, even
+  by someone who learns the token — and every frame is sealed with
+  AES-256-GCM with its type, its flags, its length and its stream id
+  authenticated as well. A frame cannot be replayed as another kind of
+  frame or as another stream.
+* `wss`/`quic` add TLS under the session, so the carrier is encrypted
+  twice. It is not needed for the confidentiality of the payload — the
+  session already provides it — but it is what makes the tunnel look like
+  ordinary web traffic to a middlebox.
 
 ### Does it survive filtering?
 

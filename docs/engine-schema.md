@@ -177,8 +177,9 @@ client                                    server
   replayed as another kind of frame or as another stream.
 * **The streams.** The server opens a stream for every connection that
   arrives on a published port, and the client connects to the destination
-  the server names. A window of 256 KiB per stream keeps a slow reader from
-  making the engine buffer without bound.
+  the server names. The window is 4 MB per session and 64 KB per stream by
+  default (both are in the configuration), so that one slow reader cannot
+  make the engine buffer without a bound.
 * **The keepalive.** A ping every 20 seconds; a session that hears nothing
   for three of them is closed and the client reconnects.
 
