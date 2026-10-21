@@ -328,6 +328,25 @@ to exist before a fresh installation can install the engine.
   architectures, measures all nine carriers against a real tunnel and does
   not disturb the tunnel that is carrying the traffic.
 
+### Commit 9 — the network graph follows the type-1 design  ✅ done
+
+The graph of the network view is built from `new-ui/type1/graphs.svg`, in
+the type-2 palette. The shell stays type 2; the graph is the one place
+where the older, softer shape is kept.
+
+* ✅ The cards are soft again: a rounded card, the name, the address, a
+  quiet line of meta, the state dot in the corner, and a soft tint on the
+  card that is picked and on the ones the path goes through. The rows of
+  chips are gone.
+* ✅ The labels on the wires are plain text in the colour of the state, and
+  the wire that is picked gets a pill around its label.
+* ✅ Every wire carries its label, the healthy ones included.
+* ✅ The zoom tools sit on the canvas, plain, in a row.
+* ✅ The screenshots in `docs/` were taken again.
+
+**Findings closed by this commit:** the graph that was built from the type-2
+design instead of the type-1 one.
+
 ---
 
 ## 3. Status
@@ -342,11 +361,12 @@ to exist before a fresh installation can install the engine.
 | 6 | Tests, docs, changelog | done |
 | 7 | The rename and the management tool | done |
 | 8 | The release | done |
+| 9 | The network graph follows the type-1 design | done |
 
-**All the findings of the audit are closed.** The plan is finished; what
-follows is the work itself: watching the panel on a live server, and the
-rewrite of the dashboard in Go, for which the state of the API is now
-complete and self-describing.
+**All the findings of the audit are closed, and the graph is the type-1
+design.** What is left is the work itself: watching the panel on a live
+server, and the rewrite of the dashboard in Go, for which the state of the
+API is now complete and self-describing.
 
 ### What is left to do, and is not a fault
 
@@ -372,6 +392,7 @@ complete and self-describing.
   under the race detector — the same tests fail the same way in the
   BackPack repository itself, which is where the code comes from. The CI
   skips them there and runs them on their own, without the detector.
+
 
 
 

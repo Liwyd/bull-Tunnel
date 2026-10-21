@@ -429,27 +429,34 @@ function fit() {
   applyView();
 }
 
+/* The card of a server, in the shape of the type-1 design
+   (new-ui/type1/graphs.svg): the name with its dot, the address, and a quiet
+   line of meta. The panel around it is type 2; the graph is the one place
+   where the older, softer card is kept. */
 function nodeCard(s) {
   const st = s.status;
   const links = S.links.filter((l) => l.status !== "pending" && (l.iran_id === s.id || l.kharej_id === s.id));
   const up = links.filter((l) => l.status === "up").length;
   const meta = [];
-  if (s.ssh_latency_ms != null) meta.push(`<span class="chip mono">ssh ${ms(s.ssh_latency_ms)}</span>`);
+  if (s.ssh_latency_ms != null) meta.push(`ssh ${ms(s.ssh_latency_ms)}`);
   if (s.role === "kharej") {
     const ex = serverExits(s.id);
-    if (ex.length) meta.push(`<span class="chip ${ex.some(exitBad) ? "bad" : "purple"}" title="${esc(ex.map((e) => `${e.port} → ${exitText(e)} (${e.method})`).join("\n"))}">${ex.length} forwarded</span>`);
+    if (ex.length) {
+      meta.push(`<span title="${esc(ex.map((e) => `${e.port} → ${exitText(e)} (${e.method})`).join("\n"))}">${ex.length} forwarded</span>`);
+    }
   }
   if (s.role === "iran") {
     const doms = S.domains.filter((d) => d.iran_id === s.id).length;
-    if (doms) meta.push(`<span class="chip info">${doms} domain${doms > 1 ? "s" : ""}</span>`);
+    if (doms) meta.push(`${doms} domain${doms > 1 ? "s" : ""}`);
   }
+  const role = s.role === "iran" ? "Iran" : "Foreign";
   return {
     cls: ["fnode", st === "offline" ? "dead" : "", s.enabled ? "" : "dim"].join(" "),
     html: `<div class="r1"><span class="nm">${esc(s.name)}</span><span class="dot ${st}"></span></div>
       <div class="ip">${esc(s.ip)}</div>
-      <div class="r3"><span class="role">${s.role === "iran" ? "Iran" : "Foreign"}</span>
-      <span class="role right">${up}/${links.length} tunnels</span></div>
-      ${meta.length ? `<div class="r3">${meta.join("")}</div>` : ""}`,
+      <div class="r3"><span class="role">${role}</span>
+      <span class="meta">${up}/${links.length} tunnels</span></div>
+      ${meta.length ? `<div class="r3"><span class="meta" style="margin-left:0">${meta.join(" · ")}</span></div>` : ""}`,
   };
 }
 
@@ -464,17 +471,17 @@ function domainCard(d) {
   }).join("");
   const more = (d.routes || []).length - routes.length;
   const flags = [];
-  if (d.iran_id && d.primary_iran && d.iran_id !== d.primary_iran) flags.push(`<span class="chip warn">standby</span>`);
-  if (d.pending_ip) flags.push(`<span class="chip warn">awaiting DNS</span>`);
-  if (!d.auto_failover) flags.push(`<span class="chip">manual</span>`);
-  if (d.error) flags.push(`<span class="chip bad" title="${esc(d.error)}">error</span>`);
+  if (d.iran_id && d.primary_iran && d.iran_id !== d.primary_iran) flags.push("standby");
+  if (d.pending_ip) flags.push("awaiting DNS");
+  if (!d.auto_failover) flags.push("manual");
+  if (d.error) flags.push(`<span title="${esc(d.error)}">error</span>`);
   return {
     cls: "fnode domain",
     html: `<div class="r1"><span class="nm">${esc(d.fqdn)}</span><span class="dot ${d.status}"></span></div>
       <div class="ip">${esc(d.current_ip || "—")}</div>
       ${lines ? `<div class="routes">${lines}${more > 0 ? `<span class="route muted">+${more} more</span>` : ""}</div>` : ""}
       <div class="r3"><span class="role">${p ? (p.kind === "cloudflare" ? "Cloudflare" : "ArvanCloud") : "no account"}</span>
-      <span class="role right">${d.ttl}s</span>${flags.join("")}</div>`,
+      <span class="meta">${d.ttl}s${flags.length ? " · " + flags.join(" · ") : ""}</span></div>`,
   };
 }
 
@@ -635,6 +642,20 @@ function drawWiresNow() {
     }
     return bezAt(c.p, 0.5);
   };
+  /* The label of a wire: a pill when the wire is the one that is picked,
+     plain text on the canvas for the others — the type-1 design
+     (new-ui/type1/graphs.svg). */
+  const wireLabel = (txt, x, y, cls, attrs, pill) => {
+    const w = txt.length * 6.6;
+    if (!pill) {
+      return `<g class="wlabel plain ${cls}" ${attrs} transform="translate(${x.toFixed(1)},${y.toFixed(1)})">`
+        + `<text x="0" y="0" text-anchor="middle" dominant-baseline="middle">${esc(txt)}</text></g>`;
+    }
+    const pw = w + 22;
+    return `<g class="wlabel ${cls}" ${attrs} transform="translate(${(x - pw / 2).toFixed(1)},${(y - 11).toFixed(1)})">`
+      + `<rect width="${pw.toFixed(1)}" height="22" rx="11"/>`
+      + `<text x="${(pw / 2).toFixed(1)}" y="15" text-anchor="middle">${esc(txt)}</text></g>`;
+  };
   for (const e of edges) {
     const x1 = e.dir1 > 0 ? e.a.x + e.a.w : e.a.x;
     const x2 = e.dir2 > 0 ? e.b.x + e.b.w : e.b.x;
@@ -643,9 +664,9 @@ function drawWiresNow() {
       const hop = `${e.from}|${e.to}`;
       parts.push(`<path class="xwire ${e.g.bad ? "down" : ""}" d="${c.d}" data-hop="${hop}"/>`);
       const txt = `↪ ${e.g.ports.join(",")} · ${[...e.g.methods].join("/")}${e.g.bad ? " ✕" : ""}`;
-      const w = txt.length * 6.4 + 14;
+      const w = txt.length * 6.6;
       const [lx, ly] = e.loop ? ((p) => [p[0] - w / 2 - 4, p[1]])(bezAt(c.p, 0.5)) : placeLabel(c, w);
-      labels.push(`<g class="wlabel hop ${e.g.bad ? "down" : ""}" data-hop="${hop}" transform="translate(${(lx - w / 2).toFixed(1)},${(ly - 10).toFixed(1)})"><rect width="${w.toFixed(1)}" height="20" rx="2.5"/><text x="${(w / 2).toFixed(1)}" y="14" text-anchor="middle">${esc(txt)}</text></g>`);
+      labels.push(wireLabel(txt, lx, ly, `hop ${e.g.bad ? "down" : ""}`, `data-hop="${hop}"`, false));
     } else if (e.kind === "link") {
       const l = e.l;
       const moved = handedOver(l) && e.st === "up";
@@ -653,14 +674,14 @@ function drawWiresNow() {
       const cls = `wire ${moved ? "handover" : e.st}${sel ? " sel" : ""}${e.standby ? " standby" : ""}`;
       parts.push(`<path class="${cls}" d="${c.d}" data-link="${l.id}"/>`);
       parts.push(`<path class="hit" d="${c.d}" data-link="${l.id}"/>`);
-      if (e.standby) continue;
       let txt;
       if (e.st === "testing") txt = "testing…";
       else if (moved) txt = `${l.transport} · ports moved`;
       else txt = `${l.transport || "—"}${e.st === "up" && l.latency_ms != null ? ` · ${Math.round(l.latency_ms)}ms` : e.st === "down" ? " ✕" : ""}${isFlapping(l) ? " ⚡" : ""}`;
-      const w = txt.length * 6.4 + 14;
+      const w = txt.length * 6.6;
       const [lx, ly] = placeLabel(c, w);
-      labels.push(`<g class="wlabel ${moved ? "handover" : e.st}${sel ? " sel" : ""}" data-link="${l.id}" transform="translate(${(lx - w / 2).toFixed(1)},${(ly - 10).toFixed(1)})"><rect width="${w.toFixed(1)}" height="20" rx="2.5"/><text x="${(w / 2).toFixed(1)}" y="14" text-anchor="middle">${esc(txt)}</text></g>`);
+      labels.push(wireLabel(txt, lx, ly, `${moved ? "handover" : e.st}${sel ? " sel" : ""}${e.standby ? " standby" : ""}`,
+        `data-link="${l.id}"`, sel));
     } else {
       const d = e.d;
       parts.push(`<path class="dwire ${d.pending_ip ? "pending-dns" : d.status}" d="${c.d}" data-domain="${d.id}"/>`);

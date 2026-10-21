@@ -7,6 +7,27 @@ only adds something.
 
 ## Unreleased
 
+### The network graph follows the type-1 design
+
+The graph of the network view is built from the type-1 design
+(`new-ui/type1/graphs.svg`), in the type-2 palette. The shell of the panel
+is type 2 — the sidebar, the cards of the pages, the counters, the type
+scale — and the graph is the one place where the older, softer shape is
+kept, because a graph of moving nodes reads better with soft cards than
+with sharp ones.
+
+- **The cards are soft again.** A rounded card with a quiet line of meta
+  under the address, the state dot in its corner, and a soft tint on the
+  card that is picked and on the ones the path goes through. The rows of
+  chips are gone: the meta is text, the way the type-1 card has it.
+- **The labels on the wires are plain text**, in the colour of the state,
+  dimmed for the standby tunnels. The wire that is picked gets a pill
+  around its label, as in the type-1 design.
+- **The zoom tools sit on the canvas**, plain, in a row: a fit, a smaller,
+  the size, a bigger, a reset.
+- Every wire carries its label now, the healthy ones included — the type-1
+  graph names every path it draws.
+
 ### bull-Tunnel, and a management tool
 
 The project is **bull-Tunnel** now, and it has a **management command**
