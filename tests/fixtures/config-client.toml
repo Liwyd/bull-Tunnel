@@ -1,0 +1,7 @@
+# Managed by bull-Tunnel (link l) - this kharej server -> Iran I
+[client]
+remote_addr = "1.2.3.4:3080"
+transport = "tcpmux"
+token = "0123456789abcdef0123456789abcdef"
+connection_pool = 8
+log_level = "info"

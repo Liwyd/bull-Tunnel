@@ -211,8 +211,8 @@ type Link struct {
 	Managed          bool                      `json:"managed"`
 	IranName         string                    `json:"iran_name"`
 	KharejName       string                    `json:"kharej_name"`
-	IranBase         map[string]any            `json:"iran_base"`
-	KharejBase       map[string]any            `json:"kharej_base"`
+	IranBase         Ordered                   `json:"iran_base"`
+	KharejBase       Ordered                   `json:"kharej_base"`
 	Allowed          []string                  `json:"allowed"`
 	Pinned           bool                      `json:"pinned"`
 	IranUnit         string                    `json:"iran_unit"`
@@ -241,8 +241,8 @@ func LinkDefaults() Link {
 		Ports:            []string{},
 		Priority:         100,
 		Managed:          true,
-		IranBase:         map[string]any{},
-		KharejBase:       map[string]any{},
+		IranBase:         NewOrdered(),
+		KharejBase:       NewOrdered(),
 		Allowed:          []string{},
 		EngineTransports: []string{},
 		Status:           StatusPending,

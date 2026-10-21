@@ -7,6 +7,35 @@ only adds something.
 
 ## Unreleased
 
+### The engine driver of the panel, in Go
+
+`internal/panel/engine` is everything the panel does with the tunnel engine
+on the servers.
+
+- **The configuration of a tunnel is written by hand**, key by key, the way
+  the Python panel writes it: the same `[server]` and `[client]` sections,
+  the same port mappings, the same probe. A tunnel the panel found already
+  running keeps the settings the panel does not manage — and the order of
+  the keys, so the panel does not shuffle them.
+- **The files the panel writes on the servers are a contract**: the
+  configuration, the unit and the five scripts are in `tests/fixtures/`,
+  and the two panels must write the same bytes. The Python panel writes the
+  fixtures — it is the reference until the rewrite is finished — and the Go
+  panel is checked against them.
+- **The health of a tunnel is read from the answer of the script**: the
+  state of the unit, the engine's own view, an end-to-end probe where the
+  tunnel has one, and the socket table as the last resort.
+- **The exits are only looked at**: the DNAT rules, who listens on a port
+  and where that process's connections go. The panel changes nothing.
+- **The engine is put on a server from the release**: the tarball is fetched
+  once, its checksum is checked against the one the release publishes, and
+  the binary is pushed over SSH — the servers in Iran often cannot reach
+  the artifact host.
+
+The tests run against a real engine when there is one (`BT_ENGINE_BIN`):
+the configuration the panel writes is read by the engine, and the tunnel
+comes up and carries the traffic.
+
 ### The SSH layer of the panel, in Go
 
 `internal/panel/ssh` is the panel's access to the servers it manages: one

@@ -1,0 +1,12 @@
+# Managed by bull-Tunnel (link l) - kharej K -> this Iran server
+[server]
+bind_addr = "0.0.0.0:3080"
+transport = "tcpmux"
+token = "0123456789abcdef0123456789abcdef"
+accept_udp = false
+log_level = "info"
+ports = [
+    "127.0.0.1:61000=127.0.0.1:2222",
+    "443",
+    "8443=127.0.0.1:2096",
+]

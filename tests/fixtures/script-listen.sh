@@ -1,0 +1,1 @@
+cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk '$4=="0A" {split($2,a,":"); print a[2]}'; cat /proc/net/udp /proc/net/udp6 2>/dev/null | awk '{split($2,a,":"); print a[2]}'

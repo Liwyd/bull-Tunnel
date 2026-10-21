@@ -1,0 +1,13 @@
+[Unit]
+Description=bull-Tunnel tunnel (bt-l)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/bull-tunnel-engine -c /etc/bull-tunnel/bt-l.toml
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

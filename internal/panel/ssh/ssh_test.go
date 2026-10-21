@@ -1,23 +1,17 @@
 package ssh
 
 import (
-	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/binary"
 	"encoding/pem"
-	"fmt"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/Liwyd/bull-Tunnel/internal/panel/model"
-	"github.com/pkg/sftp"
+	"github.com/Liwyd/bull-Tunnel/internal/panel/testssh"
 	xssh "golang.org/x/crypto/ssh"
 )
 
@@ -26,213 +20,14 @@ import (
 // the panel is tested the way it works in production — over a socket, with
 // a host key, with a password and with a private key.
 
-// testServer is an SSH server for the tests.
-type testServer struct {
-	listener net.Listener
-	hostKey  xssh.Signer
-	config   *xssh.ServerConfig
-	// directory is where the files of the SFTP subsystem are written.
-	directory string
-	// noSFTP says that the server has no SFTP subsystem, like the smallest
-	// images have.
-	noSFTP bool
-	// password is the password the server accepts. Empty means that any
-	// password is accepted.
-	password string
-	// wantKey says that the server only accepts a client with a key.
-	wantKey bool
-
-	mu       sync.Mutex
-	commands []string
-	open     []net.Conn
-}
-
 // newTestServer starts a server for the tests.
-func newTestServer(t *testing.T, password string, wantKey bool) *testServer {
+func newTestServer(t *testing.T, password string, wantKey bool) *testssh.Server {
 	t.Helper()
-	_, key, err := ed25519.GenerateKey(rand.Reader)
+	server, err := testssh.New(t.TempDir(), password, wantKey)
 	if err != nil {
-		t.Fatalf("cannot make a key for the test server: %v", err)
+		t.Fatalf("cannot start the test server: %v", err)
 	}
-	signer, err := xssh.NewSignerFromKey(key)
-	if err != nil {
-		t.Fatalf("cannot make a signer for the test server: %v", err)
-	}
-	config := &xssh.ServerConfig{
-		NoClientAuth: password == "" && !wantKey,
-		PasswordCallback: func(conn xssh.ConnMetadata, given []byte) (*xssh.Permissions, error) {
-			if password == "" {
-				return nil, nil
-			}
-			if string(given) != password {
-				return nil, fmt.Errorf("the password is not the right one")
-			}
-			return nil, nil
-		},
-		PublicKeyCallback: func(conn xssh.ConnMetadata, key xssh.PublicKey) (*xssh.Permissions, error) {
-			if !wantKey {
-				return nil, nil
-			}
-			return nil, nil
-		},
-	}
-	config.AddHostKey(signer)
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("cannot listen: %v", err)
-	}
-	server := &testServer{
-		listener:  listener,
-		hostKey:   signer,
-		config:    config,
-		directory: t.TempDir(),
-		password:  password,
-		wantKey:   wantKey,
-	}
-	go server.serve()
 	return server
-}
-
-// Port is the port the server listens on.
-func (s *testServer) Port() int { return s.listener.Addr().(*net.TCPAddr).Port }
-
-// Fingerprint is the fingerprint of the key of the server.
-func (s *testServer) Fingerprint() string { return xssh.FingerprintSHA256(s.hostKey.PublicKey()) }
-
-// Commands are the commands the server was asked to run.
-func (s *testServer) Commands() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]string{}, s.commands...)
-}
-
-// Close stops the server.
-func (s *testServer) Close() { s.listener.Close() }
-
-// CutConnections closes the connections the panel has open, the way a
-// server that is rebooted does.
-func (s *testServer) CutConnections() {
-	s.mu.Lock()
-	open := s.open
-	s.open = nil
-	s.mu.Unlock()
-	for _, conn := range open {
-		conn.Close()
-	}
-}
-
-// serve accepts the connections of the panel.
-func (s *testServer) serve() {
-	for {
-		conn, err := s.listener.Accept()
-		if err != nil {
-			return
-		}
-		go s.handle(conn)
-	}
-}
-
-// handle serves one connection.
-func (s *testServer) handle(conn net.Conn) {
-	s.mu.Lock()
-	s.open = append(s.open, conn)
-	s.mu.Unlock()
-	_, channels, requests, err := xssh.NewServerConn(conn, s.config)
-	if err != nil {
-		conn.Close()
-		return
-	}
-	defer conn.Close()
-	go xssh.DiscardRequests(requests)
-	for channel := range channels {
-		if channel.ChannelType() != "session" {
-			channel.Reject(xssh.UnknownChannelType, "only a session is wanted")
-			continue
-		}
-		channel, requests, err := channel.Accept()
-		if err != nil {
-			continue
-		}
-		go s.session(channel, requests)
-	}
-}
-
-// session serves the requests of one session.
-func (s *testServer) session(channel xssh.Channel, requests <-chan *xssh.Request) {
-	for request := range requests {
-		switch request.Type {
-		case "exec":
-			command := decodeString(request.Payload)
-			s.mu.Lock()
-			s.commands = append(s.commands, command)
-			s.mu.Unlock()
-			request.Reply(true, nil)
-			go s.exec(channel, command)
-		case "subsystem":
-			if decodeString(request.Payload) != "sftp" {
-				request.Reply(false, nil)
-				continue
-			}
-			if s.noSFTP {
-				request.Reply(false, nil)
-				continue
-			}
-			request.Reply(true, nil)
-			server, err := sftp.NewServer(channel, sftp.WithServerWorkingDirectory(s.directory))
-			if err != nil {
-				channel.Close()
-				continue
-			}
-			go func() {
-				server.Serve()
-				server.Close()
-			}()
-		default:
-			if request.WantReply {
-				request.Reply(false, nil)
-			}
-		}
-	}
-}
-
-// exec runs a command with the shell of the machine and answers.
-func (s *testServer) exec(channel xssh.Channel, command string) {
-	defer channel.Close()
-	cmd := exec.Command("/bin/sh", "-c", command)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	// what the panel sends is what the command reads
-	cmd.Stdin = channel
-	cmd.Dir = s.directory
-	err := cmd.Run()
-	code := 0
-	if err != nil {
-		if exit, ok := err.(*exec.ExitError); ok {
-			code = exit.ExitCode()
-		} else {
-			code = 1
-			stderr.WriteString(err.Error())
-		}
-	}
-	channel.Write(stdout.Bytes())
-	channel.Write(stderr.Bytes())
-	status := make([]byte, 4)
-	binary.BigEndian.PutUint32(status, uint32(code))
-	channel.SendRequest("exit-status", false, status)
-}
-
-// decodeString is the payload of a request: a length and a string.
-func decodeString(payload []byte) string {
-	if len(payload) < 4 {
-		return ""
-	}
-	length := binary.BigEndian.Uint32(payload[:4])
-	if uint32(len(payload)-4) < length {
-		return ""
-	}
-	return string(payload[4 : 4+length])
 }
 
 // aServer is a server of the panel, pointing at the test server.
@@ -371,6 +166,33 @@ func TestThePasswordIsUsed(t *testing.T) {
 	}
 }
 
+// TestThePrivateKeyIsUsed: the panel logs in with the private key of the
+// server.
+func TestThePrivateKeyIsUsed(t *testing.T) {
+	server := newTestServer(t, "", true)
+	defer server.Close()
+
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("cannot make a key: %v", err)
+	}
+	_ = public
+	encoded, err := xssh.MarshalPrivateKey(private, "bull-tunnel")
+	if err != nil {
+		t.Fatalf("cannot write the key: %v", err)
+	}
+	key := pem.EncodeToMemory(encoded)
+
+	pool := NewPool(5*time.Second, NewHostKeys(filepath.Join(t.TempDir(), "hostkeys.json")))
+	defer pool.Close()
+
+	s := aServer(t, server.Port(), "")
+	s.SSHKey = string(key)
+	if _, err := pool.Run(s, "true", 10*time.Second, nil); err != nil {
+		t.Fatalf("the command failed: %v", err)
+	}
+}
+
 // TestAPrivateKeyThatCannotBeReadIsAnErrorAndNotACrash: a key that is not a
 // key is the operator's mistake; the panel must say so and carry on.
 func TestAPrivateKeyThatCannotBeReadIsAnErrorAndNotACrash(t *testing.T) {
@@ -416,6 +238,25 @@ func TestTheCommandThatTakesTooLongIsNotRunAgain(t *testing.T) {
 	}
 }
 
+// TestThePanelOpensANewConnectionWhenTheOldOneDies: a connection that died
+// under the panel is opened again and the command is run once more.
+func TestThePanelOpensANewConnectionWhenTheOldOneDies(t *testing.T) {
+	server := newTestServer(t, "", false)
+	defer server.Close()
+
+	pool := NewPool(5*time.Second, NewHostKeys(filepath.Join(t.TempDir(), "hostkeys.json")))
+	defer pool.Close()
+
+	s := aServer(t, server.Port(), "")
+	if _, err := pool.Run(s, "true", 10*time.Second, nil); err != nil {
+		t.Fatalf("the command failed: %v", err)
+	}
+	server.CutConnections()
+	if _, err := pool.Run(s, "true", 10*time.Second, nil); err != nil {
+		t.Fatalf("the panel did not open a new connection: %v", err)
+	}
+}
+
 // TestThePanelPutsAFileOnTheServer: with SFTP, and with the shell when the
 // server has no SFTP subsystem.
 func TestThePanelPutsAFileOnTheServer(t *testing.T) {
@@ -427,13 +268,13 @@ func TestThePanelPutsAFileOnTheServer(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			server := newTestServer(t, "", false)
 			defer server.Close()
-			server.noSFTP = !withSFTP
+			server.NoSFTP = !withSFTP
 
 			pool := NewPool(5*time.Second, NewHostKeys(filepath.Join(t.TempDir(), "hostkeys.json")))
 			defer pool.Close()
 
 			s := aServer(t, server.Port(), "")
-			path := filepath.Join(server.directory, "hello.txt")
+			path := filepath.Join(server.Directory, "hello.txt")
 			if err := pool.Put(s, []byte("hello"), path, 0o600); err != nil {
 				t.Fatalf("the file was not written: %v", err)
 			}
@@ -452,52 +293,6 @@ func TestThePanelPutsAFileOnTheServer(t *testing.T) {
 				t.Errorf("the file is %o, it must be 600", mode)
 			}
 		})
-	}
-}
-
-// TestThePrivateKeyIsUsed: the panel logs in with the private key of the
-// server.
-func TestThePrivateKeyIsUsed(t *testing.T) {
-	server := newTestServer(t, "", true)
-	defer server.Close()
-
-	public, private, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("cannot make a key: %v", err)
-	}
-	_ = public
-	encoded, err := xssh.MarshalPrivateKey(private, "bull-tunnel")
-	if err != nil {
-		t.Fatalf("cannot write the key: %v", err)
-	}
-	key := pem.EncodeToMemory(encoded)
-
-	pool := NewPool(5*time.Second, NewHostKeys(filepath.Join(t.TempDir(), "hostkeys.json")))
-	defer pool.Close()
-
-	s := aServer(t, server.Port(), "")
-	s.SSHKey = string(key)
-	if _, err := pool.Run(s, "true", 10*time.Second, nil); err != nil {
-		t.Fatalf("the command failed: %v", err)
-	}
-}
-
-// TestThePanelOpensANewConnectionWhenTheOldOneDies: a connection that died
-// under the panel is opened again and the command is run once more.
-func TestThePanelOpensANewConnectionWhenTheOldOneDies(t *testing.T) {
-	server := newTestServer(t, "", false)
-	defer server.Close()
-
-	pool := NewPool(5*time.Second, NewHostKeys(filepath.Join(t.TempDir(), "hostkeys.json")))
-	defer pool.Close()
-
-	s := aServer(t, server.Port(), "")
-	if _, err := pool.Run(s, "true", 10*time.Second, nil); err != nil {
-		t.Fatalf("the command failed: %v", err)
-	}
-	server.CutConnections()
-	if _, err := pool.Run(s, "true", 10*time.Second, nil); err != nil {
-		t.Fatalf("the panel did not open a new connection: %v", err)
 	}
 }
 

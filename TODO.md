@@ -541,16 +541,28 @@ in Go and comes out identical ✓.
 **Done when:** the panel can open a connection, run a command, put a file
 and read the host key of a server it has never seen ✓.
 
-### Phase 4 — the driver of the engine
+### Phase 4 — the driver of the engine  ✅ done
 
-* `internal/panel/engine`: the rendering of the configuration (the same
+* ✅ `internal/panel/engine`: the rendering of the configuration (the same
   TOML ✓ — the same `server`/`client` sections ✓, the same port mappings
   ✓, the same probe mapping ✓), the deploy ✓, the unit ✓, the ufw ✓, the
   scan (the adoption ✓), the health scripts (the same shell ✓, the same
   parsing ✓), the metrics ✓, the install (the release, the checksum, the
   cache ✓).
-* The tests: `tests/test_engine.py` ✓ and `tests/test_exits.py` ✓
-  translated ✓.
+* ✅ The tests: `tests/test_engine.py` ✓ and `tests/test_exits.py` ✓
+  translated ✓ — the rendering ✓, the adopted tunnels ✓, the port mappings
+  ✓, the firewall ✓, the parsers ✓, the exits ✓, and the driver against a
+  server that is right there ✓.
+* ✅ The files the panel writes on the servers are a contract:
+  `tests/fixtures/` holds the configuration of a tunnel ✓, the unit ✓ and
+  the five scripts ✓, and the two panels must write the same bytes ✓. The
+  Python panel writes the fixtures — it is the reference until phase 9 — and
+  the Go panel is checked against them ✓.
+* ✅ The engine itself reads the configuration the panel writes ✓, and the
+  tunnel comes up and carries the traffic ✓ (`BT_ENGINE_BIN` ✓).
+* ✅ The order of the keys of a configuration is kept ✓: the settings of an
+  adopted tunnel keep the order of the file they came from ✓, and the
+  panel does not shuffle them ✓.
 
 **Done when:** a tunnel the Python panel built is adopted by the Go panel
 and comes up ✓, and the Go panel writes a configuration the engine accepts
@@ -657,8 +669,8 @@ already work ✓.
 | 11 | The Go rewrite — phase 1 (one module) | done |
 | 12 | The Go rewrite — phase 2 (the state) | done |
 | 13 | The Go rewrite — phase 3 (ssh) | done |
-| 14 | The Go rewrite — phase 4 (the engine driver) | **next** |
-| 15 | The Go rewrite — phase 5 (dns, telegram, backups) | pending |
+| 14 | The Go rewrite — phase 4 (the engine driver) | done |
+| 15 | The Go rewrite — phase 5 (dns, telegram, backups) | **next** |
 | 16 | The Go rewrite — phase 6 (the orchestrator) | pending |
 | 17 | The Go rewrite — phase 7 (the api) | pending |
 | 18 | The Go rewrite — phase 8 (the command) | pending |

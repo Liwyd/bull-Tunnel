@@ -304,7 +304,7 @@ func (p *Pool) Put(s *model.Server, data []byte, path string, mode os.FileMode) 
 		return nil
 	}
 	// some minimal images have no sftp subsystem: fall back to cat
-	quoted := shellQuote(path)
+	quoted := Quote(path)
 	command := fmt.Sprintf("umask 077; cat > %s.bt-tmp && chmod %o %s.bt-tmp && mv -f %s.bt-tmp %s",
 		quoted, mode.Perm(), quoted, quoted, quoted)
 	result, runErr := p.Run(s, command, 60*time.Second, data)
@@ -330,7 +330,27 @@ func (p *Pool) Close() {
 	}
 }
 
-// shellQuote quotes a word for the shell of the server.
-func shellQuote(word string) string {
-	return "'" + strings.ReplaceAll(word, "'", `'\''`) + "'"
+// Quote quotes a word for the shell of the server, the way shlex.quote
+// does: a word that is safe as it is, is left alone.
+func Quote(word string) string {
+	if word == "" {
+		return "''"
+	}
+	if safeShellWord(word) {
+		return word
+	}
+	return "'" + strings.ReplaceAll(word, "'", `'"'"'`) + "'"
+}
+
+// safeShellWord tells whether a word can be left alone in a shell command.
+func safeShellWord(word string) bool {
+	for _, r := range word {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case strings.ContainsRune("_@%+=:,./-", r):
+		default:
+			return false
+		}
+	}
+	return true
 }
