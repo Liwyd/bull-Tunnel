@@ -6,8 +6,9 @@ tunnel. The panel never sits in the traffic path.
 
 The panel does not care which build of the engine runs on a server, as long
 as that build obeys this contract. The engine that ships with Bull-Tunn is
-written in Go and has no dependency but the standard library: it is one
-static binary that runs on the servers of the tunnel, wherever they are.
+the **BackPack engine** ([github.com/AminMGMT/BackPack](https://github.com/AminMGMT/BackPack)),
+vendored under `engine/` and built into one static binary that runs on the
+servers of the tunnel, wherever they are.
 
 ```
 /etc/bulltunn/<name>.toml                 config
@@ -29,8 +30,11 @@ bulltunn-engine -v                             print the version and the carrier
 
 ```
 bulltunn-engine 1.0.0
-transports: tcp,tcpmux,ws,wsmux,wss,wssmux,stealth
+transports: tcp,tcpmux,stealth,ws,wss,wsmux,wssmux,kcp,quic
 ```
+
+The second line is the list of the carriers this build speaks. The panel
+reads it from the server and never tests a carrier that is not on it.
 
 The engine must exit non-zero when it cannot start, so the panel sees a
 broken configuration instead of a crash loop.
@@ -133,7 +137,14 @@ encrypted and authenticated, so a carrier only has to move bytes.
 | `wsmux` | WebSocket | the same carrier |
 | `wss` | WebSocket over TLS | confidentiality on top of the session |
 | `wssmux` | WebSocket over TLS | the same carrier |
-| `stealth` | an HTTP `CONNECT` tunnel | looks like ordinary proxy traffic |
+| `stealth` | a Noise record layer | no TLS fingerprint and no recognisable handshake: on the wire it is indistinguishable from random |
+| `kcp` | a reliable protocol over UDP | survives a path where a long-lived TCP flow stalls |
+| `quic` | QUIC streams over UDP | brings its own TLS 1.3, multiplexing and loss recovery |
+
+`udp` carries datagrams only and cannot be probed with a TCP probe, so the
+panel does not offer it. The experimental carriers of the engine (`xdi`,
+`pck`, `spoof`) need raw sockets and root, so they are never offered to
+an unattended repair.
 
 The panel measures the carriers and keeps the fastest one that works, but
 it never switches away from a working tunnel on its own: a change is made
@@ -171,8 +182,9 @@ client                                    server
 * **The keepalive.** A ping every 20 seconds; a session that hears nothing
   for three of them is closed and the client reconnects.
 
-The details are in the source, which is short and has tests for every part:
-`engine/internal/proto`.
+The details are in the source of the engine, which has tests for every
+part: `engine/internal/client`, `engine/internal/server` and
+`engine/internal/tunnel`.
 
 ## Measuring the path
 
@@ -183,20 +195,27 @@ button of the panel shows:
 bulltunn-engine probe -c name.toml --samples 3
 ```
 
-It runs on the side that dials out, tries every carrier **at the same
-time** and writes one JSON object per carrier:
+It runs on the side that dials out, opens every carrier in turn and writes
+one JSON object per carrier:
 
 ```json
-{"transport":"wss","ok":true,"connect_ms":30.2,"handshake_ms":9.1,"rtt_ms":21.4,"samples":3}
-{"transport":"tcp","ok":false,"connect_ms":10015.5,"handshake_ms":0,"rtt_ms":0,"samples":0,"error":"…"}
+{"transport":"wss","ok":true,"connect_ms":30.2,"handshake_ms":0,"rtt_ms":21.4,"samples":3}
+{"transport":"tcp","ok":false,"connect_ms":0,"handshake_ms":0,"rtt_ms":0,"samples":0,"error":"…"}
 ```
 
 * `connect_ms` — how long the carrier took to come up (the TCP connection,
-  the TLS handshake, the websocket upgrade).
-* `handshake_ms` — how long the session handshake took.
-* `rtt_ms` — the **real** round trip over the session: the engine pings
-  and the answer comes back the same way the traffic would. The middle of
-  three samples is kept, so one hiccup does not decide.
+  the TLS handshake, the websocket upgrade, the KCP session, the QUIC
+  handshake).
+* `handshake_ms` — how long the credential exchange took. It is zero,
+  because the probe never performs one: a credential exchange on a live
+  tunnel is a **control claim**, and the server answers a second claim by
+  taking the seat in place — the probe would take the tunnel away from the
+  client that is carrying the traffic.
+* `rtt_ms` — the median of the samples: the typical time for this carrier
+  to come up on this path.
+
+What the probe opens, it opens and closes again without claiming anything,
+so measuring the path never disturbs a tunnel that is carrying traffic.
 
 The carrier with the smallest round trip is the best one for that pair,
 right now.

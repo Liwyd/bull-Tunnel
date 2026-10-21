@@ -277,8 +277,21 @@ Findings 36 to 48.
 **Findings closed by this commit:** 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
 46, 47, 48.
 
-### Commit 6 — tests, docs and the changelog
-The whole suite, the README, the CHANGELOG and `docs/engine-schema.md`.
+### Commit 6 — tests, docs and the changelog  ✅ done
+
+* ✅ `docs/engine-schema.md` is the contract of the engine that is actually
+  shipped: the carriers, the configuration, the metrics file, the commands
+  and what the measurement does and does not do.
+* ✅ `README.md` says where the engine comes from, what it brings and what
+  is added on top of it.
+* ✅ `CHANGELOG.md` has the whole repair under "Unreleased".
+* ✅ The whole suite: 111 Python tests and the engine's own Go tests.
+* ✅ The live check: the panel comes up and answers, the static files are
+  served, the security headers are there, the demo adopts the tunnels that
+  are already running, moves a record when a tunnel dies and repairs the
+  tunnel with another carrier — and the engine, built for the four
+  architectures, measures all nine carriers against a real tunnel and does
+  not disturb the tunnel that is carrying the traffic.
 
 ---
 
@@ -291,16 +304,25 @@ The whole suite, the README, the CHANGELOG and `docs/engine-schema.md`.
 | 3 | The critical panel bugs | done |
 | 4 | The medium panel bugs | done |
 | 5 | The front-end | done |
-| 6 | Tests, docs, changelog | pending |
+| 6 | Tests, docs, changelog | done |
 
-**Next up (commit 6):** the last one.
+**All the findings of the audit are closed.** The plan is finished; what
+follows is the work itself: watching the panel on a live server, and the
+rewrite of the dashboard in Go, for which the state of the API is now
+complete and self-describing.
 
-1. `docs/engine-schema.md`: the contract is the BackPack engine's now —
-   the carriers, the configuration, the metrics file, the commands.
-2. `README.md`: what the project is and how it is put together.
-3. `CHANGELOG.md`: what changed.
-4. The whole suite, one more time, and the engine's own tests.
-5. A live check: the panel comes up, the demo runs, the engine builds.
+### What is left to do, and is not a fault
+
+* The dashboard is to be rewritten in Go. The API carries the whole truth
+  — the servers, the links, the domains, the coverage, the failback, the
+  errors — so the new front-end needs no change on the server.
+* The engine's experimental carriers (`xdi`, `pck`, `spoof`) are not
+  offered to the panel: they need raw sockets and root, and an unattended
+  repair must not ask for either.
+* The panel does not manage the layer-3 and the direct tunnels of the
+  engine: they are not reverse tunnels, and the panel's model has no place
+  for them.
+
 
 
 

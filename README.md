@@ -391,32 +391,43 @@ The panel does not build the tunnels itself: a separate program, the
 writes its config, creates the systemd service and reads its health from
 its metrics file.
 
-The tunnel engine **is part of this project**: it is written in Go, it uses
-nothing but the standard library and it is one static binary (no Python,
-no pip, no dependency at all on the tunnel servers). It is built for amd64,
-arm64, 386 and armv7.
+The tunnel engine **is the BackPack engine**
+([github.com/AminMGMT/BackPack](https://github.com/AminMGMT/BackPack)),
+vendored under `engine/` with its module path kept as
+`github.com/backpack/backpack`, so the copy is byte-identical to upstream
+and can be re-synced with a plain `rsync`. It is one static binary (no
+Python, no pip, no dependency at all on the tunnel servers) built for
+amd64, arm64, 386 and armv7. See [engine/README.md](engine/README.md) for
+what was taken, what was left behind and what was added.
 
-- **An encrypted session on every protocol:** the two ends authenticate
-  each other with a shared token (HMAC-SHA256 over the whole handshake),
-  the traffic keys come from an X25519 exchange stretched with
-  HKDF-SHA256 (so a recording of the traffic cannot be read later), and
-  every frame is sealed with AES-256-GCM.
+What that brings:
+
+- **An encrypted session on every carrier:** the two ends authenticate
+  each other with a shared token, the traffic keys come from an X25519
+  exchange stretched with HKDF-SHA256 (so a recording of the traffic
+  cannot be read later), and every frame is sealed with AES-256-GCM.
 - **Several streams over one connection:** every opened port is an
   independent stream with a window of 256 KiB, so that one slow reader
   cannot make the memory grow without a bound.
+- **The carriers:** `tcp`, `tcpmux`, `stealth` (a Noise record layer with
+  no fingerprint for inspection to match), `ws` and `wss` (websockets over
+  HTTP and over TLS), `wsmux` and `wssmux` (the same, multiplexed), `kcp`
+  (a reliable protocol over UDP) and `quic` (the same, with its own TLS
+  1.3). The panel never tests a carrier the engine does not have: the
+  engine prints the ones it speaks with `-v`, and the panel reads them
+  from there.
 - **Path measurement (`probe`):** the engine can measure the path itself on
-  every protocol and say which one is the fastest — exactly what the ⚡
-  button in the panel shows.
-- **The protocols:** `tcp`, `ws` (a websocket over HTTP), `wss` (a
-  websocket over TLS) and `stealth` (an HTTP `CONNECT` tunnel that looks
-  like ordinary proxy traffic). The `mux` names are the same carriers: the
-  session is always multiplexed.
-- **The engine says what it speaks:** the metrics file lists the
-  protocols that are available, and the panel never tests a protocol the
-  engine does not have.
+  every carrier and say which one is the fastest — exactly what the ⚡
+  button in the panel shows. The measurement opens the carrier the way
+  the tunnel's own client opens it and closes it again without claiming
+  the control channel, so it never takes the tunnel away from the client
+  that is carrying the traffic.
+
+Two things are Bull-Tunn's own and are not in BackPack: the `probe` and
+`agent` entry points, and the command channel below.
 
 The full contract of the engine (config, unit, metrics file, health probe,
-session and the list of protocols): [docs/engine-schema.md](docs/engine-schema.md).
+session and the list of carriers): [docs/engine-schema.md](docs/engine-schema.md).
 
 Installing the engine on a server:
 

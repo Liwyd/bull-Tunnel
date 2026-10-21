@@ -44,7 +44,7 @@ from typing import Any
 
 import httpx
 
-from .models import TCP_TRANSPORTS, Link, Server
+from .models import ALL_TRANSPORTS, TCP_TRANSPORTS, Link, Server
 from .ssh import SSHError, SSHPool
 
 log = logging.getLogger(__name__)
@@ -811,6 +811,11 @@ class SSHDriver(Driver):
         The engine prints two lines with -v: its version, and the carriers
         this build speaks. The panel reads both, and never tests a carrier
         the engine does not have.
+
+        An engine that prints something else — an older BackPack build,
+        which printed its source address on the second line — is not
+        believed: the carriers are taken from the line that names them, and
+        only the names the panel knows are kept.
         """
         r = await self.pool.run(
             s,
@@ -818,7 +823,11 @@ class SSHDriver(Driver):
             timeout=20,
         )
         lines = r.out.strip().splitlines() + ["", "", ""]
-        transports = [t.strip() for t in lines[2].replace("transports:", "").split(",") if t.strip()]
+        transports = [
+            t.strip()
+            for t in lines[2].replace("transports:", "").split(",")
+            if t.strip() in ALL_TRANSPORTS
+        ]
         return lines[0].strip(), lines[1].strip(), transports
 
     async def engine_info(self, s: Server) -> tuple[str, list[str]]:

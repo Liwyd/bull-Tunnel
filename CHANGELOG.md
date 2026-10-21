@@ -7,6 +7,78 @@ only adds something.
 
 ## Unreleased
 
+### The engine is BackPack
+
+The tunnel engine was a re-implementation written for this project. It is
+now **the BackPack engine** ([github.com/AminMGMT/BackPack](https://github.com/AminMGMT/BackPack)),
+vendored under `engine/` with its module path kept as
+`github.com/backpack/backpack`, so the copy is byte-identical to upstream
+and can be re-synced with a plain `rsync`. See `engine/README.md` for what
+was taken, what was left behind and what was added.
+
+That brings the carriers the panel always offered but the engine never
+had: `kcp` and `quic`, next to `tcp`, `tcpmux`, `stealth`, `ws`, `wss`,
+`wsmux` and `wssmux`. The engine says which of them it speaks with `-v`,
+and the panel reads that from the server, so it never writes a
+configuration the engine would refuse — and never waits a full test
+timeout to find out.
+
+Two things are added on top of BackPack, and nothing else:
+
+- **`bulltunn-engine probe`** measures the path between two servers, one
+  line per carrier. It opens a carrier the way the tunnel's own client
+  opens it and closes it again **without claiming the control channel**: a
+  claim would make the server take the tunnel away from the client that
+  is carrying the traffic. Measuring the path never disturbs a tunnel.
+- **`bulltunn-engine agent`** is the command channel, which BackPack does
+  not have. Its signature is now the panel's, byte for byte, and the TXT
+  record it writes is escaped the way Cloudflare wants it. Every command
+  used to be refused with "not signed with the right token", because the
+  panel left the empty argument list out of the string it signed and the
+  agent signed the two braces it found in the record.
+
+### The faults that are fixed
+
+- **One server could stop the whole monitor.** A private key the SSH
+  library refuses raised a `ValueError`, which was not an `SSHError`, so
+  it escaped the check of the servers and aborted the cycle: no server was
+  checked, no tunnel was checked, no domain was evaluated and no failover
+  happened — for ever, on every cycle, while the panel looked alive.
+- **Deleting a server left its tunnels on the machine.** The cleanup
+  looked the servers up in the panel, and the panel had already forgotten
+  them: the config, the unit and the running process stayed there.
+- **"Make it primary" did nothing** as soon as a domain's group was
+  chosen by hand: the group took precedence over the primary, and the
+  traffic came back to another server.
+- **Saving a server dropped the pinned host key** whenever the host-key
+  field was empty — and renaming a server is a save. The key is only
+  forgotten when the operator had written a fingerprint and then removed
+  it.
+- **A state file or a login file that could not be read took the panel
+  down** at start-up. The state file is moved aside rather than
+  overwritten, the login file is left untouched, and both say so in the
+  panel.
+- **The engine was never updated.** Its tarball was cached under the name
+  "latest" for ever, and a server that had been updated kept the build it
+  had. The checksum of what is published now says whether the tarball the
+  panel has is still that one.
+- **Two mappings that want the same port** were accepted by the panel and
+  refused by the engine, which exits and never brings the tunnel up.
+- **The health check needed a GNU date.** On a small distribution the
+  clock has no nanoseconds, and every tunnel would have read "it did not
+  answer" on a system whose clock was perfectly fine.
+- **Two backups in the same minute** were the same file, and the second
+  threw the first away.
+- **A restored login without the key the sessions are signed with** locked
+  the panel out.
+- **A handover could race with a repair** of the same tunnel, and a
+  handover that would have looped was written anyway.
+- The panel is faster with many servers: the map of the forwarded ports
+  is worked out once and kept until something it depends on changes.
+- The connection test says what went wrong instead of failing silently,
+  the forwarded-port labels open the drawer of the server the ports leave
+  from, and the signed-in user is the one who signed in.
+
 ### A new interface for the panel
 
 The panel was redesigned from the ground up. The screens, the colours, the

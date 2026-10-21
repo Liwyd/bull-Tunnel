@@ -94,3 +94,18 @@ cd engine && go test ./...
 
 The tests of the vendored code are the tests of BackPack: they are the ones
 that prove the engine still behaves as it did upstream.
+
+Two of them are timing sensitive and fail from time to time under the race
+detector — one asks that the UDP server's port be free the moment `Start`
+returns, the other counts the allocations of a batch, and the detector
+allocates a great deal. They are skipped in the race run of the CI and run
+on their own, without the detector:
+
+```bash
+go test -race -skip 'TestStartDoesNotReturnUntilThePortsAreFree|TestWriteBatchDoesNotAllocatePerCall' ./...
+go test -count=3 -run 'TestStartDoesNotReturnUntilThePortsAreFree' ./internal/server/
+go test -count=3 -run 'TestWriteBatchDoesNotAllocatePerCall' ./internal/tunnel/l3/
+```
+
+They are flaky upstream as well: the same tests fail the same way in the
+BackPack repository itself, which is where the code comes from.

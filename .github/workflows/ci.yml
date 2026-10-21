@@ -39,7 +39,17 @@ jobs:
         run: python -m pytest -q
       - name: the engine tests
         working-directory: engine
-        run: go test -race ./...
+        run: |
+          # The race detector is on: it is what keeps the engine honest.
+          # Two upstream tests are timing sensitive and fail under it from
+          # time to time — one asks that the UDP server's port be free the
+          # moment Start returns, the other counts the allocations of a
+          # batch (and the detector allocates a great deal). They are run on
+          # their own, without the detector; a real failure is still a
+          # failure.
+          go test -race -skip 'TestStartDoesNotReturnUntilThePortsAreFree|TestWriteBatchDoesNotAllocatePerCall' ./...
+          go test -count=3 -run 'TestStartDoesNotReturnUntilThePortsAreFree' ./internal/server/
+          go test -count=3 -run 'TestWriteBatchDoesNotAllocatePerCall' ./internal/tunnel/l3/
       - name: the engine builds
         working-directory: engine
         run: go build ./...
