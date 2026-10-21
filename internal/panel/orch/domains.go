@@ -105,6 +105,11 @@ func (o *Orchestrator) suggest(domain *model.Domain, plan *Plan, why string) {
 		domain.FQDN, why, would), true, map[string]string{"domain": domain.ID})
 }
 
+// MoveDomain points the record of a domain at another Iran server.
+func (o *Orchestrator) MoveDomain(domain *model.Domain, iranID string, reason string, failback bool) bool {
+	return o.moveDomain(domain, iranID, reason, failback)
+}
+
 // moveDomain points the record of a domain at another Iran server.
 func (o *Orchestrator) moveDomain(domain *model.Domain, iranID string, reason string, failback bool) bool {
 	iran := o.store.Servers.Get(iranID)

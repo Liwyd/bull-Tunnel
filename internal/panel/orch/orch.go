@@ -28,6 +28,7 @@ package orch
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -107,6 +108,35 @@ func (o *Orchestrator) Woken() bool {
 	woken := o.woken
 	o.woken = false
 	return woken
+}
+
+// LastCheck is when the last cycle ran.
+func (o *Orchestrator) LastCheck() float64 { return o.lastCheck }
+
+// LastScan is when the servers were looked at last.
+func (o *Orchestrator) LastScan() float64 { return o.lastScan }
+
+// BusyList are the tunnels with an operation in flight.
+func (o *Orchestrator) BusyList() []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	out := []string{}
+	for id := range o.busy {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// FlappingList are the tunnels that keep dropping.
+func (o *Orchestrator) FlappingList() []string {
+	out := []string{}
+	for _, link := range o.store.Links.List() {
+		if o.Flapping(link) {
+			out = append(out, link.ID)
+		}
+	}
+	return out
 }
 
 // Store is the state the brain looks at.

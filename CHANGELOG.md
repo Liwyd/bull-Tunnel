@@ -7,6 +7,25 @@ only adds something.
 
 ## Unreleased
 
+### The web interface of the panel, in Go
+
+`internal/panel/api` is the API the front-end talks to: the same endpoints
+and the same answers as the Python panel, so the interface changes nothing.
+
+- **The security headers of every answer** — the same ones, and the same
+  content security policy — and the websocket that carries the state to the
+  open pages.
+- **The management tool of the machine itself** is let in with the key the
+  panel wrote for it, and only from that machine: an operator can run
+  `bull-tunnel` on the panel's own server without knowing the admin's
+  password.
+- **The secrets are masked on the way out** and the mask is not taken for a
+  new secret on the way in: a panel that is given the mask of the password
+  keeps the password it had.
+
+The endpoints of the backups, of the Telegram test, of the probe and of the
+command channel come with their own work.
+
 ### The brain of the panel, in Go
 
 `internal/panel/orch` is the state machine of the panel: the check cycle,

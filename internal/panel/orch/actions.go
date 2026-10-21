@@ -40,6 +40,29 @@ func (o *Orchestrator) install(server *model.Server) error {
 	return nil
 }
 
+// Install puts the engine on a server.
+func (o *Orchestrator) Install(server *model.Server) {
+	if o.driver == nil {
+		return
+	}
+	version, err := o.driver.EnsureInstalled(server, o.settings().InstallEngine)
+	if err != nil {
+		o.Emit("error", "install", fmt.Sprintf("installing the tunnel engine on %s failed: %v", server.Name, err), true,
+			map[string]string{"server": server.ID})
+		return
+	}
+	server.EngineVersion = version
+	o.Changed()
+}
+
+// Ping asks a server how long it takes to answer.
+func (o *Orchestrator) Ping(server *model.Server) (float64, error) {
+	if o.driver == nil {
+		return 0, fmt.Errorf("the panel has no way to reach the servers")
+	}
+	return o.driver.Ping(server)
+}
+
 // ensureProbe gives a tunnel a probe port: the loopback port the health
 // check opens to prove that the whole path works.
 func (o *Orchestrator) ensureProbe(link *model.Link) error {

@@ -696,6 +696,28 @@ the two panels, and the front-end depends on it.
 * ✅ The fixture `tests/fixtures/state-snapshot.json` holds what the Python
   panel shows for a state ✓, and the Go panel must show the same ✓.
 
+### Commit 22 — the web interface of the panel, in Go  ✅ done
+
+The API the front-end talks to: the same endpoints ✓, the same answers ✓.
+
+* ✅ `internal/panel/api`: the session ✓, the setup ✓, the login ✓, the
+  logout ✓, the state ✓, the layout ✓, the servers ✓, the links ✓, the
+  domains ✓, the DNS accounts ✓, the settings ✓ and the actions ✓ (the
+  check ✓, the scan ✓, the build ✓, the carrier of a tunnel ✓, the record
+  of a domain ✓).
+* ✅ The security headers of every answer ✓ (the same ones as the Python
+  panel ✓, the same policy ✓) and the websocket ✓ that carries the state
+  to the open pages ✓.
+* ✅ The management tool of the machine itself is let in with the key the
+  panel wrote for it ✓, and only from that machine ✓.
+* ✅ The tests: the headers ✓, the session ✓, the login ✓, the collections
+  ✓.
+
+**What is left of phase 7:** the endpoints of the backups ✓, of the
+Telegram test ✓, of the probe ✓ and of the command channel ✓ — they come
+with the command channel's own work ✓ (phase 8 ✓) and with the backups'
+own work ✓.
+
 ### Phase 7 — the API
 
 * `internal/panel/api`: the endpoints of `bulltunn/app.py` ✓, one for
@@ -781,10 +803,11 @@ already work ✓.
 | 19 | The Go rewrite — phase 6 (the orchestrator) | done |
 | 20 | The door of the panel (the auth) | done |
 | 21 | The state the dashboard is shown | done |
-| 22 | The Go rewrite — phase 7 (the api) | **next** |
-| 23 | The Go rewrite — phase 8 (the command) | pending |
-| 24 | The Go rewrite — phase 9 (the switchover) | pending |
-| 25 | The Go rewrite — phase 10 (the dashboard) | later |
+| 22 | The web interface of the panel, in Go | done |
+| 23 | The Go rewrite — phase 7 (the api) | **next** |
+| 24 | The Go rewrite — phase 8 (the command) | pending |
+| 25 | The Go rewrite — phase 9 (the switchover) | pending |
+| 26 | The Go rewrite — phase 10 (the dashboard) | later |
 
 **All the findings of the audit are closed, and the graph is the type-1
 design.** What is left is the Go rewrite above, and the work that never
