@@ -29,7 +29,8 @@ async def test_a_carrier_the_engine_does_not_have_is_never_tested(world):
     carrier that is not there."""
     w = world
     link = w.link(w.i1, w.k1)
-    link.engine_transports = ["tcpmux", "ws"]
+    # the engine on the Iran side speaks these two, and no more
+    w.i1.engine_transports = ["tcpmux", "ws"]
     w.store.settings.candidate_transports = ["tcpmux", "ws", "quic"]
     await connected(w)
     assert set(link.tests) <= {"tcpmux", "ws"}

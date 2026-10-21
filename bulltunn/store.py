@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .engine import RANGE_TO, kharej_dest, listen_ports, target_host
+from .engine import kharej_dest, listen_ports, target_host
 from .models import (
     IRAN,
     KHAREJ,
@@ -334,7 +334,7 @@ class Store:
                     t = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
                     if t not in remote:
                         remote.append(t)
-                elif "=" not in m and not RANGE_TO.match(m) and "-" in m:
+                elif "=" not in m and "-" in m:
                     local += sorted(listen_ports([m], limit=20))  # a plain range: the same ports
                 else:
                     local.append(port)
@@ -351,7 +351,7 @@ class Store:
         if not dest or not k:
             return None
         host, kport = dest
-        if not host and "=" not in mapping and not RANGE_TO.match(mapping):
+        if not host and "=" not in mapping:
             kport = port  # "2053-2060": each port goes to the same port
         if host:
             t = f"[{host}]:{kport}" if ":" in host else f"{host}:{kport}"

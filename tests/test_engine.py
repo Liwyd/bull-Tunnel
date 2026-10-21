@@ -31,8 +31,32 @@ from bulltunn.engine import (
     validate_port_mapping,
     wait_script,
 )
-from bulltunn.models import IRAN, KHAREJ, Link, Server
+from bulltunn.models import ALL_TRANSPORTS, IRAN, KHAREJ, Link, Server
 from bulltunn.store import Store
+
+
+def engine_source(*parts: str) -> str:
+    """The source of the vendored engine, read from the tree."""
+    return (Path(__file__).parent.parent / "engine" / Path(*parts)).read_text()
+
+
+def test_the_panel_offers_exactly_the_carriers_the_engine_speaks():
+    """The panel must never offer a carrier the engine does not have.
+
+    The engine refuses a configuration that names one it does not have, so
+    every discovery would write a config the engine rejects, wait for the
+    tunnel to come up, and only then find out. The engine's list is read
+    from its own source, so the two cannot drift apart unnoticed.
+    """
+    import re
+
+    block = engine_source("main.go").split("var carriers = []string{")[1].split("}")[0]
+    names = re.findall(r"string\(config\.(\w+)\)", block)
+    constants = dict(re.findall(r'(\w+)\s+TransportType = "([^"]+)"', engine_source("config", "config.go")))
+    engine = [constants[n] for n in names]
+    assert sorted(engine) == sorted(ALL_TRANSPORTS)
+    # and every one of them is a carrier the engine really has
+    assert set(engine) <= set(constants.values())
 
 
 def mk():
@@ -140,14 +164,16 @@ def test_parsers():
     assert not parse_wait("FAIL\n").ok
 
 
-def test_the_check_reads_the_carriers_of_the_engine():
-    """The engine writes what it speaks in its metrics file; the panel must
-    never test a carrier the engine does not have."""
-    p = parse_check("@@l1|active|true|1|4210|1|tcp tcpmux ws wsmux wss wssmux stealth\n")
+def test_the_check_reads_the_state_of_the_engine():
+    """The engine writes what it knows in its metrics file; the panel reads
+    the connection state from there. The carriers it speaks come from the
+    engine itself (`bulltunn-engine -v`), not from the metrics file."""
+    p = parse_check("@@l1|active|true|1|4210|1\n")
     assert p["l1"].ok
-    assert p["l1"].transports == ["tcp", "tcpmux", "ws", "wsmux", "wss", "wssmux", "stealth"]
-    p = parse_check("@@l1|active|true|1|4210|1|\n")
-    assert p["l1"].transports == []
+    assert p["l1"].connected is True
+    p = parse_check("@@l1|inactive|false|0|0|0\n")
+    assert not p["l1"].ok
+    assert p["l1"].connected is False
 
 
 def test_store_ports_and_handover_dedupe():

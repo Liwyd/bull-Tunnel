@@ -60,6 +60,19 @@ func (d *dnsAPI) SetTXT(ctx context.Context, name, text string) error {
 	}
 }
 
+// quoteTxt is the text of a TXT record as Cloudflare wants it: a quoted
+// string, with the quotes and the backslashes inside it escaped.
+//
+// The command the panel writes is JSON, so it is full of quotes. A record
+// that is not escaped is not a record: Cloudflare refuses it, and the agent
+// never sees the command. This is the same rule the panel's own DNS client
+// follows — see quote_txt in bulltunn/dns/base.py.
+func quoteTxt(text string) string {
+	out := strings.ReplaceAll(text, `\`, `\\`)
+	out = strings.ReplaceAll(out, `"`, `\"`)
+	return `"` + out + `"`
+}
+
 func (d *dnsAPI) setCloudflare(ctx context.Context, name, text string) error {
 	const api = "https://api.cloudflare.com/client/v4"
 	zid, err := d.cloudflareZone(ctx, api)
@@ -76,11 +89,10 @@ func (d *dnsAPI) setCloudflare(ctx context.Context, name, text string) error {
 	if err := json.Unmarshal(recs, &list); err != nil {
 		return err
 	}
-	// cloudflare wants the text of a TXT record quoted
 	body := map[string]any{
 		"type":    "TXT",
 		"name":    name,
-		"content": `"` + text + `"`,
+		"content": quoteTxt(text),
 		"ttl":     60,
 	}
 	var out []byte

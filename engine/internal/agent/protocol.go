@@ -1,14 +1,20 @@
 // Package agent is the command channel of Bull-Tunn.
 //
-// When not even a TCP handshake is possible, the panel cannot reach a
-// server over SSH. The agent is the way out: it polls a TXT record over
-// ordinary DNS, checks the signature of the command with the token of the
-// tunnel, runs it, and writes the answer into another TXT record.
+// When not even a TCP handshake is possible, the panel cannot reach a server
+// over SSH. The agent is the way out: it polls a TXT record over ordinary
+// DNS, checks the signature of the command with the key the panel and the
+// agent share, runs it, and writes the answer into another TXT record.
 //
 // The commands are signed, so an account that can write in the zone cannot
-// make the agent do anything. The agent only knows a small list of
-// commands, and every name it is given is checked against the files of the
-// tunnel directory: there is no shell anywhere in this package.
+// make the agent do anything. The agent only knows a small list of commands,
+// and every name it is given is checked against the files of the tunnel
+// directory: there is no shell anywhere in this package.
+//
+// This is a Bull-Tunn addition to the BackPack engine: BackPack has no
+// command channel. What it does share with BackPack is the rule that the two
+// ends of a protocol must agree on it byte for byte — the signature below is
+// the Python panel's, down to the last separator, and the test vector in
+// agent_test.go is the one both sides are checked against.
 package agent
 
 import (
@@ -38,11 +44,30 @@ type Answer struct {
 	TS     int64           `json:"ts"`
 }
 
-// Sign computes the signature of a command. The panel and the agent both
-// know the token of the tunnel, so only they can make a valid command.
+// canonicalArgs is the argument list as it is signed.
+//
+// The panel signs the arguments it writes into the record, and it always
+// writes them — an empty list is written as "{}" and not left out. The agent
+// therefore signs exactly what it reads, and an argument list that is missing
+// altogether is read as the empty one, which is what it would have been had
+// it been written.
+//
+// This is the whole reason the two ends agree: the panel used to leave an
+// empty argument list out of the string it signed, and the agent signed the
+// two braces it found in the record. The two never matched, and every command
+// was refused with "not signed with the right token".
+func canonicalArgs(args json.RawMessage) string {
+	if len(args) == 0 {
+		return "{}"
+	}
+	return string(args)
+}
+
+// Sign computes the signature of a command. The panel and the agent both know
+// the key, so only they can make a valid command.
 func Sign(token string, c Command) string {
 	mac := hmac.New(sha256.New, []byte(token))
-	fmt.Fprintf(mac, "%s|%s|%s|%d", c.ID, c.Action, string(c.Args), c.TS)
+	fmt.Fprintf(mac, "%s|%s|%s|%d", c.ID, c.Action, canonicalArgs(c.Args), c.TS)
 	return hex.EncodeToString(mac.Sum(nil))
 }
 

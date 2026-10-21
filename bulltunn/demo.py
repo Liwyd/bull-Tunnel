@@ -22,6 +22,8 @@ class SimNet(Driver):
     holds tunnels "already running" on servers, for scan() to find."""
 
     LAT = {"tcpmux": 40, "wsmux": 55, "tcp": 35, "ws": 60, "stealth": 50, "kcp": 70, "quic": 45}
+    # the carriers the engine speaks: the same list the real engine prints
+    TRANSPORTS = ["tcp", "tcpmux", "stealth", "ws", "wss", "wsmux", "wssmux", "kcp", "quic"]
 
     def __init__(self, jitter: bool = False):
         self.jitter = jitter
@@ -72,7 +74,14 @@ class SimNet(Driver):
     async def ensure_installed(self, s, install=True):
         if s.id in self.dead:
             raise SSHError("down")
+        if not s.engine_transports:
+            s.engine_transports = list(self.TRANSPORTS)
         return "v1.9.0"
+
+    async def engine_info(self, s):
+        if s.id in self.dead:
+            raise SSHError("down")
+        return "v1.9.0", list(s.engine_transports or self.TRANSPORTS)
 
     async def deploy(self, link, iran, kharej, transport, ports):
         if iran.id in self.dead:

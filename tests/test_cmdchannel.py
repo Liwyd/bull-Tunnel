@@ -11,8 +11,8 @@ def test_the_signature_is_the_one_the_engine_computes():
     # the same vector as the test of the engine: both sides must build the
     # very same string, or the agent refuses every command
     cmd = cm.Command(id="abc123", action="status", args={}, ts=1700000000)
-    assert cmd.payload() == "abc123|status||1700000000"
-    assert cm.sign("the-token", cmd) == "977f06684511d88cdbc23d136552838464312635c842e932335ef353a3a25218"
+    assert cmd.payload() == "abc123|status|{}|1700000000"
+    assert cm.sign("the-token", cmd) == "5cc167f05e2ddbc544051150193f9f2072ef2496dd90af5758e4c3dd3e90959c"
     cmd = cm.Command(id="abc123", action="restart", args={"tunnel": "link1"}, ts=1700000000)
     assert cm.sign("the-token", cmd) == "2e7058a61d5cfa0f08bdece43ade5a7b988992d685cd3e7de0d7722031787def"
 

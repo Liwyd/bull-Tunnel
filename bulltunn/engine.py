@@ -72,8 +72,13 @@ ARCH = {
 _SAFE = re.compile(r"^[A-Za-z0-9_.:\-=|,\[\]]+$")
 _NAME = re.compile(r"^[A-Za-z0-9_.\-]+$")
 PROBE_RE = re.compile(r"^127\.0\.0\.1:(\d+)=127\.0\.0\.1:\d+$")
-RANGE_TO = re.compile(r"^(\d+-\d+):(\d+)$")  # "443-600:5201": a range sent to one port
 _TARGET = re.compile(r"^[A-Za-z0-9.\-]+:\d{1,5}$|^\[[0-9A-Fa-f:.]+\]:\d{1,5}$")
+
+# The engine refuses a range wider than this in one mapping, and a whole set
+# wider than this. The panel refuses them first, so the operator is told at
+# the panel and not in the tunnel's log on the server.
+MAX_PORTS_PER_MAPPING = 1024
+MAX_EXPANDED_PORTS = 4096
 
 
 class DeployError(Exception):
@@ -123,10 +128,79 @@ class Found:
         return addr.rsplit(":", 1)[0].strip("[]") if ":" in addr else ""
 
 
+def _check_port_side(text: str, what: str) -> int:
+    """One half of a port mapping: an optional address and a port or a range.
+
+    This is the engine's own grammar (see the port mappings of the BackPack
+    engine): "443", "443-460", "127.0.0.1:443", "[2a01:4f8::1]:443". It
+    returns how many ports the side covers.
+    """
+    text = text.strip()
+    if not text:
+        raise ValueError(f"the {what} side of a port mapping is empty")
+    if text.startswith("["):
+        end = text.find("]")
+        if end < 0 or end + 1 >= len(text) or text[end + 1] != ":":
+            raise ValueError(f"invalid port mapping: {text!r} is not a bracketed [address]:port")
+        rest = text[end + 2 :]
+    elif text.count(":") > 1:
+        raise ValueError(f"invalid port mapping: {text!r} looks like an IPv6 address; write it as [address]:port")
+    elif ":" in text:
+        rest = text.split(":", 1)[1]
+    else:
+        rest = text
+    lo, sep, hi = rest.partition("-")
+    try:
+        low = int(lo)
+    except ValueError:
+        raise ValueError(f"invalid port mapping: {text!r} has no port") from None
+    if not 1 <= low <= 65535:
+        raise ValueError(f"invalid port mapping: {text!r} has no port between 1 and 65535")
+    if not sep:
+        return 1
+    try:
+        high = int(hi)
+    except ValueError:
+        raise ValueError(f"invalid port mapping: {text!r} is not a port range") from None
+    if not 1 <= high <= 65535 or high < low:
+        raise ValueError(f"invalid port mapping: {text!r} is not a port range")
+    if high - low + 1 > MAX_PORTS_PER_MAPPING:
+        raise ValueError(f"invalid port mapping: {text!r} asks for more than {MAX_PORTS_PER_MAPPING} ports")
+    return high - low + 1
+
+
 def validate_port_mapping(p: str) -> str:
+    """Check a port mapping against the engine's grammar.
+
+    The forms the engine understands are:
+
+        443                       this server :443 -> the far end :443
+        443=2096                  a different port at the far end
+        443=127.0.0.1:2096        the same, written out
+        443=10.0.0.5:8443         an explicit host the far end can reach
+        443=10.0.0.1:80|10.0.0.2:80   two backends
+        10000-10009               a range, each port to the same port
+        10000-10009=20000-20009   a range, preserving the offset
+        127.0.0.1:443=2096        a listener bound to one local address
+        [2a01:4f8::1]:443=2096    the same, with an IPv6 address
+
+    A mapping the engine cannot read is refused here, at the panel, where the
+    operator can see why — instead of being written to the server and refused
+    by the tunnel in its log.
+    """
     p = p.strip()
     if not p or not _SAFE.match(p):
         raise ValueError(f"invalid port mapping: {p!r}")
+    left, _, right = p.partition("=")
+    count = _check_port_side(left, "listening")
+    if right:
+        alternatives = [a for a in right.split("|") if a.strip()]
+        if not alternatives:
+            raise ValueError(f"invalid port mapping: {p!r} has no target")
+        if len(alternatives) > 1 and count > 1:
+            raise ValueError(f"invalid port mapping: {p!r} — a port range cannot have several backends")
+        for alt in alternatives:
+            _check_port_side(alt, "target")
     return p
 
 
@@ -266,10 +340,9 @@ def check_script(links: list[Link]) -> str:
         parts.append(
             f"""a=$(systemctl is-active {u} 2>/dev/null)
 c=$(grep -o '"connected": *[a-z]*' {CONF_DIR}/{n}.metrics.json 2>/dev/null | grep -o '[a-z]*$')
-t=$(grep -o '"transports":[^]]*]' {CONF_DIR}/{n}.metrics.json 2>/dev/null | sed -e 's/.*\\[//' -e 's/\\]//' -e 's/"//g' -e 's/,/ /g')
 {probe}
 e=$(cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk '{{ split($2,a,":"); if (a[2]=="{x.tunnel_port:04X}" && $4=="01") n++ }} END {{ print n+0 }}')
-echo "@@{x.id}|$a|$c|$p|$(( (t1-t0)/1000 ))|$e|$t"
+echo "@@{x.id}|$a|$c|$p|$(( (t1-t0)/1000 ))|$e"
 """
         )
     return "".join(parts)
@@ -285,7 +358,6 @@ def parse_check(out: str, links: dict[str, Link] | None = None) -> dict[str, Pro
             continue
         lid, active, conn, ok, us = parts[:5]
         estab = int(parts[5]) if len(parts) > 5 and parts[5].strip().isdigit() else 0
-        transports = [t for t in (parts[6] if len(parts) > 6 else "").split() if t]
         connected = None if conn == "" else conn == "true"
         if ok in ("0", "1"):
             good = ok == "1"
@@ -294,7 +366,6 @@ def parse_check(out: str, links: dict[str, Link] | None = None) -> dict[str, Pro
                 active=active,
                 connected=connected,
                 latency_ms=round(int(us) / 1000, 1) if good and us.isdigit() else None,
-                transports=transports,
             )
             continue
         # no probe port: infer from the engine, then from the socket table
@@ -308,7 +379,7 @@ def parse_check(out: str, links: dict[str, Link] | None = None) -> dict[str, Pro
             good = estab > 0
         else:
             good = True  # a running datagram tunnel we cannot see into
-        res[lid] = Probe(ok=good, active=active, connected=connected, verified=False, transports=transports)
+        res[lid] = Probe(ok=good, active=active, connected=connected, verified=False)
     return res
 
 
@@ -378,9 +449,12 @@ def listen_ports(mappings: list[str], limit: int = 5000) -> set[int]:
     out: set[int] = set()
     for m in mappings:
         left = m.split("=", 1)[0].strip()
-        rng = RANGE_TO.match(left)
-        port = rng.group(1) if rng else left.rsplit(":", 1)[-1]
-        lo, _, hi = port.partition("-")
+        # the address, when there is one, is dropped: the port is what is bound
+        if left.startswith("["):
+            left = left.split("]", 1)[-1].lstrip(":")
+        else:
+            left = left.rsplit(":", 1)[-1]
+        lo, _, hi = left.partition("-")
         try:
             a, b = int(lo), int(hi or lo)
         except ValueError:
@@ -412,15 +486,16 @@ def target_host(t: str) -> str:
 def kharej_dest(mapping: str) -> tuple[str, int] | None:
     """Where the kharej side delivers a forwarded port: (host, port), host ""
     for the kharej itself. "443" -> ("", 443), "8443=2096" -> ("", 2096),
-    "443=1.2.3.4:5201" -> ("1.2.3.4", 5201), "443-600:5201" -> ("", 5201)."""
+    "443=1.2.3.4:5201" -> ("1.2.3.4", 5201)."""
     m = mapping.strip()
     host = ""
     if "=" in m:
         right = m.split("=", 1)[1].strip()
+        # several backends: the panel shows the first one
+        right = right.split("|")[0].strip()
         host, _, port = right.rpartition(":")
     else:
-        rng = RANGE_TO.match(m)
-        port = rng.group(2) if rng else m.rsplit(":", 1)[-1]
+        port = m.rsplit(":", 1)[-1]
     port = port.split("-")[0]
     host = "" if is_local(host) else host.strip("[]")
     try:
@@ -633,6 +708,15 @@ class Driver:
 
     async def ping(self, s: Server) -> float: ...
     async def ensure_installed(self, s: Server, install: bool = True) -> str: ...
+
+    async def engine_info(self, s: Server) -> tuple[str, list[str]]:
+        """The version of the engine on the server and the carriers it speaks.
+
+        The carriers are what the panel tests a tunnel with and repairs it
+        with: the engine prints the ones it has, so the panel never tries one
+        this build does not have.
+        """
+        return "", []
     async def deploy(self, link: Link, iran: Server, kharej: Server, transport: str, ports: list[str]) -> None: ...
     async def deploy_iran(self, link: Link, iran: Server, kharej: Server, ports: list[str]) -> None: ...
     async def stop(self, link: Link, iran: Server | None, kharej: Server | None) -> None: ...
@@ -677,7 +761,12 @@ class SSHDriver(Driver):
 
     # ---- install -------------------------------------------------------
     async def installed_version(self, s: Server) -> tuple[str, str, list[str]]:
-        """The machine, the version of the engine and the carriers it speaks."""
+        """The machine, the version of the engine and the carriers it speaks.
+
+        The engine prints two lines with -v: its version, and the carriers
+        this build speaks. The panel reads both, and never tests a carrier
+        the engine does not have.
+        """
         r = await self.pool.run(
             s,
             f"uname -m; test -x {BIN_PATH} && {BIN_PATH} -v 2>/dev/null | head -n2 || echo MISSING",
@@ -686,6 +775,11 @@ class SSHDriver(Driver):
         lines = r.out.strip().splitlines() + ["", "", ""]
         transports = [t.strip() for t in lines[2].replace("transports:", "").split(",") if t.strip()]
         return lines[0].strip(), lines[1].strip(), transports
+
+    async def engine_info(self, s: Server) -> tuple[str, list[str]]:
+        """The version of the engine on the server and the carriers it speaks."""
+        _, ver, transports = await self.installed_version(s)
+        return ver, transports
 
     def _artifact_urls(self, name: str) -> tuple[str, str]:
         """(tarball, checksums) for the configured release.
@@ -732,7 +826,10 @@ class SSHDriver(Driver):
         raise DeployError(f"no bulltunn-engine binary in {name}")
 
     async def ensure_installed(self, s: Server, install: bool = True) -> str:
-        machine, ver, _ = await self.installed_version(s)
+        machine, ver, transports = await self.installed_version(s)
+        # The carriers this engine speaks are remembered on the server: they
+        # are what the panel tests a tunnel with.
+        s.engine_transports = transports or s.engine_transports
         if ver and ver != "MISSING":
             return ver
         if not install:
@@ -743,7 +840,8 @@ class SSHDriver(Driver):
         data = await self._binary(arch)
         await self.pool.run(s, f"mkdir -p {CONF_DIR} && chmod 700 {CONF_DIR}")
         await self.pool.put(s, data, BIN_PATH, 0o755)
-        _, ver, _ = await self.installed_version(s)
+        _, ver, transports = await self.installed_version(s)
+        s.engine_transports = transports or s.engine_transports
         if not ver or ver == "MISSING":
             raise DeployError(f"the tunnel engine did not run after install on {s.name}")
         return ver

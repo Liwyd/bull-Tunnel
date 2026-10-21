@@ -178,9 +178,17 @@ class Orchestrator:
         return link.flapping(self.s.flap_window, self.s.flap_count)
 
     def supported(self, link: Link, candidates: list[str]) -> list[str]:
-        """Never test a carrier the engine on the Iran side does not speak:
-        the engine reports what it has in its metrics file."""
-        known = link.engine_transports
+        """Never test a carrier the engine on the Iran side does not speak.
+
+        The engine prints the carriers it has with `bulltunn-engine -v`, and
+        the panel reads them from the server. A carrier this build does not
+        have would be written to the config, refused by the engine, and every
+        discovery would waste a full test timeout on it.
+        """
+        iran, _ = self.pair(link)
+        known = list(iran.engine_transports) if iran else []
+        if not known:
+            known = list(link.engine_transports)
         if not known:
             return candidates
         out = [t for t in candidates if t in known]
@@ -213,9 +221,14 @@ class Orchestrator:
 
     # ------------------------------------------------------------ deployment
     async def _install(self, srv: Server) -> None:
-        if srv.engine_version:
+        if srv.engine_version and srv.engine_transports:
             return
-        srv.engine_version = await self.driver.ensure_installed(srv, self.s.install_engine)
+        if not srv.engine_version:
+            srv.engine_version = await self.driver.ensure_installed(srv, self.s.install_engine)
+        else:
+            _, transports = await self.driver.engine_info(srv)
+            if transports:
+                srv.engine_transports = transports
 
     async def _ensure_probe(self, link: Link) -> None:
         if link.probe_port:
@@ -682,6 +695,10 @@ class Orchestrator:
                 except (SSHError, OSError) as e:
                     log.info("check %s: %s", iran_id, e)
             for link in links:
+                # the carriers the engine on the Iran side speaks: what the
+                # tunnel may be built with, and what the panel shows
+                if iran and iran.engine_transports:
+                    link.engine_transports = list(iran.engine_transports)
                 if link.id in self.busy:
                     continue
                 await self._apply_probe(link, probes.get(link.id))
@@ -692,8 +709,6 @@ class Orchestrator:
         t = time.time()
         if p is not None:
             self.last_probe[link.id] = p
-            if p.transports:
-                link.engine_transports = p.transports
         if p is not None and p.ok:
             was = link.status
             self.prev_ok[link.id] = True

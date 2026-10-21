@@ -22,9 +22,14 @@ L_UP = "up"  # tunnel carries traffic
 L_DEGRADED = "degraded"  # failing, but not for long enough to act on
 L_DOWN = "down"
 
-# Transports a reverse tunnel can run on that carry TCP and need no
-# extra setup (wss/wssmux fall back to a self-signed certificate). "udp" only
+# Transports a reverse tunnel can run on that carry TCP and need no extra
+# setup (wss/wssmux fall back to a self-signed certificate). "udp" only
 # carries UDP and cannot be probed with TCP, so it is not offered.
+#
+# This list must be the carriers the engine speaks: the engine prints them
+# with `bulltunn-engine -v`, the panel reads them from the server and never
+# tests a carrier the engine does not have. The two lists are checked by
+# tests/test_engine.py.
 ALL_TRANSPORTS = ["tcpmux", "wsmux", "tcp", "ws", "stealth", "kcp", "quic", "wssmux", "wss"]
 DEFAULT_TRANSPORTS = ["tcpmux", "wsmux", "tcp", "ws", "stealth", "kcp", "quic"]
 TCP_TRANSPORTS = {"tcp", "tcpmux", "ws", "wss", "wsmux", "wssmux", "stealth"}
@@ -76,6 +81,9 @@ class Server(Model):
     last_seen: float = 0
     ssh_latency_ms: float | None = None
     engine_version: str = ""
+    # the carriers the engine on this server speaks, as it reports them with
+    # `bulltunn-engine -v`. Empty = not known yet, so everything may be tried.
+    engine_transports: list[str] = field(default_factory=list)
     error: str = ""
     fail_count: int = 0
     last_scan: float = 0

@@ -8,6 +8,11 @@
 #   bulltunn-engine_linux_armv7.tar.gz   the binary for the arm servers
 #   SHA256SUMS                           the checksums of all of them
 #
+# The engine is the BackPack engine (github.com/AminMGMT/BackPack), vendored
+# under engine/ with its module path kept as github.com/backpack/backpack so
+# the copy can be re-synced with a plain rsync. This script builds that code
+# into a binary the panel can push to the servers; it changes nothing of it.
+#
 # The build is hermetic: the dependencies are vendored, so no network is
 # needed and the result is the same everywhere.
 #
@@ -16,7 +21,9 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="${1:-$HERE/dist}"
-VERSION="$(grep -oE 'Version = "[^"]+"' "$HERE/cmd/bulltunn-engine/main.go" | head -n1 | cut -d'"' -f2)"
+# the engine and the panel are released together and carry the same version
+VERSION="$(grep -oE '__version__ = "[^"]+"' "$HERE/../bulltunn/__init__.py" | head -n1 | cut -d'"' -f2)"
+[ -n "$VERSION" ] || { echo "cannot read the version from bulltunn/__init__.py"; exit 1; }
 
 export CGO_ENABLED=0
 export GOFLAGS=-mod=vendor
@@ -40,9 +47,9 @@ for t in "${TARGETS[@]}"; do
   goarm="${rest##*:}"
   binary="bulltunn-engine"
   if [ "$goarch" = "arm" ]; then
-    GOARM="$goarm" GOOS=linux GOARCH=arm go build -trimpath -ldflags "-s -w -X main.Version=$VERSION" -o "$OUT/$binary" ./cmd/bulltunn-engine
+    GOARM="$goarm" GOOS=linux GOARCH=arm go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$OUT/$binary" .
   else
-    GOOS=linux GOARCH="$goarch" go build -trimpath -ldflags "-s -w -X main.Version=$VERSION" -o "$OUT/$binary" ./cmd/bulltunn-engine
+    GOOS=linux GOARCH="$goarch" go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$OUT/$binary" .
   fi
   tar -C "$OUT" -czf "$OUT/bulltunn-engine_linux_${name}.tar.gz" "$binary"
   rm -f "$OUT/$binary"

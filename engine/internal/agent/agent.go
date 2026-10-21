@@ -22,7 +22,8 @@ type Config struct {
 	// one it writes. Both are full names.
 	CommandRecord string `toml:"command_record"`
 	AnswerRecord  string `toml:"answer_record"`
-	// Token is the key of the signature: the token of the tunnel.
+	// Token is the key of the signature: the key the panel and the agent
+	// share, and nobody else.
 	Token string `toml:"token"`
 	// The provider the answer is written with. It should be a zone of its
 	// own: a server that is broken must not be able to touch the records
@@ -54,7 +55,7 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("the agent needs both a command and an answer record")
 	}
 	if c.Token == "" {
-		return nil, fmt.Errorf("the agent needs the token of the tunnel")
+		return nil, fmt.Errorf("the agent needs the key it shares with the panel")
 	}
 	if c.PollSeconds <= 0 {
 		c.PollSeconds = 30
@@ -239,11 +240,11 @@ func (a *Agent) system() map[string]any {
 }
 
 func hostname() string {
-	b, err := os.Hostname()
+	h, err := os.Hostname()
 	if err != nil {
 		return ""
 	}
-	return b
+	return h
 }
 
 func uptime() float64 {

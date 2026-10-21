@@ -47,8 +47,15 @@ class Command:
 
     def payload(self) -> str:
         """The bytes the signature is made of. The engine computes the very
-        same string."""
-        args = json.dumps(self.args, separators=(",", ":"), sort_keys=True) if self.args else ""
+        same string.
+
+        The arguments are always part of it, even when there are none: they
+        are written into the record as "{}" and the engine signs what it
+        finds there. The panel used to leave the empty list out of the string
+        it signed, so the two sides never agreed and every command was
+        refused with "not signed with the right token".
+        """
+        args = json.dumps(self.args or {}, separators=(",", ":"), sort_keys=True)
         return f"{self.id}|{self.action}|{args}|{int(self.ts)}"
 
 

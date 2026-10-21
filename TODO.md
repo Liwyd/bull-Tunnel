@@ -132,25 +132,37 @@ them.
 ### Commit 1 — this file
 `TODO.md`: the audit, the standing rules and the commit plan.
 
-### Commit 2 — the engine is BackPack
-* Delete the hand-written engine (`engine/internal/proto`, `engine/internal/carrier`,
-  `engine/internal/tunnel`, `engine/internal/config`, `engine/internal/probe`,
-  `engine/internal/metrics`, `engine/internal/agent`).
-* Vendor the BackPack engine into `engine/`: the packages the engine mode
-  needs, byte-identical to upstream, with the module path kept as
-  `github.com/backpack/backpack` so the copy can be re-synced with a plain
-  `rsync`.
-* `engine/main.go`: the `bulltunn-engine` binary — engine mode (`-c`), `-v`
-  (version + the carriers this build speaks), `probe` (path measurement, one
-  JSON line per carrier) and `agent` (the DNS command channel).
-* The metrics snapshot grows one field, `transports`, so the panel learns the
-  carriers from the running engine (finding 53).
-* The agent is rewritten on top of BackPack's own publisher code and its
-  signature is made identical on both sides (findings 2 and 3).
-* The panel's `engine.py` follows the new binary: the paths, the release
-  layout, the transports it reads, and the probe it calls.
-* Tests: the Go tests of the vendored engine, plus a Python test of the
-  new engine contract.
+### Commit 2 — the engine is BackPack  ✅ done
+
+* ✅ The hand-written engine is gone (`internal/proto`, `internal/carrier`,
+  `internal/tunnel`, `internal/config`, `internal/probe`, `internal/metrics`,
+  `internal/agent`).
+* ✅ BackPack's engine is vendored into `engine/`: `cmd/`, `config/`,
+  `internal/client`, `internal/server`, `internal/tunnel/*`,
+  `internal/utils/*`, `internal/metrics`, `internal/controlwire`,
+  `internal/enginectl`, `internal/optimize`, `internal/quota`,
+  `internal/socks`, `internal/web`, `internal/app`, `internal/debugserver`,
+  `internal/snispoof`, `internal/testport` — unchanged, with the module path
+  kept as `github.com/backpack/backpack` so the copy can be re-synced with a
+  plain `rsync`.
+* ✅ `engine/main.go`: the `bulltunn-engine` binary — engine mode (`-c`),
+  `-check`, `-v` (the version **and** the carriers), `probe` and `agent`.
+* ✅ `engine/internal/client/transport/probe.go`: the path measurement. It
+  opens a carrier the way the tunnel's own client opens it and closes it
+  again **without claiming the control channel** — a claim would make the
+  server take the tunnel away from the client that is carrying the traffic.
+* ✅ `engine/internal/agent/`: the command channel, with the signature the
+  panel computes (the empty argument list is `{}` on both sides) and the TXT
+  record escaped the way Cloudflare wants it.
+* ✅ The panel follows: `models.py` (the carriers, `Server.engine_transports`),
+  `engine.py` (the carriers are read from `-v`, the port mappings are checked
+  against the engine's grammar), `orchestrator.py`, `probe.py` (the IPv6
+  brackets, the transport filter, the file is cleaned up), `demo.py`.
+* ✅ `engine/build.sh` builds the module root; the CI builds it with Go 1.27.
+* ✅ Tests: the Go tests of the vendored engine all pass, and a new Python
+  test proves the panel offers exactly the carriers the engine speaks.
+
+**Findings closed by this commit:** 1, 2, 3, 4, 16, 17, 18, 53 (partly).
 
 ### Commit 3 — the critical panel bugs
 Findings 5, 6, 7, 8, 9, 10, 11.
@@ -179,12 +191,23 @@ The whole suite, the README, the CHANGELOG and `docs/engine-schema.md`.
 | Commit | What | State |
 |---|---|---|
 | 1 | `TODO.md` | done |
-| 2 | The engine is BackPack | pending |
+| 2 | The engine is BackPack | done |
 | 3 | The critical panel bugs | pending |
 | 4 | The medium panel bugs | pending |
 | 5 | The front-end | pending |
 | 6 | Tests, docs, changelog | pending |
 
-**Next up (commit 2):** vendor BackPack's engine into `engine/`, write
-`engine/main.go` (engine mode, `-v`, `probe`, `agent`), add `transports` to
-the metrics snapshot, and adapt `bulltunn/engine.py` to the new binary.
+**Next up (commit 3):** the critical panel bugs.
+
+1. `bulltunn/ssh.py`: a malformed private key must become an `SSHError`, and
+   the check cycle must survive any exception a server can throw.
+2. `bulltunn/store.py` + `bulltunn/orchestrator.py`: the cleanup of a deleted
+   server must run while the server is still known.
+3. `bulltunn/store.py`: the domain's primary must be honoured with a manual
+   group, and the snapshot must not overwrite it.
+4. `bulltunn/app.py`: the host key must only be forgotten when the operator
+   really cleared it.
+5. `bulltunn/auth.py` + `bulltunn/store.py`: a corrupt file must be reported,
+   not crash the panel.
+6. `bulltunn/app.py`: the handover release must answer 404, not 500.
+

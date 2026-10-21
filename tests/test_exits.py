@@ -95,8 +95,9 @@ def test_kharej_side_of_a_mapping():
     assert kharej_dest("8443=2096") == ("", 2096)
     assert kharej_dest("443=1.2.3.4:5201") == ("1.2.3.4", 5201)
     assert kharej_dest("127.0.0.2:443=127.0.0.1:22") == ("", 22)
-    assert kharej_dest("443-600:5201") == ("", 5201)
-    assert listen_ports(["443-445:5201"]) == {443, 444, 445}
+    assert kharej_dest("443=10.0.0.1:80|10.0.0.2:80") == ("10.0.0.1", 80)
+    assert listen_ports(["443-445"]) == {443, 444, 445}
+    assert listen_ports(["127.0.0.1:61000=127.0.0.1:22"]) == {61000}
 
 
 def test_script_only_quotes_valid_targets():

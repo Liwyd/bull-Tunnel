@@ -45,6 +45,14 @@ def target_link(store: Store, iran: Server, kharej: Server) -> tuple[Link | None
 
 
 def build_config(addr: str, token: str) -> str:
+    """The file the engine reads on the far side.
+
+    The address is bracketed when it is an IPv6 one: the engine splits the
+    address at the last colon, so an unbracketed one would be read as a port
+    of "::1" and the dial would go nowhere.
+    """
+    if ":" in addr and not addr.startswith("["):
+        addr = f"[{addr}]"
     return (
         "# Written by the Bull-Tunn panel for a connection test.\n"
         '[client]\n'
@@ -104,18 +112,29 @@ async def measure(
             "results": [],
         }
     if not transports:
-        transports = list(store.settings.candidate_transports)
+        # the carriers this engine build speaks, and the ones the panel is
+        # configured to try: the intersection of the two, so the measurement
+        # never spends its time on a carrier the engine does not have
+        known = list(getattr(iran, "engine_transports", []) or [])
+        candidates = [t for t in store.settings.candidate_transports if not known or t in known]
+        transports = candidates or list(store.settings.candidate_transports)
     token = link.token
     body = build_config(addr, token)
+    only = ",".join(t for t in transports if t)
+    cmd = f"{BIN_PATH} probe -c {PROBE_CONFIG} --samples 3"
+    if only:
+        cmd += f" --transports {only}"
     try:
         await driver.put_file(kharej, PROBE_CONFIG, body.encode(), 0o600)
-        code, out, err = await driver.run(
-            kharej,
-            f"{BIN_PATH} probe -c {PROBE_CONFIG} --samples 3",
-            timeout=PROBE_TIMEOUT,
-        )
+        code, out, err = await driver.run(kharej, cmd, timeout=PROBE_TIMEOUT)
     except Exception as e:  # the server is unreachable, the engine is missing
         return {"ok": False, "error": str(e), "results": []}
+    finally:
+        # the file is only needed while the engine reads it
+        try:
+            await driver.run(kharej, f"rm -f {PROBE_CONFIG}", timeout=10)
+        except Exception:
+            pass
     results = parse(out)
     if not results:
         detail = (err or out).strip()
