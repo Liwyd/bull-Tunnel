@@ -570,6 +570,10 @@ func (s *Server) providerByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
+	if len(parts) > 1 && parts[1] == "verify" {
+		s.verifyProvider(w, provider)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{"provider": s.providerBody(provider)})
@@ -594,6 +598,21 @@ func (s *Server) providerByID(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+// verifyProvider checks the credentials and the zone of a DNS account.
+func (s *Server) verifyProvider(w http.ResponseWriter, provider *model.DNSProvider) {
+	client, err := s.dnsClient(provider)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	detail, err := client.Verify()
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "detail": detail})
 }
 
 // providerBody is a DNS account as the panel sends and receives it.

@@ -7,6 +7,19 @@ only adds something.
 
 ## Unreleased
 
+### The API of the panel is complete
+
+Every endpoint of the Python panel is there, one for one, with the same
+answers: the session, the setup, the login, the logout, the state, the
+layout, the servers, the links, the domains, the DNS accounts, the settings,
+the measurement of the path, the command channel, the Telegram test and the
+backups — and the actions: the check, the scan, the build, the carrier of a
+tunnel, the record of a domain and the verification of a DNS account.
+
+The websocket carries the state to the open pages, every answer carries the
+security headers, and the management tool of the machine itself is let in
+with the key the panel wrote for it, and only from that machine.
+
 ### The declared dependencies cannot pull a vulnerable version
 
 The floors of the dependencies were old enough to allow versions with known

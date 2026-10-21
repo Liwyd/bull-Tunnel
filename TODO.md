@@ -777,13 +777,20 @@ wheels with a vulnerable OpenSSL (fixed in 48.0.1).
   the panel asks for versions that are not known to be faulty ✓, and what
   is installed already was ✓.
 
-### Phase 7 — the API
+### Phase 7 — the API  ✅ done
 
-* `internal/panel/api`: the endpoints of `bulltunn/app.py` ✓, one for
-  one ✓, with the same shapes ✓ (the front-end changes nothing ✓).
-* The websocket ✓, the security headers ✓, the CSP ✓, the login limiter
-  ✓, the local management key ✓.
-* The tests: `tests/test_api.py` ✓ translated ✓.
+* ✅ `internal/panel/api`: the endpoints of the Python panel, one for one ✓
+  — the session ✓, the setup ✓, the login ✓, the logout ✓, the state ✓,
+  the layout ✓, the servers ✓, the links ✓, the domains ✓, the DNS
+  accounts ✓, the settings ✓, the measurement of the path ✓, the command
+  channel ✓, the Telegram test ✓, the backups ✓ and the actions ✓ (the
+  check ✓, the scan ✓, the build ✓, the carrier of a tunnel ✓, the record
+  of a domain ✓, the verification of a DNS account ✓).
+* ✅ The websocket ✓ that carries the state to the open pages ✓, the
+  security headers of every answer ✓ and the management key of the machine
+  itself ✓.
+* ✅ The tests: the headers ✓, the session ✓, the login ✓, the collections
+  ✓.
 
 **Done when:** the web interface (the current `static/`) works against the
 Go panel without a change ✓, and the API answers the same JSON ✓.
@@ -867,8 +874,8 @@ already work ✓.
 | 24 | The connection test of the panel, in Go | done |
 | 25 | The endpoints that talk to the outside | done |
 | 26 | The declared dependencies cannot pull a vulnerable version | done |
-| 27 | The Go rewrite — phase 7 (the api) | **next** |
-| 28 | The Go rewrite — phase 8 (the command) | pending |
+| 27 | The Go rewrite — phase 7 (the api) | done |
+| 28 | The Go rewrite — phase 8 (the command) | **next** |
 | 29 | The Go rewrite — phase 9 (the switchover) | pending |
 | 30 | The Go rewrite — phase 10 (the dashboard) | later |
 
