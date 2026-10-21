@@ -1,4 +1,11 @@
-/* Bull-Tunn dashboard — vanilla JS, live over WebSocket. */
+/* Bull-Tunn panel — vanilla JS, live over WebSocket.
+
+   The layout follows the type-2 design ("Precision Routing"): a left
+   sidebar, a breadcrumb bar, numbered sections, square corners and a
+   monospace face for every number. The network flow graph keeps the
+   structure of the type-1 design (three server columns, pills on the
+   wires, the legend) inside the type-2 palette.
+*/
 "use strict";
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -13,18 +20,33 @@ const FA = {
   up: "Up", degraded: "Unstable", down: "Down", testing: "Testing", pending: "Not built",
   online: "Online", offline: "Offline", unknown: "Unknown", ok: "Healthy", broken: "Broken",
 };
-const COL_X = { kharej: 0, iran: 440, domain: 880 };
-const COL_TITLE = { kharej: "Foreign servers", iran: "Iran servers", domain: "Domains" };
-const NODE_W = 250;
+const COL_X = { kharej: 0, iran: 400, domain: 800 };
+const COL_TITLE = { kharej: "Exit servers", iran: "Ingress servers", domain: "DNS domains" };
+const COL_KICKER = { kharej: "EXIT", iran: "INGRESS", domain: "DNS" };
+const NODE_W = 232;
 
-let S = null;          // last state from the server
-let skew = 0;          // server clock - local clock (s)
+const VIEWS = {
+  network: { title: "Network view" },
+  tunnels: { title: "Tunnels & protocols" },
+  domains: { title: "Domains" },
+  infrastructure: { title: "Infrastructure" },
+  settings: { title: "System settings" },
+};
+
+let S = null;              // last state from the server
+let skew = 0;              // server clock - local clock (s)
 let events = [];
 let evFilter = "all";
-let drawer = null;     // {type, id}
+let drawer = null;         // {type, id}
 let selTransport = null;
-let groupDraft = null; // {manual, ids} while editing a domain's group
+let groupDraft = null;     // {manual, ids} while editing a domain's group
 let ws = null, wsAlive = false;
+let view = "network";
+let netQuery = "";
+let netFilter = "all";
+let selectedDomain = "";   // the domain open on the domains page
+let selNode = null;        // the node picked in the flow graph
+let selLink = null;        // the tunnel picked in the flow graph
 
 /* ------------------------------------------------------------------ api */
 async function api(method, path, body) {
@@ -71,7 +93,6 @@ const provider = (id) => S.providers.find((p) => p.id === id);
 const nowS = () => Date.now() / 1000 + skew;
 const linkName = (l) => (l ? `${nm(l.kharej_id)} ⇄ ${nm(l.iran_id)}` : "—");
 const linkTag = (l) => (l && l.label ? ` (${l.label})` : "");
-// where a port finally leaves from, when the kharej sends it on (only shown)
 const exitName = (t) => (t.server_id ? nm(t.server_id) : t.addr);
 const exitText = (e) => (e ? e.targets.map(exitName).join(", ") : "");
 const exitBad = (e) => !!e && e.targets.some((t) => t.ok === false);
@@ -125,14 +146,23 @@ function spark(history, w = 110, h = 22) {
   });
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block">${fails}<path d="${d}" fill="none" stroke="var(--muted)" stroke-width="1.4"/></svg>`;
 }
+const ICON = {
+  add: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>`,
+  scan: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/></svg>`,
+  check: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12.5l5 5L20 6.5"/></svg>`,
+  zap: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13 2L4.5 13.5H11L10 22l8.5-11.5H12z"/></svg>`,
+  refresh: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v4h-4"/></svg>`,
+  edit: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20h4l10-10-4-4L4 16z"/></svg>`,
+  trash: `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>`,
+};
 
 /* ------------------------------------------------------------------ boot */
 async function boot() {
   let sess;
   try { sess = await api("GET", "/api/session"); } catch (e) { toast(e.message, "error"); return; }
-  $("#ver").textContent = `v${sess.version}`;
+  $("#ss-ver").textContent = `v${sess.version}`;
   if (!sess.logged_in) return showAuth(sess.configured);
-  startApp();
+  startApp(sess);
 }
 
 function showAuth(configured = true) {
@@ -152,24 +182,27 @@ function showAuth(configured = true) {
 }
 
 let firstState = true;
-function startApp() {
+function startApp(sess) {
   $("#auth").classList.add("hidden");
   $("#app").classList.remove("hidden");
+  if (sess) $("#ss-user").textContent = sess.username || "admin";
   api("GET", "/api/state").then((st) => {
     events = st.events || [];
     setState(st);
     renderEvents();
   }).catch(() => {});
   connectWS();
+  route();
 }
 
 function connectWS() {
   if (ws) try { ws.close(); } catch (_) { /* ignore */ }
   const proto = location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${proto}://${location.host}/ws`);
-  ws.onopen = () => { wsAlive = true; $("#live").classList.add("on"); };
+  ws.onopen = () => { wsAlive = true; $("#live").classList.add("on"); $("#live-text").textContent = "Live"; };
   ws.onclose = (e) => {
     wsAlive = false; $("#live").classList.remove("on");
+    $("#live-text").textContent = "Reconnecting…";
     if (e.code === 4401) return showAuth();
     setTimeout(connectWS, 2500);
   };
@@ -193,144 +226,242 @@ function setState(st) {
 
 function renderAll() {
   if (!S) return;
-  renderStats();
-  renderCanvas();
+  renderSide();
+  renderStrip();
+  renderFlow();
   renderTable();
+  renderTunnels();
+  renderDomains();
+  renderInfra();
+  renderSettings();
   renderEmpty();
   renderDrawer();
 }
 
-/* ----------------------------------------------------------------- stats */
-function renderStats() {
+/* ---------------------------------------------------------------- router */
+function route() {
+  const id = (location.hash || "").replace(/^#\//, "") || "network";
+  view = VIEWS[id] ? id : "network";
+  for (const p of $$(".page")) p.hidden = p.id !== `view-${view}`;
+  for (const a of $$("#nav a")) a.classList.toggle("on", a.dataset.view === view);
+  $("#crumb-page").textContent = VIEWS[view].title;
+  document.title = `Bull-Tunn · ${VIEWS[view].title}`;
+  if (view === "network") requestAnimationFrame(() => { drawWires(); fit(); });
+}
+window.addEventListener("hashchange", route);
+
+/* --------------------------------------------------------------- sidebar */
+function renderSide() {
+  const on = S.servers.filter((s) => s.status === "online").length;
+  const deg = S.links.filter((l) => lstatus(l) === "degraded").length + S.flapping.length;
+  const dom = S.domains.filter((d) => d.status === "ok").length;
+  $("#ss-on").textContent = `${on} / ${S.servers.length}`;
+  $("#ss-deg").textContent = String(deg);
+  $("#ss-dom").textContent = String(dom);
+  $("#ss-user").textContent = (S.username || "admin");
+  $("#ss-ver").textContent = `v${S.version}`;
+  const foot = S.demo ? "demo environment" : "production";
+  const sync = S.last_check ? `last check ${ago(S.last_check)}` : "waiting for the first check";
+  $("#foot-note").innerHTML = `<span class="label" style="color:var(--muted)">${esc(foot.toUpperCase())}</span><span>·</span><span>${esc(sync)}</span>`;
+  // the flags of the top bar: what the panel is doing right now
+  const flags = [];
+  if (S.settings.observe_only) flags.push(`<button class="flag observe" id="observe-pill" title="The panel only observes and reports; nothing is changed automatically">● Observe mode</button>`);
+  if (S.busy.length) flags.push(`<span class="flag busy" title="Operations that are running right now">⚙ ${S.busy.length} running</span>`);
+  $("#top-flags").innerHTML = flags.join("");
+}
+
+/* the strip of counters under the page title */
+function renderStrip() {
+  if (!S) return;
   const on = S.servers.filter((s) => s.status === "online").length;
   const live = S.links.filter((l) => l.status !== "pending");
   const up = live.filter((l) => l.status === "up").length;
+  const deg = live.filter((l) => l.status === "degraded").length + S.flapping.length;
   const dok = S.domains.filter((d) => d.status === "ok").length;
-  const pill = (label, a, b) => {
-    const col = !b ? "var(--pending)" : a === b ? "var(--up)" : a >= b / 2 ? "var(--degraded)" : "var(--down)";
-    return `<span class="stat"><span class="d" style="background:${col}"></span>${label} <b>${a}/${b}</b></span>`;
-  };
-  const prop = S.domains.filter((d) => d.pending_ip).length;
-  const flap = S.flapping.length;
-  const hand = Object.keys(S.handover).length;
-  $("#stats").innerHTML =
-    pill("Servers", on, S.servers.length) + pill("Tunnels", up, live.length) + pill("Domains", dok, S.domains.length) +
-    (hand ? `<span class="stat" style="color:var(--handover)">${hand} port handover</span>` : "") +
-    (flap ? `<span class="stat" style="color:var(--degraded)">${flap} unstable tunnels</span>` : "") +
-    (prop ? `<span class="stat" style="color:var(--degraded)">${prop} awaiting DNS</span>` : "") +
-    (S.busy.length ? `<span class="stat" style="color:var(--testing)">${S.busy.length} operations running</span>` : "") +
-    (S.demo ? `<span class="stat">Demo mode</span>` : "") +
-    (S.settings.observe_only ? `<span class="stat observe" id="observe-pill" title="The panel only observes and reports; nothing is changed automatically">● Observe mode</span>` : "");
+  const next = S.last_check ? Math.max(0, S.settings.check_interval - (nowS() - S.last_check)) : S.settings.check_interval;
+  const cell = (k, v, cls = "") => `<div><span class="k">${k}</span><span class="v ${cls}">${v}</span></div>`;
+  const strip = cell("Servers online", `${on} / ${S.servers.length}`, on === S.servers.length && S.servers.length ? "ok" : "warn")
+    + cell("Stable tunnels", `${up} / ${live.length}`, "ok")
+    + cell("Unstable tunnels", String(deg), deg ? "warn" : "")
+    + cell("Healthy domains", `${dok} / ${S.domains.length}`, dok === S.domains.length && S.domains.length ? "ok" : "warn")
+    + cell("Next check", `${Math.round(next)} s`, "test");
+  $("#net-strip").innerHTML = strip;
+  $("#tun-strip").innerHTML = cell("Tunnels", String(S.links.length))
+    + cell("Healthy", String(up), "ok")
+    + cell("Unstable", String(deg), deg ? "warn" : "")
+    + cell("Pinned", String(S.links.filter((l) => l.pinned).length))
+    + cell("Not built", String(S.links.filter((l) => l.status === "pending").length));
+  $("#dom-strip").innerHTML = cell("Domains", String(S.domains.length))
+    + cell("Healthy", String(dok), "ok")
+    + cell("Broken", String(S.domains.filter((d) => d.status === "broken").length), "warn")
+    + cell("Awaiting DNS", String(S.domains.filter((d) => d.pending_ip).length))
+    + cell("Manual failover", String(S.domains.filter((d) => !d.auto_failover).length));
+  $("#inf-strip").innerHTML = cell("Foreign servers", String(byRole("kharej").length))
+    + cell("Iran servers", String(byRole("iran").length))
+    + cell("Online", `${S.servers.filter((s) => s.status === "online").length} / ${S.servers.length}`, "ok")
+    + cell("Tunnels", String(S.links.length))
+    + cell("Domains", String(S.domains.length));
 }
-setInterval(() => {
-  if (!S) return;
-  $("#last-check").textContent = S.last_check ? `Checked: ${ago(S.last_check)}` : "Waiting for the first check";
-  if (drawer && drawer.type === "domain") {
-    const el = $("#failback-timer");
-    if (el) el.textContent = failbackText(S.domains.find((x) => x.id === drawer.id)) || "";
-  }
-}, 1000);
 
-/* ================================================================ canvas */
-const canvas = $("#canvas"), world = $("#world"), nodesEl = $("#nodes"), wiresEl = $("#wires");
-const view = { x: 60, y: 70, z: 1 };
+/* the buttons in the header of every page */
+function renderActions() {
+  const add = `<div class="menu"><button class="btn primary menu-btn">${ICON.add} Add</button>
+    <div class="menu-pop">
+      <button data-add="kharej">Foreign server</button>
+      <button data-add="iran">Iran server</button>
+      <button data-add="link">New tunnel</button>
+      <button data-add="provider">DNS account</button>
+      <button data-add="domain">Domain</button>
+    </div></div>`;
+  const net = `<button class="btn" id="btn-scan">${ICON.scan} Find tunnels</button>
+    <button class="btn" id="btn-check">${ICON.check} Check</button>
+    <button class="btn primary" id="btn-discover">${ICON.zap} Test &amp; connect</button>${add}`;
+  $("#net-actions").innerHTML = net;
+  $("#tun-actions").innerHTML = `<button class="btn" id="btn-scan-2">${ICON.scan} Find tunnels</button>
+    <button class="btn" id="btn-check-2">${ICON.check} Check</button>
+    <button class="btn primary" id="btn-discover-2">${ICON.zap} Test &amp; connect</button>${add}`;
+  $("#dom-actions").innerHTML = add;
+  $("#inf-actions").innerHTML = add;
+  $("#set-actions").innerHTML = `<button class="btn" id="btn-settings">${ICON.edit} Edit the settings</button>`;
+
+  $("#btn-scan").onclick = $("#btn-scan-2").onclick = scanNow;
+  $("#btn-check").onclick = $("#btn-check-2").onclick = () => act(() => api("POST", "/api/check"), "The immediate check has started");
+  $("#btn-discover").onclick = $("#btn-discover-2").onclick = discoverNow;
+  $("#btn-settings").onclick = settingsForm;
+  $$(".menu > .menu-btn").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); toggleMenu(b); }));
+}
+/* only one popup of the “Add” buttons is open at a time */
+function toggleMenu(btn) {
+  const pop = btn.parentElement.querySelector(".menu-pop");
+  const was = pop.classList.contains("open");
+  $$(".menu-pop").forEach((p) => p.classList.remove("open"));
+  if (!was) pop.classList.add("open");
+}
+function closeMenus() {
+  $$(".menu-pop").forEach((p) => p.classList.remove("open"));
+}
+async function scanNow() {
+  const r = await act(() => api("POST", "/api/scan"));
+  toast(r.added ? `${r.added} existing tunnels were found and added` : "No new tunnel was found", "success");
+}
+function discoverNow() {
+  const n = S.links.filter((l) => l.status === "pending" || l.status === "down").length;
+  if (!n) return toast("There is no tunnel that is not built or that is down; the healthy tunnels are left alone");
+  if (!confirm(`${n} tunnels that are not built or that are down will be built/rebuilt by testing every protocol. The healthy tunnels are left alone. Continue?`)) return;
+  act(() => api("POST", "/api/discover", {}), "Building the tunnels has started");
+}
+
+/* ================================================================ the flow */
+const stage = $("#stage"), world = $("#world"), nodesEl = $("#nodes"), wiresEl = $("#wires"), colsEl = $("#cols");
+const cam = { x: 40, y: 58, z: 1 };
 const pos = {};             // node id -> [x, y] in world units
 const els = {};             // node id -> element
 let viewRestored = false;
 try {
   const saved = localStorage.getItem("bt-view");
-  if (saved) { Object.assign(view, JSON.parse(saved)); viewRestored = true; }
+  if (saved) {
+    Object.assign(cam, JSON.parse(saved));
+    // the zoom tools sit in the top left corner: keep the column titles
+    // of the graph out of their way
+    cam.x = Math.max(8, cam.x);
+    cam.y = Math.max(58, cam.y);
+    viewRestored = true;
+  }
 } catch (_) { /* ignore */ }
 
 function applyView() {
-  world.style.transform = `translate(${view.x}px,${view.y}px) scale(${view.z})`;
-  const g = 22 * view.z;
-  canvas.style.backgroundSize = `${g}px ${g}px`;
-  canvas.style.backgroundPosition = `${view.x}px ${view.y}px`;
-  $("#zoom-val").textContent = `${Math.round(view.z * 100)}%`;
+  world.style.transform = `translate(${cam.x}px,${cam.y}px) scale(${cam.z})`;
+  $("#zoom-val").textContent = `${Math.round(cam.z * 100)}%`;
   clearTimeout(applyView.t);
-  applyView.t = setTimeout(() => { try { localStorage.setItem("bt-view", JSON.stringify({ ...view, cw: canvas.clientWidth })); } catch (_) { /* ignore */ } }, 300);
+  applyView.t = setTimeout(() => { try { localStorage.setItem("bt-view", JSON.stringify({ ...cam, cw: stage.clientWidth })); } catch (_) { /* ignore */ } }, 300);
 }
 function zoomAt(cx, cy, f) {
-  const r = canvas.getBoundingClientRect();
+  const r = stage.getBoundingClientRect();
   const px = cx - r.left, py = cy - r.top;
-  const nz = Math.min(2.5, Math.max(0.2, view.z * f));
-  view.x = px - (px - view.x) * (nz / view.z);
-  view.y = py - (py - view.y) * (nz / view.z);
-  view.z = nz;
+  const nz = Math.min(2.5, Math.max(0.2, cam.z * f));
+  cam.x = px - (px - cam.x) * (nz / cam.z);
+  cam.y = py - (py - cam.y) * (nz / cam.z);
+  cam.z = nz;
   applyView();
 }
 function fit() {
   const ids = Object.keys(els);
-  if (!ids.length) { Object.assign(view, { x: 60, y: 70, z: 1 }); return applyView(); }
+  if (!ids.length) { Object.assign(cam, { x: 40, y: 58, z: 1 }); return applyView(); }
   let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
   for (const id of ids) {
     const [x, y] = pos[id]; const el = els[id];
-    x0 = Math.min(x0, x); y0 = Math.min(y0, y - 30); x1 = Math.max(x1, x + el.offsetWidth); y1 = Math.max(y1, y + el.offsetHeight);
+    x0 = Math.min(x0, x); y0 = Math.min(y0, y - 46); x1 = Math.max(x1, x + el.offsetWidth); y1 = Math.max(y1, y + el.offsetHeight);
   }
-  // labels of wires that loop outside the columns (kharej -> kharej forwards)
   for (const g of $$(".wlabel.hop", wiresEl)) {
     const m = /translate\(([-\d.]+),([-\d.]+)\)/.exec(g.getAttribute("transform") || "");
     if (m) { x0 = Math.min(x0, +m[1]); x1 = Math.max(x1, +m[1] + g.getBBox().width); }
   }
-  const r = canvas.getBoundingClientRect();
-  const top = 56, bottom = 60, pad = 30;
-  const z = Math.min(1.15, (r.width - pad * 2) / (x1 - x0), (r.height - top - bottom) / (y1 - y0));
-  view.z = Math.max(0.2, z);
-  view.x = (r.width - (x1 - x0) * view.z) / 2 - x0 * view.z;
-  view.y = top + (r.height - top - bottom - (y1 - y0) * view.z) / 2 - y0 * view.z;
+  const r = stage.getBoundingClientRect();
+  const top = 58, bottom = 26, pad = 22;
+  const z = Math.min(1.1, (r.width - pad * 2) / (x1 - x0), (r.height - top - bottom) / (y1 - y0));
+  cam.z = Math.max(0.2, z);
+  cam.x = (r.width - (x1 - x0) * cam.z) / 2 - x0 * cam.z;
+  cam.y = top + (r.height - top - bottom - (y1 - y0) * cam.z) / 2 - y0 * cam.z;
   applyView();
 }
 
-function serverCard(s) {
+function nodeCard(s) {
   const st = s.status;
   const links = S.links.filter((l) => l.status !== "pending" && (l.iran_id === s.id || l.kharej_id === s.id));
   const up = links.filter((l) => l.status === "up").length;
-  const meta = [`<span class="chip">${up}/${links.length} tunnels</span>`];
-  if (s.ssh_latency_ms != null) meta.push(`<span class="chip mono" title="SSH latency from the panel">ssh ${ms(s.ssh_latency_ms)}</span>`);
-  const ex = s.role === "kharej" ? serverExits(s.id) : [];
-  if (ex.length) meta.push(`<span class="chip ${ex.some(exitBad) ? "bad" : ""}" title="${esc(ex.map((e) => `${e.port} → ${exitText(e)} (${e.method})`).join("\n"))}">↪ ${ex.length} port${ex.length > 1 ? "s" : ""} forwarded</span>`);
+  const meta = [];
+  if (s.ssh_latency_ms != null) meta.push(`<span class="chip mono">ssh ${ms(s.ssh_latency_ms)}</span>`);
+  if (s.role === "kharej") {
+    const ex = serverExits(s.id);
+    if (ex.length) meta.push(`<span class="chip ${ex.some(exitBad) ? "bad" : "purple"}" title="${esc(ex.map((e) => `${e.port} → ${exitText(e)} (${e.method})`).join("\n"))}">${ex.length} forwarded</span>`);
+  }
   if (s.role === "iran") {
     const doms = S.domains.filter((d) => d.iran_id === s.id).length;
     if (doms) meta.push(`<span class="chip info">${doms} domain${doms > 1 ? "s" : ""}</span>`);
   }
   return {
-    cls: ["node", st === "offline" ? "offline" : "", s.enabled ? "" : "disabled"].join(" "),
-    html: `<div class="row1"><span class="dot ${st}"></span><span class="title">${esc(s.name)}</span><span class="role">${s.role === "iran" ? "Iran" : "Foreign"}${s.priority !== 100 ? ` · P${s.priority}` : ""}</span></div>
-      <div class="ip">${esc(s.ip)}</div><div class="meta">${meta.join("")}</div>`,
+    cls: ["fnode", st === "offline" ? "dead" : "", s.enabled ? "" : "dim"].join(" "),
+    html: `<div class="r1"><span class="nm">${esc(s.name)}</span><span class="dot ${st}"></span></div>
+      <div class="ip">${esc(s.ip)}</div>
+      <div class="r3"><span class="role">${s.role === "iran" ? "Iran" : "Foreign"}</span>
+      <span class="role right">${up}/${links.length} tunnels</span></div>
+      ${meta.length ? `<div class="r3">${meta.join("")}</div>` : ""}`,
   };
 }
 
 function domainCard(d) {
   const p = provider(d.provider_id);
-  const meta = [];
-  if (d.iran_id) meta.push(`<span class="chip">${esc(nm(d.iran_id))}</span>`);
-  const routes = d.routes || [];
-  for (const r of routes.slice(0, 4)) {
+  const routes = (d.routes || []).slice(0, 3);
+  // the type-1 flow card lists the routes as plain lines under the address
+  const lines = routes.map((r) => {
     const l = linkById(r.link_id);
-    const ex = r.exit ? `↪${exitText(r.exit)}` : "";
-    meta.push(`<span class="chip mono ${r.healthy ? (exitBad(r.exit) ? "warn" : "") : "bad"}" title="${esc(l ? linkName(l) : "no tunnel")}${r.exit ? esc(` · final exit: ${exitText(r.exit)} (${r.exit.method})`) : ""}">${esc(r.spec)}→${esc(l ? nm(l.kharej_id) : "?")}${esc(ex)}</span>`);
-  }
-  if (routes.length > 4) meta.push(`<span class="chip">+${routes.length - 4}</span>`);
-  if (!routes.length && d.iran_id) meta.push(`<span class="chip warn">no port set</span>`);
-  if (d.iran_id && d.primary_iran && d.iran_id !== d.primary_iran) meta.push(`<span class="chip warn">standby</span>`);
-  if (d.pending_ip) meta.push(`<span class="chip warn">awaiting DNS</span>`);
-  if (!d.auto_failover) meta.push(`<span class="chip">manual</span>`);
-  if (d.error) meta.push(`<span class="chip bad" title="${esc(d.error)}">error</span>`);
+    const ex = r.exit ? ` → ${exitText(r.exit)}` : "";
+    return `<span class="route ${r.healthy ? "" : "bad"}" title="${esc(l ? linkName(l) : "no tunnel")}">${esc(r.spec)} → ${esc(l ? nm(l.kharej_id) : "?")}${esc(ex)}</span>`;
+  }).join("");
+  const more = (d.routes || []).length - routes.length;
+  const flags = [];
+  if (d.iran_id && d.primary_iran && d.iran_id !== d.primary_iran) flags.push(`<span class="chip warn">standby</span>`);
+  if (d.pending_ip) flags.push(`<span class="chip warn">awaiting DNS</span>`);
+  if (!d.auto_failover) flags.push(`<span class="chip">manual</span>`);
+  if (d.error) flags.push(`<span class="chip bad" title="${esc(d.error)}">error</span>`);
   return {
-    cls: "node domain",
-    html: `<div class="row1"><span class="dot ${d.status}"></span><span class="title">${esc(d.fqdn)}</span>${p ? `<span class="prov ${p.kind}">${p.kind === "cloudflare" ? "CF" : "ARVAN"}</span>` : ""}</div>
-      <div class="ip">${esc(d.current_ip || "—")}</div><div class="meta">${meta.join("")}</div>`,
+    cls: "fnode domain",
+    html: `<div class="r1"><span class="nm">${esc(d.fqdn)}</span><span class="dot ${d.status}"></span></div>
+      <div class="ip">${esc(d.current_ip || "—")}</div>
+      ${lines ? `<div class="routes">${lines}${more > 0 ? `<span class="route muted">+${more} more</span>` : ""}</div>` : ""}
+      <div class="r3"><span class="role">${p ? (p.kind === "cloudflare" ? "Cloudflare" : "ArvanCloud") : "no account"}</span>
+      <span class="role right">${d.ttl}s</span>${flags.join("")}</div>`,
   };
 }
 
-function renderCanvas() {
+function renderFlow() {
   const items = [];
-  for (const s of byRole("kharej")) items.push(["kharej", s.id, serverCard(s)]);
-  for (const s of byRole("iran")) items.push(["iran", s.id, serverCard(s)]);
+  for (const s of byRole("kharej")) items.push(["kharej", s.id, nodeCard(s)]);
+  for (const s of byRole("iran")) items.push(["iran", s.id, nodeCard(s)]);
   const iranRank = Object.fromEntries(byRole("iran").map((s, i) => [s.id, i]));
   const rank = (d) => iranRank[d.iran_id] ?? 99;
   for (const d of [...S.domains].sort((a, b) => rank(a) - rank(b) || a.fqdn.localeCompare(b.fqdn))) items.push(["domain", d.id, domainCard(d)]);
+
   const seen = new Set();
   for (const [col, id, card] of items) {
     seen.add(id);
@@ -345,49 +476,52 @@ function renderCanvas() {
       bindDrag(el);
     }
     if (el.dataset.html !== card.html) { el.innerHTML = card.html; el.dataset.html = card.html; }
-    const keep = ["dragging", "hl"].filter((c) => el.classList.contains(c)).join(" ");
+    const keep = ["dragging", "hl", "sel"].filter((c) => el.classList.contains(c)).join(" ");
     const cls = `${card.cls} ${keep}`.trim();
     if (el.className !== cls) el.className = cls;
   }
   for (const id of Object.keys(els)) if (!seen.has(id)) { els[id].remove(); delete els[id]; delete pos[id]; }
-  // positions: the saved layout, else stacked under the column
+
   const bottom = { kharej: 30, iran: 30, domain: 30 };
-  for (const [col, id] of items) if (pos[id]) bottom[col] = Math.max(bottom[col], pos[id][1] + els[id].offsetHeight + 18);
+  for (const [col, id] of items) if (pos[id]) bottom[col] = Math.max(bottom[col], pos[id][1] + els[id].offsetHeight + 16);
   for (const [col, id] of items) {
     if (!pos[id]) {
       const saved = S.layout[id];
       pos[id] = saved ? [saved[0], saved[1]] : [COL_X[col], bottom[col]];
-      bottom[col] = Math.max(bottom[col], pos[id][1] + els[id].offsetHeight + 18);
+      bottom[col] = Math.max(bottom[col], pos[id][1] + els[id].offsetHeight + 16);
     }
     els[id].style.left = `${pos[id][0]}px`;
     els[id].style.top = `${pos[id][1]}px`;
   }
-  renderTitles(items);
+  renderColumns(items);
+  const live = S.links.filter((l) => l.status !== "pending").length;
+  $("#flow-badge").innerHTML = `<i class="dot ok"></i><span>${live} tunnel${live === 1 ? "" : "s"} checked</span>`;
   if (firstState) {
     firstState = false;
-    const sameScreen = view.cw && Math.abs(view.cw - canvas.clientWidth) / canvas.clientWidth < 0.3;
+    const sameScreen = cam.cw && Math.abs(cam.cw - stage.clientWidth) / stage.clientWidth < 0.3;
     if (viewRestored && sameScreen) applyView(); else requestAnimationFrame(() => { drawWiresNow(); fit(); });
   }
   drawWires();
 }
-function renderTitles(items) {
-  let titles = $$(".col-title", world);
+
+function renderColumns(items) {
+  let titles = $$(".ct", colsEl);
   if (!titles.length) {
     for (const col of Object.keys(COL_X)) {
       const t = document.createElement("div");
-      t.className = "col-title"; t.dataset.col = col; t.textContent = COL_TITLE[col];
-      world.insertBefore(t, nodesEl);
+      t.className = "ct"; t.dataset.col = col;
+      colsEl.appendChild(t);
     }
-    titles = $$(".col-title", world);
+    titles = $$(".ct", colsEl);
   }
   for (const t of titles) {
     const mine = items.filter((i) => i[0] === t.dataset.col).map((i) => pos[i[1]]);
-    t.style.display = mine.length ? "" : "none";
-    if (!mine.length) continue;
-    t.style.top = `${Math.min(...mine.map((p) => p[1])) - 26}px`;
+    if (!mine.length) { t.style.display = "none"; continue; }
+    t.style.display = "";
+    t.innerHTML = `<span class="n">${String(mine.length).padStart(2, "0")} / ${COL_KICKER[t.dataset.col]}</span><span class="t">${COL_TITLE[t.dataset.col]}</span>`;
     t.style.left = `${Math.min(...mine.map((p) => p[0]))}px`;
+    t.style.top = `${Math.min(...mine.map((p) => p[1])) - 40}px`;
     t.style.width = `${NODE_W}px`;
-    t.style.textAlign = "center";
   }
 }
 
@@ -419,11 +553,12 @@ function drawWires() {
 function drawWiresNow() {
   if (!S) return;
   const showStandby = $("#show-standby").checked;
+  const showPending = $("#show-pending").checked;
   const active = activeLinkIds();
   const parts = [], labels = [];
   const edges = [];
   for (const l of S.links) {
-    if (l.status === "pending" && !isBusy(l)) continue;
+    if (l.status === "pending" && !isBusy(l) && !showPending) continue;
     const a = box(l.kharej_id), b = box(l.iran_id);
     if (!a || !b) continue;
     const st = lstatus(l);
@@ -437,7 +572,7 @@ function drawWiresNow() {
     if (!a || !b) continue;
     edges.push({ kind: "domain", d, from: d.iran_id, to: d.id, a, b });
   }
-  // kharej -> another registered server the kharej sends ports on to
+  // a foreign server that sends its ports on to another registered server
   for (const k of byRole("kharej")) {
     const to = {};
     for (const e of serverExits(k.id)) for (const t of e.targets) {
@@ -452,7 +587,6 @@ function drawWiresNow() {
       if (a && b) edges.push({ kind: "hop", from: k.id, to: tid, a, b, g });
     }
   }
-  // spread the anchor points along each node side, ordered by the far end
   const sides = {};
   for (const e of edges) {
     e.loop = e.kind === "hop" && Math.abs(e.b.cx - e.a.cx) < NODE_W;
@@ -485,36 +619,62 @@ function drawWiresNow() {
       const hop = `${e.from}|${e.to}`;
       parts.push(`<path class="xwire ${e.g.bad ? "down" : ""}" d="${c.d}" data-hop="${hop}"/>`);
       const txt = `↪ ${e.g.ports.join(",")} · ${[...e.g.methods].join("/")}${e.g.bad ? " ✕" : ""}`;
-      const w = txt.length * 6.5 + 14;
-      // a loop between two kharejs: hang the label outside the curve, clear of the cards
+      const w = txt.length * 6.4 + 14;
       const [lx, ly] = e.loop ? ((p) => [p[0] - w / 2 - 4, p[1]])(bezAt(c.p, 0.5)) : placeLabel(c, w);
-      labels.push(`<g class="wlabel hop ${e.g.bad ? "down" : ""}" data-hop="${hop}" transform="translate(${(lx - w / 2).toFixed(1)},${(ly - 10).toFixed(1)})"><rect width="${w.toFixed(1)}" height="20" rx="10"/><text x="${(w / 2).toFixed(1)}" y="14" text-anchor="middle">${esc(txt)}</text></g>`);
+      labels.push(`<g class="wlabel hop ${e.g.bad ? "down" : ""}" data-hop="${hop}" transform="translate(${(lx - w / 2).toFixed(1)},${(ly - 10).toFixed(1)})"><rect width="${w.toFixed(1)}" height="20" rx="2.5"/><text x="${(w / 2).toFixed(1)}" y="14" text-anchor="middle">${esc(txt)}</text></g>`);
     } else if (e.kind === "link") {
       const l = e.l;
       const moved = handedOver(l) && e.st === "up";
-      const cls = `wire ${moved ? "handover" : e.st}${e.act ? " active" : ""}${e.standby ? " standby" : ""}`;
+      const sel = selLink === l.id;
+      const cls = `wire ${moved ? "handover" : e.st}${sel ? " sel" : ""}${e.standby ? " standby" : ""}`;
       parts.push(`<path class="${cls}" d="${c.d}" data-link="${l.id}"/>`);
-      if (e.act && e.st === "up") parts.push(`<path class="flowline" d="${c.d}" data-link="${l.id}"/>`);
       parts.push(`<path class="hit" d="${c.d}" data-link="${l.id}"/>`);
       if (e.standby) continue;
       let txt;
       if (e.st === "testing") txt = "testing…";
       else if (moved) txt = `${l.transport} · ports moved`;
       else txt = `${l.transport || "—"}${e.st === "up" && l.latency_ms != null ? ` · ${Math.round(l.latency_ms)}ms` : e.st === "down" ? " ✕" : ""}${isFlapping(l) ? " ⚡" : ""}`;
-      const w = txt.length * 6.5 + 14;
+      const w = txt.length * 6.4 + 14;
       const [lx, ly] = placeLabel(c, w);
-      labels.push(`<g class="wlabel ${moved ? "handover" : e.st}" data-link="${l.id}" transform="translate(${(lx - w / 2).toFixed(1)},${(ly - 10).toFixed(1)})"><rect width="${w.toFixed(1)}" height="20" rx="10"/><text x="${(w / 2).toFixed(1)}" y="14" text-anchor="middle">${esc(txt)}</text></g>`);
+      labels.push(`<g class="wlabel ${moved ? "handover" : e.st}${sel ? " sel" : ""}" data-link="${l.id}" transform="translate(${(lx - w / 2).toFixed(1)},${(ly - 10).toFixed(1)})"><rect width="${w.toFixed(1)}" height="20" rx="2.5"/><text x="${(w / 2).toFixed(1)}" y="14" text-anchor="middle">${esc(txt)}</text></g>`);
     } else {
       const d = e.d;
       parts.push(`<path class="dwire ${d.pending_ip ? "pending-dns" : d.status}" d="${c.d}" data-domain="${d.id}"/>`);
-      if (d.status === "ok" && !d.pending_ip) parts.push(`<path class="flowline" d="${c.d}" data-domain="${d.id}"/>`);
     }
   }
-  wiresEl.innerHTML = parts.join("") + labels.join("");
+  wiresEl.innerHTML = `<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--muted)"/></marker></defs>` + parts.join("") + labels.join("");
   applyFocus();
+  renderFlowStatus();
 }
 
-/* drag nodes; pan & zoom the canvas */
+function renderFlowStatus() {
+  const el = $("#flow-status");
+  if (!el) return;
+  if (selLink) {
+    const l = linkById(selLink);
+    if (l) {
+      el.innerHTML = `SELECTED: <b>${esc(linkName(l))}</b> · ${esc(l.transport || "—")}${l.latency_ms != null ? ` · ${ms(l.latency_ms)}` : ""}`;
+      return;
+    }
+  }
+  if (!selNode) { el.textContent = "Click a node or a wire to follow its path."; return; }
+  if (els[selNode] && els[selNode].dataset.type === "domain") {
+    const d = S.domains.find((x) => x.id === selNode);
+    el.innerHTML = d ? `SELECTED: <b>${esc(d.fqdn)}</b>` : "";
+    return;
+  }
+  const s = srv(selNode);
+  const links = S.links.filter((l) => l.iran_id === selNode || l.kharej_id === selNode);
+  el.innerHTML = s ? `SELECTED: <b>${esc(s.name)}</b> · ${links.length} tunnel${links.length === 1 ? "" : "s"}` : "";
+}
+/* the selection is an edge, never a different colour: a 1px brand border */
+function paintSelection() {
+  for (const [id, node] of Object.entries(els)) node.classList.toggle("sel", id === selNode);
+  renderFlowStatus();
+  drawWires();
+}
+
+/* drag nodes; pan & zoom the stage */
 function bindDrag(el) {
   el.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
@@ -524,7 +684,7 @@ function bindDrag(el) {
     let moved = false;
     el.setPointerCapture(e.pointerId);
     const move = (ev) => {
-      const dx = (ev.clientX - start.cx) / view.z, dy = (ev.clientY - start.cy) / view.z;
+      const dx = (ev.clientX - start.cx) / cam.z, dy = (ev.clientY - start.cy) / cam.z;
       if (!moved && Math.hypot(ev.clientX - start.cx, ev.clientY - start.cy) < 4) return;
       moved = true;
       el.classList.add("dragging");
@@ -538,8 +698,8 @@ function bindDrag(el) {
       el.removeEventListener("pointerup", up);
       el.removeEventListener("pointercancel", up);
       el.classList.remove("dragging");
-      if (moved) { saveLayout({ [id]: pos[id] }); renderTitles(currentItems()); }
-      else openDrawer(el.dataset.type, id);
+      if (moved) { saveLayout({ [id]: pos[id] }); renderColumns(currentItems()); }
+      else { selNode = id; selLink = null; paintSelection(); openDrawer(el.dataset.type, id); }
     };
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", up);
@@ -563,45 +723,45 @@ function saveLayout(p) {
 
 const pointers = new Map();
 let pan = null, pinch = null;
-canvas.addEventListener("pointerdown", (e) => {
-  if (e.target.closest(".tools,.legend,.empty-card,.wlabel,.hit")) return;
+stage.addEventListener("pointerdown", (e) => {
+  if (e.target.closest(".flow-tools,.fnode,.wlabel,.hit")) return;
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  canvas.setPointerCapture(e.pointerId);
-  if (pointers.size === 1) { pan = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y }; canvas.classList.add("panning"); }
+  stage.setPointerCapture(e.pointerId);
+  if (pointers.size === 1) { pan = { x: e.clientX, y: e.clientY, vx: cam.x, vy: cam.y }; stage.classList.add("panning"); }
   else if (pointers.size === 2) {
     const [p, q] = [...pointers.values()];
-    pinch = { d: Math.hypot(p.x - q.x, p.y - q.y), z: view.z };
+    pinch = { d: Math.hypot(p.x - q.x, p.y - q.y), z: cam.z };
     pan = null;
   }
 });
-canvas.addEventListener("pointermove", (e) => {
+stage.addEventListener("pointermove", (e) => {
   if (!pointers.has(e.pointerId)) return;
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (pinch && pointers.size === 2) {
     const [p, q] = [...pointers.values()];
     const d = Math.hypot(p.x - q.x, p.y - q.y);
-    zoomAt((p.x + q.x) / 2, (p.y + q.y) / 2, (pinch.z * d) / pinch.d / view.z);
+    zoomAt((p.x + q.x) / 2, (p.y + q.y) / 2, (pinch.z * d) / pinch.d / cam.z);
   } else if (pan) {
-    view.x = pan.vx + e.clientX - pan.x;
-    view.y = pan.vy + e.clientY - pan.y;
+    cam.x = pan.vx + e.clientX - pan.x;
+    cam.y = pan.vy + e.clientY - pan.y;
     applyView();
   }
 });
 const endPointer = (e) => {
   pointers.delete(e.pointerId);
   if (pointers.size < 2) pinch = null;
-  if (!pointers.size) { pan = null; canvas.classList.remove("panning"); }
+  if (!pointers.size) { pan = null; stage.classList.remove("panning"); }
 };
-canvas.addEventListener("pointerup", endPointer);
-canvas.addEventListener("pointercancel", endPointer);
-canvas.addEventListener("wheel", (e) => {
+stage.addEventListener("pointerup", endPointer);
+stage.addEventListener("pointercancel", endPointer);
+stage.addEventListener("wheel", (e) => {
   e.preventDefault();
   zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)));
 }, { passive: false });
 $("#tools").addEventListener("click", async (e) => {
   const b = e.target.closest("[data-zoom]");
   if (!b) return;
-  const r = canvas.getBoundingClientRect();
+  const r = stage.getBoundingClientRect();
   const z = b.dataset.zoom;
   if (z === "in") zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1.2);
   else if (z === "out") zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1 / 1.2);
@@ -611,11 +771,13 @@ $("#tools").addEventListener("click", async (e) => {
     await api("DELETE", "/api/layout");
     for (const id of Object.keys(pos)) delete pos[id];
     S.layout = {};
-    renderCanvas();
+    renderFlow();
     requestAnimationFrame(fit);
   }
 });
 $("#show-standby").onchange = drawWires;
+$("#show-pending").onchange = (e) => { $("#show-pending-2").checked = e.target.checked; drawWires(); renderTable(); };
+$("#show-pending-2").onchange = (e) => { $("#show-pending").checked = e.target.checked; drawWires(); renderTable(); };
 
 /* hover: light up a node's whole path, dim the rest */
 let focus = null;
@@ -668,19 +830,22 @@ function linkTip(l) {
 
 /* --------------------------------------------------------- tunnels table */
 function renderTable() {
-  const showPending = $("#show-pending").checked;
+  const showPending = $("#show-pending-2").checked;
   const active = activeLinkIds();
-  const rows = S.links.filter((l) => showPending || l.status !== "pending")
+  const q = netQuery.trim().toLowerCase();
+  let rows = S.links.filter((l) => showPending || l.status !== "pending")
     .sort((a, b) => nm(a.kharej_id).localeCompare(nm(b.kharej_id)) || nm(a.iran_id).localeCompare(nm(b.iran_id)) || a.priority - b.priority);
+  if (q) rows = rows.filter((l) => `${linkName(l)} ${l.label || ""} ${l.transport || ""} ${(l.ports || []).join(" ")}`.toLowerCase().includes(q));
+  if (netFilter !== "all") rows = rows.filter((l) => lstatus(l) === netFilter);
   if (!rows.length) {
-    $("#links-table").innerHTML = `<tr><td class="muted">No tunnel yet. Add the servers; the tunnels that already run on them are found automatically.</td></tr>`;
+    $("#links-table").innerHTML = `<tbody><tr><td class="muted" style="padding:20px 14px">${S.links.length ? "No tunnel matches this filter." : "No tunnel yet. Add the servers; the tunnels that already run on them are found automatically."}</td></tr></tbody>`;
     return;
   }
-  $("#links-table").innerHTML = `<tr><th></th><th>Path</th><th>Name</th><th>Protocol</th><th>Latency</th><th>Ports (Iran side)</th><th>Kind</th><th>History</th></tr>` +
+  $("#links-table").innerHTML = `<thead><tr><th></th><th>Path</th><th>Name</th><th>Protocol</th><th>Latency</th><th>Ports (Iran side)</th><th>Kind</th><th>History</th></tr></thead><tbody>` +
     rows.map((l) => {
       const st = lstatus(l);
       const tags = [];
-      if (active.has(l.id)) tags.push(`<span class="act">● traffic</span>`);
+      if (active.has(l.id)) tags.push(`<span class="chip ok">● traffic</span>`);
       if (handedOver(l)) tags.push(`<span class="chip purple">ports on ${esc(linkName(linkById(S.handover[l.id])))}</span>`);
       if (isFlapping(l)) tags.push(`<span class="chip warn">unstable</span>`);
       return `<tr data-link="${l.id}"><td><span class="dot ${st}"></span></td>
@@ -688,12 +853,15 @@ function renderTable() {
         <td class="muted">${esc(l.label || "")}</td>
         <td class="mono">${esc(st === "testing" ? "…" : l.transport || "—")}${l.pinned ? " 🔒" : ""}</td>
         <td class="mono">${st === "up" ? ms(l.latency_ms) : `<span class="muted">${FA[st] || st}</span>`}</td>
-        <td class="mono small">${esc((l.ports || []).join(", ") || "—")}</td>
+        <td class="mono">${esc((l.ports || []).join(", ") || "—")}</td>
         <td>${l.managed ? `<span class="chip">panel</span>` : `<span class="chip info" title="It was already on the server">existing</span>`}</td>
         <td>${spark(l.history, 90, 18)}</td></tr>`;
-    }).join("");
+    }).join("") + "</tbody>";
 }
-$("#show-pending").onchange = renderTable;
+$("#show-pending-2").onchange = renderTable;
+$("#net-q").oninput = (e) => { netQuery = e.target.value; renderTable(); };
+$("#net-filter").onchange = (e) => { netFilter = e.target.value; renderTable(); };
+$("#net-search").onclick = () => { netQuery = $("#net-q").value; netFilter = $("#net-filter").value; renderTable(); };
 
 /* --------------------------------------------------------------- events */
 function renderEvents(newId) {
@@ -708,6 +876,307 @@ $$("#ev-filter button").forEach((b) => (b.onclick = () => {
   renderEvents();
 }));
 
+/* ================================================== tunnels & protocols */
+function renderTunnels() {
+  if (!S) return;
+  const sort = $("#tun-sort").value;
+  let rows = [...S.links];
+  if (sort === "latency") rows.sort((a, b) => (a.latency_ms ?? 1e9) - (b.latency_ms ?? 1e9));
+  else if (sort === "status") rows.sort((a, b) => String(lstatus(a)).localeCompare(String(lstatus(b))));
+  else rows.sort((a, b) => linkName(a).localeCompare(linkName(b)));
+  $("#tun-table").innerHTML = `<thead><tr><th></th><th>Path</th><th>Protocol</th><th>Latency</th><th>Ports (Iran side)</th><th>Kind</th><th>Engine</th></tr></thead><tbody>` +
+    (rows.map((l) => {
+      const st = lstatus(l);
+      return `<tr data-link="${l.id}"><td><span class="dot ${st}"></span></td>
+        <td class="pair">${esc(linkName(l))}</td>
+        <td class="mono">${esc(st === "testing" ? "…" : l.transport || "—")}${l.pinned ? " 🔒" : ""}</td>
+        <td class="mono">${st === "up" ? ms(l.latency_ms) : `<span class="muted">${FA[st] || st}</span>`}</td>
+        <td class="mono">${esc((l.ports || []).join(", ") || "—")}</td>
+        <td>${l.managed ? `<span class="chip">panel</span>` : `<span class="chip info">existing</span>`}</td>
+        <td class="mono muted">${esc(l.engine_version || "—")}</td></tr>`;
+    }).join("") || `<tr><td class="muted" style="padding:20px 14px">No tunnel yet.</td></tr>`) + "</tbody>";
+
+  // the carriers the panel knows about
+  const all = [...new Set([...S.transports])];
+  const cand = S.settings.candidate_transports;
+  $("#tun-protocols").innerHTML = `
+    <p class="note">The carriers the tunnel engine speaks. The ones that are ticked are tested on every check and used to repair a tunnel that breaks.</p>
+    <div class="tchecks">${all.map((t) => `<label><input type="checkbox" ${cand.includes(t) ? "checked" : ""} disabled>${esc(t)}</label>`).join("")}</div>
+    <dl class="kv" style="margin-top:6px">
+      <dt>Enabled</dt><dd class="mono">${cand.length} / ${all.length}</dd>
+      <dt>Timeout</dt><dd class="mono">${S.settings.test_timeout}s</dd>
+      <dt>Check interval</dt><dd class="mono">${S.settings.check_interval}s</dd>
+      <dt>Auto repair</dt><dd>${S.settings.auto_repair ? "on" : "off"}</dd>
+      <dt>Mode</dt><dd>${S.settings.observe_only ? "observe only" : "acting"}</dd>
+    </dl>
+    <div class="btns"><button class="btn sm" id="btn-settings-2">${ICON.edit} Edit the protocols</button></div>`;
+  $("#btn-settings-2").onclick = settingsForm;
+}
+$("#tun-sort").onchange = renderTunnels;
+
+/* ============================================================== domains */
+function renderDomains() {
+  if (!S) return;
+  if (!S.domains.length) {
+    $("#dom-list").innerHTML = `<p class="note">No domain yet. Add one with a DNS account (ArvanCloud or Cloudflare) and the panel keeps its record pointed at a healthy Iran server.</p>`;
+    $("#dom-detail").innerHTML = "";
+    return;
+  }
+  if (!selectedDomain || !S.domains.some((d) => d.id === selectedDomain)) selectedDomain = S.domains[0].id;
+  $("#dom-list").innerHTML = `<div class="opt-list">${S.domains.map((d) => {
+    const st = d.status;
+    return `<div class="opt click ${d.id === selectedDomain ? "" : ""}" data-dom="${d.id}" style="${d.id === selectedDomain ? "border-left:2px solid var(--brand)" : ""}">
+      <span class="dot ${st}"></span>
+      <span class="grow"><span class="mono">${esc(d.fqdn)}</span>
+      <span class="sub">${esc(d.current_ip || "—")} · ${d.ttl}s · ${esc((provider(d.provider_id) || {}).name || "no account")}</span></span>
+      ${d.pending_ip ? `<span class="chip warn">pending</span>` : ""}
+      ${d.error ? `<span class="chip bad" title="${esc(d.error)}">error</span>` : ""}
+    </div>`;
+  }).join("")}</div>`;
+  const d = S.domains.find((x) => x.id === selectedDomain);
+  $("#dom-detail").innerHTML = d ? domainDetail(d) : "";
+}
+
+function domainDetail(d) {
+  const p = provider(d.provider_id);
+  const iran = srv(d.iran_id);
+  const routeRows = (d.routes || []).map((r) => {
+    const l = linkById(r.link_id);
+    const st = l ? lstatus(l) : "down";
+    const sub = l ? [l.label, l.transport, st === "up" ? ms(l.latency_ms) : FA[st]].filter(Boolean).join(" · ") : "no tunnel opens this port on this server";
+    return `<div class="opt"><span class="dot ${r.healthy ? "up" : st}"></span>
+      <span class="grow"><span class="mono">${esc(r.spec)} → ${esc(l ? nm(l.kharej_id) : "?")}${r.exit ? ` ↪ ${esc(exitText(r.exit))}` : ""}</span>
+      <span class="sub mono">${esc(sub)}</span></span>
+      ${l ? `<button class="btn sm" data-link="${l.id}">Tunnel</button>` : ""}</div>`;
+  }).join("");
+  const cov = (d.coverage || []).map((c) => {
+    const s = srv(c.iran_id);
+    if (!s) return "";
+    const tags = [];
+    if (c.iran_id === d.primary_iran) tags.push(`<span class="chip">primary</span>`);
+    if (c.iran_id === d.iran_id) tags.push(`<span class="chip ok">current</span>`);
+    const sub = c.ok ? "all the ports are healthy" : (c.problems[0] || "");
+    return `<div class="opt ${c.ok ? "" : "off"}"><span class="dot ${c.ok ? "up" : "down"}"></span>
+      <span class="grow"><span>${esc(s.name)} <span class="mono muted small">${esc(s.ip)}</span></span>
+      <span class="sub">${esc(sub)}${c.problems.length > 1 ? ` (+${c.problems.length - 1})` : ""}</span></span>
+      ${tags.join("")}
+      ${c.iran_id !== d.primary_iran ? `<button class="btn sm ghost" data-primary="${c.iran_id}" data-dom-of="${d.id}" title="Once the failure is over, the traffic comes back to this server">Make it primary</button>` : ""}
+      ${c.ok && c.iran_id !== d.iran_id ? `<button class="btn sm" data-switch="${c.iran_id}" data-dom-of="${d.id}">Switch</button>` : ""}</div>`;
+  }).join("");
+  const fb = failbackText(d);
+  return `
+  <div class="panel">
+    <div class="panel-head">
+      <span class="idx">01 / RECORD</span>
+      <h2 class="mono">${esc(d.fqdn)}</h2>
+      <div class="right">
+        ${p ? `<span class="prov ${p.kind}">${p.kind === "cloudflare" ? "CF" : "ARVAN"}</span>` : ""}
+        <span class="chip ${d.status === "ok" ? "ok" : d.status === "broken" ? "bad" : ""}"><span class="dot ${d.status}"></span>${FA[d.status] || d.status}</span>
+      </div>
+    </div>
+    <div class="panel-body">
+      <div class="pathline">
+        <span class="chip">User</span><span class="arrow">→</span>
+        <span class="chip mono">${esc(d.fqdn)}</span><span class="arrow">→</span>
+        <span class="chip">${esc(iran ? `${iran.name} ${iran.ip}` : "—")}</span>
+      </div>
+      ${iran ? "" : `<p class="note" style="color:var(--degraded)">The record of this domain points at none of the registered Iran servers. Pick the right one below.</p>`}
+      ${d.pending_ip ? `<p class="note" style="color:var(--degraded)">The record was changed to <span class="mono">${esc(d.pending_ip)}</span>; waiting for the change to reach the public DNS servers (${ago(d.pending_since)})…</p>` : ""}
+      ${fb ? `<p class="note"><span id="failback-timer">${esc(fb)}</span></p>` : ""}
+      <dl class="kv">
+        <dt>Record IP</dt><dd class="mono">${esc(d.current_ip || "—")}</dd>
+        <dt>TTL</dt><dd class="mono">${d.ttl}s</dd>
+        <dt>Last switch</dt><dd>${ago(d.last_switch)}</dd>
+        <dt>Automatic failover</dt><dd>${d.auto_failover ? "on" : "off"}</dd>
+        <dt>Provider</dt><dd>${esc(p ? `${p.name} (${p.zone})` : "no DNS account")}</dd>
+        ${d.error ? `<dt>Error</dt><dd style="color:var(--down)">${esc(d.error)}</dd>` : ""}
+      </dl>
+      <div class="btns">
+        <button class="btn sm" data-edit-domain="${d.id}">${ICON.edit} Edit</button>
+        <button class="btn sm" data-sync="${d.id}">${ICON.refresh} Read the record from DNS</button>
+        <button class="btn sm danger" data-del-domain="${d.id}">${ICON.trash} Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <span class="idx">02 / ROUTES</span>
+      <h2>Paths and routes</h2>
+      <div class="right"><span class="label">${esc(iran ? iran.name : "no Iran server")}</span></div>
+    </div>
+    <div class="panel-body">
+      <div class="opt-list">${routeRows || `<span class="note">No port has been selected for this domain yet.</span>`}</div>
+      <div class="btns"><button class="btn sm" data-dom-ports="${d.id}">${ICON.edit} Choose the ports</button></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <span class="idx">03 / FAILOVER</span>
+      <h2>Failover order</h2>
+    </div>
+    <div class="panel-body">
+      <p class="note">On a failure, the record moves to the first server in this list that has <b>all the ports of the domain</b> healthy. The “primary” comes back behind the domain again after ${Math.round(S.settings.failback_after / 60)} minutes of complete stability.</p>
+      <div class="opt-list">${cov || `<span class="note">—</span>`}</div>
+    </div>
+  </div>`;
+}
+
+/* ========================================================= infrastructure */
+function renderInfra() {
+  if (!S) return;
+  const card = (s) => {
+    const links = S.links.filter((l) => l.iran_id === s.id || l.kharej_id === s.id);
+    const built = links.filter((l) => l.status !== "pending");
+    const broken = built.filter((l) => l.status !== "up");
+    const exits = s.role === "kharej" ? serverExits(s.id) : [];
+    return `<div class="card">
+      <header>
+        <span class="dot ${s.status}"></span>
+        <span class="nm">${esc(s.name)}</span>
+        <div class="right">
+          <span class="label">P${s.priority}</span>
+          ${s.enabled ? "" : `<span class="chip warn">disabled</span>`}
+        </div>
+      </header>
+      <div class="card-body">
+        <div class="ip">${esc(s.ip)} · ${esc(s.ssh_user)}@${esc(s.ip)}:${s.ssh_port}</div>
+        <dl class="kv">
+          <dt>SSH latency</dt><dd class="mono">${ms(s.ssh_latency_ms)}</dd>
+          <dt>Last seen</dt><dd>${ago(s.last_seen)}</dd>
+          <dt>Engine</dt><dd class="mono">${esc(s.engine_version || "—")}</dd>
+          <dt>Tunnels</dt><dd class="mono">${built.length} built · ${links.length - built.length} pending</dd>
+          ${s.error ? `<dt>Error</dt><dd style="color:var(--down)">${esc(s.error)}</dd>` : ""}
+        </dl>
+        ${exits.length ? `<div><span class="label">Forwarded ports</span><div class="opt-list" style="margin-top:6px">${exits.map((e) => `<div class="opt"><span class="dot ${exitBad(e) ? "down" : "up"}"></span><span class="grow"><span class="mono">${esc(e.port)}</span><span class="sub">→ ${esc(exitText(e))} · ${esc(e.method)}</span></span></div>`).join("")}</div></div>` : ""}
+      </div>
+      <div class="card-foot">
+        <button class="btn sm" data-open-server="${s.id}">Open</button>
+        <button class="btn sm" data-edit-server="${s.id}">${ICON.edit} Edit</button>
+        <button class="btn sm" data-test-server="${s.id}">Test SSH</button>
+        ${broken.length ? `<button class="btn sm" data-discover-links="${broken.map((l) => l.id).join(",")}">Rebuild the broken ones</button>` : ""}
+      </div>
+    </div>`;
+  };
+  const list = (role) => {
+    const arr = byRole(role);
+    return arr.length ? `<div class="cards">${arr.map(card).join("")}</div>`
+      : `<p class="note">No ${role === "iran" ? "Iran" : "foreign"} server yet. Add one with its IP address and its SSH credentials; the panel finds the tunnels that already run on it.</p>`;
+  };
+  $("#inf-kharej").innerHTML = list("kharej");
+  $("#inf-iran").innerHTML = list("iran");
+}
+
+/* ============================================================== settings */
+function renderSettings() {
+  if (!S) return;
+  // never wipe what the operator is typing in
+  const body = $("#set-body");
+  if (body.contains(document.activeElement)) return;
+  const s = S.settings, tg = s.telegram;
+  const order = [...s.candidate_transports, ...S.transports.filter((t) => !s.candidate_transports.includes(t))];
+  const sec = (n, title, kicker, body) => `<div class="section" id="set-${n}">
+    <header><span class="n">${n}</span><h3>${title}</h3><span class="k">${kicker}</span></header>
+    <div class="modal-body">${body}</div></div>`;
+  $("#set-body").innerHTML =
+    sec("01", "Operating mode", "OBSERVE / MUTATE", `
+      <label class="check"><input type="checkbox" data-set="observe_only" ${s.observe_only ? "checked" : ""}>
+        <span><b>Observe mode</b>: only check and report; no DNS record, config or service is changed automatically</span></label>
+      <p class="hint">In this mode, everywhere the panel would have done something, it only says in the events and on Telegram what it would have done. What you do by hand in the panel is still carried out.</p>
+      <div class="btns"><button class="btn sm" data-open-settings>Open the full settings</button></div>`)
+    + sec("02", "Monitor and recover", "MONITOR / RECOVER", `
+      <div class="grid2">
+        <label>Check interval (seconds)<input data-set="check_interval" type="number" min="10" value="${s.check_interval}"></label>
+        <label>Errors in a row that count as “down”<input data-set="fail_threshold" type="number" min="1" value="${s.fail_threshold}"></label>
+      </div>
+      <div class="grid2">
+        <label>Fail back after (minutes)<input data-set="failback_after" type="number" min="1" value="${Math.round(s.failback_after / 60)}"></label>
+        <label>Timeout of each protocol in the test (seconds)<input data-set="test_timeout" type="number" min="5" value="${s.test_timeout}"></label>
+      </div>
+      <div class="grid2">
+        <label>“Unstable” = how many drops<input data-set="flap_count" type="number" min="2" value="${s.flap_count}"></label>
+        <label>In how many minutes<input data-set="flap_window" type="number" min="1" value="${Math.round(s.flap_window / 60)}"></label>
+      </div>
+      <label class="check"><input type="checkbox" data-set="auto_repair" ${s.auto_repair ? "checked" : ""}> Rebuild the broken tunnels automatically with other protocols</label>
+      <span class="label">Protocols that are tested</span>
+      <div class="tchecks">${order.map((t) => `<label><input type="checkbox" data-set-tr value="${t}" ${s.candidate_transports.includes(t) ? "checked" : ""}>${esc(t)}</label>`).join("")}</div>`)
+    + sec("03", "Discovery and engine", "DISCOVERY / ENGINE", `
+      <label class="check"><input type="checkbox" data-set="auto_adopt" ${s.auto_adopt ? "checked" : ""}> Find and add the existing tunnels on the servers automatically</label>
+      <label class="check"><input type="checkbox" data-set="auto_mesh" ${s.auto_mesh ? "checked" : ""}> Suggest a tunnel for every Iran/foreign pair that has none</label>
+      <div class="grid2">
+        <label>How often to look for tunnels (minutes)<input data-set="scan_interval" type="number" min="1" value="${Math.round(s.scan_interval / 60)}"></label>
+        <label>Tunnel engine version<input data-set="engine_release" class="mono" value="${esc(s.engine_release)}" placeholder="latest"></label>
+      </div>
+      <label>Tunnel engine source URL<input data-set="engine_source" class="mono" value="${esc(s.engine_source || "")}" placeholder="https://github.com/Liwyd/Bull-Tunn/releases"></label>
+      <div class="grid2">
+        <label>First tunnel port<input data-set="tunnel_port_base" type="number" value="${s.tunnel_port_base}"></label>
+        <label>First probe port (local)<input data-set="probe_port_base" type="number" value="${s.probe_port_base}"></label>
+      </div>
+      <label class="check"><input type="checkbox" data-set="install_engine" ${s.install_engine ? "checked" : ""}> Install the tunnel engine automatically on the servers that do not have it</label>`)
+    + sec("04", "DNS accounts", "PROVIDERS", `
+      <div class="opt-list">${S.providers.map((p) => `<div class="opt"><span class="prov ${p.kind}">${p.kind === "cloudflare" ? "CF" : "ARVAN"}</span>
+        <span class="grow">${esc(p.name)} <span class="mono muted small">${esc(p.zone)}</span></span>
+        <button class="btn sm" data-verify-provider="${p.id}">Test</button>
+        <button class="btn sm" data-edit-provider="${p.id}">${ICON.edit} Edit</button>
+        <button class="btn sm danger" data-del-provider="${p.id}">${ICON.trash}</button></div>`).join("") || `<span class="note">No DNS account yet.</span>`}</div>
+      <div class="btns"><button class="btn sm" data-add="provider">${ICON.add} Add a DNS account</button></div>`)
+    + sec("05", "Reporting and backups", "TELEGRAM / BACKUP", `
+      <label class="check"><input type="checkbox" data-set="tg_enabled" ${tg.enabled ? "checked" : ""}> Send every event to Telegram</label>
+      <label class="check"><input type="checkbox" data-set="backup_enabled" ${s.backup_enabled ? "checked" : ""}> Send a full backup to Telegram every night</label>
+      <div class="grid2">
+        <label>Backup time<input data-set="backup_time" class="mono" value="${esc(s.backup_time)}" placeholder="03:00"></label>
+        <label>Backup time zone<input data-set="backup_tz" class="mono" value="${esc(s.backup_tz)}" placeholder="Asia/Tehran"></label>
+      </div>
+      <div class="btns"><button class="btn sm" data-open-settings>Open the full settings</button></div>`);
+
+  $("#set-index").innerHTML = `<span class="label">Sections</span>
+    <div class="index">
+      <button data-goto="set-01" class="on"><span class="n">01</span><span class="t">Operating mode</span><span class="d">Watch only, or act.</span></button>
+      <button data-goto="set-02"><span class="n">02</span><span class="t">Monitor and recover</span><span class="d">How often, and when to give up.</span></button>
+      <button data-goto="set-03"><span class="n">03</span><span class="t">Discovery and engine</span><span class="d">Find the tunnels, push the engine.</span></button>
+      <button data-goto="set-04"><span class="n">04</span><span class="t">DNS accounts</span><span class="d">ArvanCloud and Cloudflare.</span></button>
+      <button data-goto="set-05"><span class="n">05</span><span class="t">Reporting and backups</span><span class="d">Telegram and the nightly copy.</span></button>
+    </div>`;
+}
+
+/* save the quick settings of the settings page */
+async function saveQuickSettings() {
+  const s = S.settings;
+  const get = (k) => $(`[data-set="${k}"]`);
+  const observe = !!get("observe_only").checked;
+  if (s.observe_only && !observe && !confirm("Turn observe mode off? From now on the panel changes the DNS record itself when something fails"
+    + (get("auto_repair").checked ? " and rebuilds the broken tunnels with another protocol" : "") + ".")) {
+    get("observe_only").checked = true;  // leave the panel watching
+    return;
+  }
+  const body = {
+    observe_only: observe,
+    check_interval: +get("check_interval").value,
+    fail_threshold: +get("fail_threshold").value,
+    failback_after: Math.round(+get("failback_after").value * 60),
+    test_timeout: +get("test_timeout").value,
+    flap_count: +get("flap_count").value,
+    flap_window: Math.round(+get("flap_window").value * 60),
+    auto_repair: !!get("auto_repair").checked,
+    auto_adopt: !!get("auto_adopt").checked,
+    auto_mesh: !!get("auto_mesh").checked,
+    scan_interval: Math.round(+get("scan_interval").value * 60),
+    engine_release: get("engine_release").value.trim() || "latest",
+    engine_source: get("engine_source").value.trim(),
+    install_engine: !!get("install_engine").checked,
+    tunnel_port_base: +get("tunnel_port_base").value,
+    probe_port_base: +get("probe_port_base").value,
+    candidate_transports: $$("[data-set-tr]").filter((x) => x.checked).map((x) => x.value),
+    backup_enabled: !!get("backup_enabled").checked,
+    backup_time: get("backup_time").value.trim(),
+    backup_tz: get("backup_tz").value.trim() || "Asia/Tehran",
+    telegram: { ...s.telegram, enabled: !!get("tg_enabled").checked },
+  };
+  if (!body.candidate_transports.length) return toast("Pick at least one protocol", "error");
+  await act(() => api("PUT", "/api/settings", body), "Settings saved");
+}
+
 /* ------------------------------------------------------------ onboarding */
 function renderEmpty() {
   const kh = byRole("kharej"), ir = byRole("iran");
@@ -717,11 +1186,12 @@ function renderEmpty() {
     ["Add a DNS account (ArvanCloud/Cloudflare) and the domains", S.domains.length > 0],
   ];
   const el = $("#empty-hint");
+  if (!el) return;
   const show = S.servers.length < 2 || (!S.domains.length && S.servers.length < 3);
   el.classList.toggle("hidden", !show);
   if (!show) return;
   el.innerHTML = `<div class="empty-card"><h3>Getting started</h3><ol>${steps.map(([t, ok]) => `<li class="${ok ? "done" : ""}">${ok ? "✓ " : ""}${t}</li>`).join("")}</ol>
-    <div class="btns"><button class="btn primary sm" data-add="kharej">＋ Foreign server</button><button class="btn sm" data-add="iran">＋ Iran server</button><button class="btn sm" data-add="domain">＋ Domain</button></div></div>`;
+    <div class="btns"><button class="btn primary sm" data-add="kharej">${ICON.add} Foreign server</button><button class="btn sm" data-add="iran">${ICON.add} Iran server</button><button class="btn sm" data-add="domain">${ICON.add} Domain</button></div></div>`;
 }
 
 /* ---------------------------------------------------------------- drawer */
@@ -741,7 +1211,6 @@ function closeDrawer() {
 function renderDrawer(force) {
   if (!drawer || !S) return;
   const body = $("#drawer-body");
-  // never wipe what the user is typing or a group being edited
   if (!force && (groupDraft || (body.contains(document.activeElement) && document.activeElement.matches("input,textarea,select")))) return;
   const keep = $("#drawer").scrollTop;
   const html = drawer.type === "link" ? linkDrawer() : drawer.type === "server" ? serverDrawer() : domainDrawer();
@@ -750,7 +1219,7 @@ function renderDrawer(force) {
   $("#drawer").scrollTop = keep;
 }
 const head = (title, sub, status) => `<div class="d-head"><div style="flex:1;min-width:0"><h2>${title}</h2><div class="d-sub">${sub}</div></div>
-  ${status ? `<span class="chip"><span class="dot ${status}"></span>${FA[status] || status}</span>` : ""}<button class="btn icon" data-close aria-label="Close">✕</button></div>`;
+  <div class="right">${status ? `<span class="chip"><span class="dot ${status}"></span>${FA[status] || status}</span>` : ""}<button class="btn icon" data-close aria-label="Close">✕</button></div></div>`;
 
 function linkDrawer() {
   const l = linkById(drawer.id);
@@ -762,8 +1231,6 @@ function linkDrawer() {
   const sel = selTransport || l.transport;
   const grid = all.map((t) => {
     const r = l.tests[t];
-    // the engine says what it speaks: a carrier it does not have is shown
-    // as unavailable, so nobody pins a tunnel to it
     const has = !l.engine_transports || !l.engine_transports.length || l.engine_transports.includes(t);
     const cls = ["topt", t === l.transport ? "cur" : "", t === sel ? "sel" : "", r ? (r.ok ? "ok" : "bad") : "", has ? "" : "off"].join(" ");
     const res = !has ? "not in the engine" : r ? (r.ok ? `${ms(r.latency_ms)} · ${r.connect_s ?? "?"}s` : "failed") : "not tested";
@@ -790,7 +1257,7 @@ function linkDrawer() {
   <div class="box"><h4>Forwarded ports — Iran server side (${esc(nm(l.iran_id))})</h4>
     <textarea id="lp-ports" placeholder="443&#10;8443=2096&#10;2053-2060">${esc((l.ports || []).join("\n"))}</textarea>
     <p class="hint">One port per line: “<span class="mono">443</span>” means port 443 of this Iran server goes to the same port on the foreign server; “<span class="mono">8443=2096</span>” means 8443 inside goes to 2096 outside; “<span class="mono">2053-2060</span>” is a range.</p>
-    ${Object.keys(l.exits || {}).length ? `<div class="opt-list">${Object.entries(l.exits).map(([spec, e]) => `<div class="opt"><span class="dot ${exitBad(e) ? "down" : "up"}"></span><span class="grow"><span dir="ltr" style="text-align:left"><span class="mono">${esc(spec)}</span> → ${esc(nm(l.kharej_id))} ↪ ${esc(exitText(e))}</span>${exitLine(e)}</span></div>`).join("")}</div>` : ""}
+    ${Object.keys(l.exits || {}).length ? `<div class="opt-list">${Object.entries(l.exits).map(([spec, e]) => `<div class="opt"><span class="dot ${exitBad(e) ? "down" : "up"}"></span><span class="grow"><span style="text-align:left"><span class="mono">${esc(spec)}</span> → ${esc(nm(l.kharej_id))} ↪ ${esc(exitText(e))}</span>${exitLine(e)}</span></div>`).join("")}</div>` : ""}
     <label class="check"><input type="checkbox" id="lp-udp" ${l.accept_udp ? "checked" : ""}> Forward UDP as well</label>
     <label class="check"><input type="checkbox" id="lp-all"> Set the same ports on every tunnel of ${esc(nm(l.kharej_id))}</label>
     <div class="btns"><button class="btn primary sm" data-save-ports="${l.id}">Save and apply</button></div>
@@ -822,7 +1289,7 @@ function serverDrawer() {
   const row = (l) => {
     const st = lstatus(l);
     const sub = [l.label, l.transport, st === "up" ? ms(l.latency_ms) : FA[st]].filter(Boolean).join(" · ");
-    return `<div class="opt" data-link="${l.id}" style="cursor:pointer"><span class="dot ${st}"></span>
+    return `<div class="opt click" data-link="${l.id}"><span class="dot ${st}"></span>
       <span class="grow"><span>${esc(other(l))}</span><span class="sub mono">${esc(sub)}</span></span></div>`;
   };
   const built = links.filter((l) => l.status !== "pending"), offers = links.filter((l) => l.status === "pending");
@@ -838,8 +1305,8 @@ function serverDrawer() {
     <dt>Priority</dt><dd>${s.priority} ${s.enabled ? "" : "<span class='chip warn'>disabled</span>"}</dd>
     ${s.error ? `<dt>Error</dt><dd style="color:var(--down)">${esc(s.error)}</dd>` : ""}
   </dl>
-  <div class="btns"><button class="btn sm" data-edit-server="${s.id}">Edit</button><button class="btn sm" data-test-server="${s.id}">Test SSH</button>
-  <button class="btn sm" data-scan>Find the tunnels</button><button class="btn sm" data-install="${s.id}">Install the tunnel engine</button><button class="btn sm danger" data-del-server="${s.id}">Delete</button></div></div>
+  <div class="btns"><button class="btn sm" data-edit-server="${s.id}">${ICON.edit} Edit</button><button class="btn sm" data-test-server="${s.id}">Test SSH</button>
+  <button class="btn sm" data-scan>${ICON.scan} Find the tunnels</button><button class="btn sm" data-install="${s.id}">Install the tunnel engine</button><button class="btn sm danger" data-del-server="${s.id}">${ICON.trash} Delete</button></div></div>
   <div class="box"><h4>Connection test ⚡</h4>
     <p class="hint">The path between this server and one on the other side is measured on every protocol: the time to connect, the handshake time and the real round trip. The best protocol can be applied right here.</p>
     ${probePeers(s).length ? `<div class="grid2"><label>${s.role === "iran" ? "Foreign server" : "Iran server"}<select data-probe-peer>
@@ -855,21 +1322,19 @@ function serverDrawer() {
       <button class="btn sm" data-read-command="${s.id}">Read the answer</button></div>
     <div id="cmd-out" class="sub mono"></div></div>` : ""}
   <div class="box"><h4>Tunnels (${built.length})</h4><div class="opt-list">${built.map(row).join("") || "<span class='muted small'>—</span>"}</div>
-    <div class="btns"><button class="btn sm" data-new-link="${s.id}">＋ New tunnel</button>
+    <div class="btns"><button class="btn sm" data-new-link="${s.id}">${ICON.add} New tunnel</button>
     ${broken.length ? `<button class="btn sm" data-discover-links="${broken.map((l) => l.id).join(",")}">Rebuild the broken tunnels</button>` : ""}</div></div>
   ${s.role === "kharej" && serverExits(s.id).length ? `<div class="box"><h4>Ports that finally leave through another server</h4>
-    <div class="opt-list">${serverExits(s.id).map((e) => `<div class="opt"><span class="dot ${exitBad(e) ? "down" : "up"}"></span><span class="grow"><span dir="ltr" style="text-align:left"><span class="mono">${e.port}</span> ↪ ${esc(exitText(e))}</span>${exitLine(e)}</span></div>`).join("")}</div>
+    <div class="opt-list">${serverExits(s.id).map((e) => `<div class="opt"><span class="dot ${exitBad(e) ? "down" : "up"}"></span><span class="grow"><span style="text-align:left"><span class="mono">${e.port}</span> ↪ ${esc(exitText(e))}</span>${exitLine(e)}</span></div>`).join("")}</div>
     <p class="hint">The panel only reads these from the server and shows them (iptables/nft, socat, gost, realm and the connections of the process listening on the port); it changes nothing at this stage.</p></div>` : ""}
   ${offers.length ? `<div class="box"><h4>Pairs without a tunnel</h4><div class="opt-list">${offers.map(row).join("")}</div>
     <div class="btns"><button class="btn sm" data-discover-links="${offers.map((l) => l.id).join(",")}">Build with the best protocol</button></div></div>` : ""}`;
 }
 
-/* the servers of the other role: the path to them is the one to measure */
 function probePeers(s) {
   return byRole(s.role === "iran" ? "kharej" : "iran");
 }
 
-/* the table of a measurement: one row per carrier, the best one marked */
 function probeTable(r) {
   if (!r || !r.ok) {
     return `<p class="note" style="color:var(--down)">${esc((r && r.error) || "no result")}</p>`;
@@ -880,15 +1345,16 @@ function probeTable(r) {
     const cells = ok
       ? `<td class="mono">${ms(x.connect_ms)}</td><td class="mono">${ms(x.handshake_ms)}</td><td class="mono">${ms(x.rtt_ms)}</td>`
       : `<td colspan="3" class="muted small">${esc(x.error || "did not work")}</td>`;
-    return `<tr><td class="mono">${esc(x.transport)}${best ? " ★" : ""}</td>${cells}<td>${ok ? (best ? '<b style="color:var(--up)">best</b>' : "✓") : "✗"}</td></tr>`;
+    return `<tr><td class="mono">${esc(x.transport)}${best ? " ★" : ""}</td>${cells}<td>${ok ? (best ? '<b style="color:var(--ok)">best</b>' : "✓") : "✗"}</td></tr>`;
   }).join("");
   const apply = r.best && r.link_id
     ? `<div class="btns"><button class="btn sm primary" data-apply-probe="${esc(r.link_id)}" data-transport="${esc(r.best)}">Apply ${esc(r.best)} on this tunnel</button></div>`
     : "";
-  return `<table class="links"><tr><th>Protocol</th><th>Connect</th><th>Session</th><th>Round trip</th><th></th></tr>${rows}</table>${apply}`;
+  return `<table class="tbl"><thead><tr><th>Protocol</th><th>Connect</th><th>Session</th><th>Round trip</th><th></th></tr></thead><tbody>${rows}</tbody></table>${apply}`;
 }
 
-function failbackText(d) {  if (!d || !d.failback) return "";
+function failbackText(d) {
+  if (!d || !d.failback) return "";
   const f = d.failback, name = nm(f.iran_id);
   if (f.wait < 0) return `the primary server ${name} does not have all the ports of this domain healthy yet`;
   const left = f.wait - (nowS() - S.now);
@@ -896,43 +1362,40 @@ function failbackText(d) {  if (!d || !d.failback) return "";
 }
 function exitLine(e) {
   if (!e) return "";
-  const st = e.targets.map((t) => `${esc(exitName(t))}${t.server_id ? ` <span class="mono muted">${esc(t.addr)}</span>` : ""} ${t.ok === false ? "<b style='color:var(--down)'>does not answer</b>" : t.ok ? "<span style='color:var(--up)'>✓</span>" : ""}`).join(", ");
+  const st = e.targets.map((t) => `${esc(exitName(t))}${t.server_id ? ` <span class="mono muted">${esc(t.addr)}</span>` : ""} ${t.ok === false ? "<b style='color:var(--down)'>does not answer</b>" : t.ok ? "<span style='color:var(--ok)'>✓</span>" : ""}`).join(", ");
   return `<span class="sub">final exit: ${st} <span class="muted">(${esc(e.method)}${e.inferred ? ", inferred from the connections" : ""})</span></span>`;
 }
+
 function domainDrawer() {
   const d = S.domains.find((x) => x.id === drawer.id);
   if (!d) return "";
   const p = provider(d.provider_id);
   const iran = srv(d.iran_id);
-  // 1. per-port routes on the Iran server the record points at
   const routeRows = (d.routes || []).map((r) => {
     const l = linkById(r.link_id);
     const st = l ? lstatus(l) : "down";
     const sub = l ? [l.label, l.transport, st === "up" ? ms(l.latency_ms) : FA[st]].filter(Boolean).join(" · ") : "no tunnel opens this port on this server";
     return `<div class="opt"><span class="dot ${r.healthy ? "up" : st}"></span>
-      <span class="grow"><span dir="ltr" style="text-align:left"><span class="mono">${esc(r.spec)}</span> → ${esc(l ? nm(l.kharej_id) : "?")}${r.exit ? ` ↪ ${esc(exitText(r.exit))}` : ""}</span><span class="sub mono">${esc(sub)}</span>${exitLine(r.exit)}</span>
+      <span class="grow"><span style="text-align:left"><span class="mono">${esc(r.spec)}</span> → ${esc(l ? nm(l.kharej_id) : "?")}${r.exit ? ` ↪ ${esc(exitText(r.exit))}` : ""}</span><span class="sub mono">${esc(sub)}</span>${exitLine(r.exit)}</span>
       ${l ? `<button class="btn sm" data-link="${l.id}">Tunnel</button>` : ""}</div>`;
   }).join("");
-  // 2. which ports this domain uses: pick from what the Iran server exposes
   const offered = [];
   for (const l of S.links.filter((x) => x.iran_id === d.iran_id && x.status !== "pending")) {
     for (const spec of l.ports || []) if (!offered.some((o) => o.spec === spec)) offered.push({ spec, l });
   }
   for (const spec of d.specs || []) if (!offered.some((o) => o.spec === spec)) offered.push({ spec, l: null });
-  const picker = offered.map((o) => `<label><input type="checkbox" class="dp-port" value="${esc(o.spec)}" ${(d.specs || []).includes(o.spec) ? "checked" : ""}><span dir="ltr">${esc(o.spec)} <span class="muted small">→ ${esc(o.l ? nm(o.l.kharej_id) : "?")}${o.l && (o.l.exits || {})[o.spec] ? ` ↪ ${esc(exitText(o.l.exits[o.spec]))}` : ""}</span></span></label>`).join("");
-  // 3. every Iran server: can it carry all of the domain's ports?
+  const picker = offered.map((o) => `<label><input type="checkbox" class="dp-port" value="${esc(o.spec)}" ${(d.specs || []).includes(o.spec) ? "checked" : ""}><span>${esc(o.spec)} <span class="muted small">→ ${esc(o.l ? nm(o.l.kharej_id) : "?")}${o.l && (o.l.exits || {})[o.spec] ? ` ↪ ${esc(exitText(o.l.exits[o.spec]))}` : ""}</span></span></label>`).join("");
   const cov = (d.coverage || []).map((c) => {
     const s = srv(c.iran_id);
     if (!s) return "";
     const tags = [];
     if (c.iran_id === d.primary_iran) tags.push(`<span class="chip">primary</span>`);
-    if (c.iran_id === d.iran_id) tags.push(`<span class="chip good">current</span>`);
+    if (c.iran_id === d.iran_id) tags.push(`<span class="chip ok">current</span>`);
     const sub = c.ok ? "all the ports are healthy" : (c.problems[0] || "");
     return `<div class="opt ${c.ok ? "" : "off"}"><span class="dot ${c.ok ? "up" : "down"}"></span>
       <span class="grow"><span>${esc(s.name)} <span class="mono muted small">${esc(s.ip)}</span></span><span class="sub">${esc(sub)}${c.problems.length > 1 ? ` (+${c.problems.length - 1})` : ""}</span></span>
       ${tags.join("")}${c.iran_id !== d.primary_iran ? `<button class="btn sm ghost" data-primary="${c.iran_id}" title="Once the failure is over, the traffic comes back to this server">Make it primary</button>` : ""}${c.ok && c.iran_id !== d.iran_id ? `<button class="btn sm" data-switch="${c.iran_id}">Switch</button>` : ""}</div>`;
   }).join("");
-  // 4. allowed tunnels (advanced)
   const manual = groupDraft ? groupDraft.manual : d.group.length > 0;
   const notPending = (id) => (linkById(id) || {}).status !== "pending";
   const order = groupDraft ? (groupDraft.manual ? groupDraft.ids : []) : d.effective_group.filter(manual ? () => true : notPending);
@@ -947,7 +1410,7 @@ function domainDrawer() {
   const fb = failbackText(d);
   return `${head(`<span class="mono">${esc(d.fqdn)}</span>`, `${p ? `<span class="prov ${p.kind}">${p.kind === "cloudflare" ? "Cloudflare" : "ArvanCloud"}</span> ${esc(p.name)}` : "no DNS account"}`, d.status)}
   <div class="box"><h4>Traffic path</h4>
-    <div class="path"><span class="chip">User</span><span class="arrow">→</span><span class="chip mono">${esc(d.fqdn)}</span><span class="arrow">→</span><span class="chip">${esc(iran ? `${iran.name} ${iran.ip}` : "—")}</span></div>
+    <div class="pathline"><span class="chip">User</span><span class="arrow">→</span><span class="chip mono">${esc(d.fqdn)}</span><span class="arrow">→</span><span class="chip">${esc(iran ? `${iran.name} ${iran.ip}` : "—")}</span></div>
     ${iran ? "" : (d.error || "").startsWith("DNS read") && !d.current_ip
       ? `<p class="note" style="color:var(--degraded)">The record of this domain could not be read from DNS (see the error below). Until that is fixed, the panel tries again every 5 minutes and does not change the record.</p>`
       : `<p class="note" style="color:var(--degraded)">The record of this domain points at none of the registered Iran servers. Pick the right one in the “Iran servers” list below.</p>`}
@@ -956,7 +1419,7 @@ function domainDrawer() {
     <dl class="kv"><dt>Record IP</dt><dd class="mono">${esc(d.current_ip || "—")}</dd><dt>TTL</dt><dd class="mono">${d.ttl}s</dd>
     <dt>Last switch</dt><dd>${ago(d.last_switch)}</dd><dt>Automatic failover</dt><dd>${d.auto_failover ? "on" : "off"}</dd>
     ${d.error ? `<dt>Error</dt><dd style="color:var(--down)">${esc(d.error)}</dd>` : ""}</dl>
-    <div class="btns"><button class="btn sm" data-edit-domain="${d.id}">Edit</button><button class="btn sm" data-sync="${d.id}">Read the record from DNS</button><button class="btn sm danger" data-del-domain="${d.id}">Delete</button></div></div>
+    <div class="btns"><button class="btn sm" data-edit-domain="${d.id}">${ICON.edit} Edit</button><button class="btn sm" data-sync="${d.id}">${ICON.refresh} Read the record from DNS</button><button class="btn sm danger" data-del-domain="${d.id}">${ICON.trash} Delete</button></div></div>
   ${iran ? `<div class="box"><h4>Ports and routes on ${esc(iran.name)}</h4>
     <div class="opt-list">${routeRows || "<span class='muted small'>No port has been selected for this domain yet</span>"}</div>
     <label>Which ports does this domain use?</label>
@@ -992,7 +1455,7 @@ function openModal(html, onSubmit) {
 }
 function closeModal() { $("#modal").classList.remove("open"); }
 const actions = (label) => `<div class="modal-actions"><button type="button" class="btn ghost" data-close-modal>Cancel</button><button class="btn primary" type="submit">${label}</button></div>`;
-const lines = (v) => v.split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
+const lines = (v) => String(v || "").split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
 
 function serverForm(role, s) {
   const k = role === "kharej";
@@ -1077,7 +1540,7 @@ function domainForm(d) {
     ${actions(edit ? "Save" : "Add")}`, async (f) => {
     const body = { fqdn: f.get("fqdn"), provider_id: f.get("provider_id"), kharej_id: f.get("kharej_id"), ports: lines(f.get("ports")), ttl: +f.get("ttl") || 120, auto_failover: !!f.get("auto_failover"), group: d.group || [] };
     if (edit) await api("PUT", `/api/domains/${d.id}`, body);
-    else { const r = await api("POST", "/api/domains", body); setTimeout(() => openDrawer("domain", r.domain.id), 300); }
+    else { const r = await api("POST", "/api/domains", body); selectedDomain = r.domain.id; setTimeout(() => openDrawer("domain", r.domain.id), 300); }
     toast("Saved", "success");
   });
 }
@@ -1176,7 +1639,7 @@ function settingsForm() {
 async function restoreForm() {
   const info = await api("GET", "/api/backups");
   const size = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`);
-  const rows = info.files.map((f, i) => `<label class="opt"><input type="radio" name="bk_name" value="${esc(f.name)}">
+  const rows = info.files.map((f) => `<label class="opt"><input type="radio" name="bk_name" value="${esc(f.name)}">
     <span class="grow"><span class="mono">${esc(f.name)}</span><span class="sub">${clock(f.mtime)} · ${size(f.size)} ${f.encrypted ? "· 🔒" : ""}</span></span>
     <a class="btn sm ghost" href="/api/backups/download?name=${encodeURIComponent(f.name)}" download>Download</a></label>`).join("");
   openModal(`<h2>Restore a backup</h2>
@@ -1217,20 +1680,28 @@ function saveDomain(dom, patch) {
   });
 }
 
-const CLICKABLE = "[data-add],[data-close],[data-close-modal],[data-link],[data-pick],[data-apply-transport],[data-retest],[data-unpin],[data-edit-server],[data-test-server],[data-install],[data-del-server],[data-scan],[data-new-link],[data-release],[data-save-ports],[data-save-link],[data-del-link],[data-discover-links],[data-switch],[data-primary],[data-save-dports],[data-sync],[data-edit-domain],[data-del-domain],[data-verify-provider],[data-edit-provider],[data-del-provider],[data-g-mode],[data-g-toggle],[data-g-up],[data-g-down],[data-g-save],[data-g-cancel],[data-install-agent],[data-send-command],[data-read-command],[data-probe],[data-apply-probe]";
+const CLICKABLE = "[data-add],[data-close],[data-close-modal],[data-link],[data-dom],[data-pick],[data-apply-transport],[data-retest],[data-unpin],[data-edit-server],[data-open-server],[data-test-server],[data-install],[data-del-server],[data-scan],[data-new-link],[data-release],[data-save-ports],[data-save-link],[data-del-link],[data-discover-links],[data-switch],[data-primary],[data-save-dports],[data-sync],[data-edit-domain],[data-del-domain],[data-verify-provider],[data-edit-provider],[data-del-provider],[data-g-mode],[data-g-toggle],[data-g-up],[data-g-down],[data-g-save],[data-g-cancel],[data-install-agent],[data-send-command],[data-read-command],[data-probe],[data-apply-probe],[data-dom-ports],[data-open-settings],[data-goto]";
 document.addEventListener("click", async (e) => {
   const t = e.target.closest(CLICKABLE);
   if (!t) {
-    if (!e.target.closest(".menu")) $("#add-pop").classList.remove("open");
+    if (!e.target.closest(".menu")) closeMenus();
     return;
   }
   if (t.closest("#wires")) return; // wire clicks are handled below (pointer events)
   const d = t.dataset;
-  $("#add-pop").classList.remove("open");
+  closeMenus();
   if (d.add) { closeModal(); return addFlow(d.add); }
   if ("close" in d) return closeDrawer();
   if ("closeModal" in d) return closeModal();
-  if (d.pick) { selTransport = d.pick; return renderDrawer(true); }
+  if (d.goto) {
+    const target = document.getElementById(d.goto);
+    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    for (const b of $$("#set-index .index button")) b.classList.toggle("on", b === t);
+    return;
+  }
+  if (d.dom) { selectedDomain = d.dom; renderDomains(); return; }
+  if (d.domPorts) { return openDrawer("domain", d.domPorts); }
+  if (d.openSettings) return settingsForm();  if (d.pick) { selTransport = d.pick; return renderDrawer(true); }
   if ("applyTransport" in d) {
     const l = linkById(drawer.id);
     const tr = selTransport || l.transport || S.settings.candidate_transports[0];
@@ -1255,6 +1726,7 @@ document.addEventListener("click", async (e) => {
   }
   if (d.release) return act(() => api("POST", `/api/links/${d.release}/release`), "The ports came back");
   if (d.editServer) { const s = srv(d.editServer); return serverForm(s.role, s); }
+  if (d.openServer) return openDrawer("server", d.openServer);
   if (d.testServer) {
     const r = await act(() => api("POST", `/api/servers/${d.testServer}/test`));
     return toast(r.status === "online" ? `SSH is fine — ${ms(r.latency_ms)}` : `SSH failed: ${r.error}`, r.status === "online" ? "success" : "error");
@@ -1280,7 +1752,8 @@ document.addEventListener("click", async (e) => {
     return act(() => api("POST", `/api/links/${l.id}/transport`, { transport: d.transport, pin: true }),
       `The protocol ${d.transport} was applied`);
   }
-  if (d.installAgent) {    toast("Installing the command channel…");
+  if (d.installAgent) {
+    toast("Installing the command channel…");
     const r = await act(() => api("POST", `/api/servers/${d.installAgent}/agent`));
     return toast(`The command channel is ready (${r.command_record})`, "success");
   }
@@ -1300,14 +1773,16 @@ document.addEventListener("click", async (e) => {
   }
   if (d.discoverLinks) return act(() => api("POST", "/api/discover", { link_ids: d.discoverLinks.split(",") }), "Building the tunnels has started");
   if (d.switch) {
-    const dom = S.domains.find((x) => x.id === drawer.id);
+    const dom = S.domains.find((x) => x.id === (d.domOf || (drawer && drawer.id)));
+    if (!dom) return;
     const s = srv(d.switch);
     const note = s.id !== dom.primary_iran && dom.auto_failover && !S.settings.observe_only ? `\n\nThe primary server of this domain is ${nm(dom.primary_iran)}; if this change should be permanent, make ${s.name} the “primary”, otherwise the traffic comes back to the primary once it is stable.` : "";
     if (!confirm(`Change the record of ${dom.fqdn} in DNS to ${s.name} (${s.ip})?${note}`)) return;
     return act(() => api("POST", `/api/domains/${dom.id}/switch`, { iran_id: d.switch }), "The record was changed");
   }
   if (d.primary) {
-    const dom = S.domains.find((x) => x.id === drawer.id);
+    const dom = S.domains.find((x) => x.id === (d.domOf || (drawer && drawer.id)));
+    if (!dom) return;
     return act(() => api("POST", `/api/domains/${dom.id}/primary`, { iran_id: d.primary }), `${nm(d.primary)} is now the primary server of ${dom.fqdn}`);
   }
   if (d.saveDports) {
@@ -1349,7 +1824,7 @@ document.addEventListener("click", async (e) => {
   if (d.delProvider) { if (!confirm("Delete the DNS account?")) return; await act(() => api("DELETE", `/api/providers/${d.delProvider}`), "Deleted"); return settingsForm(); }
   if (d.link) return openDrawer("link", d.link);
 });
-// wires & labels live inside the panned canvas: open on a clean click only
+// wires & labels live inside the panned stage: open on a clean click only
 wiresEl.addEventListener("pointerdown", (e) => {
   const w = e.target.closest(".hit,.wlabel");
   if (!w) return;
@@ -1357,7 +1832,12 @@ wiresEl.addEventListener("pointerdown", (e) => {
   const start = [e.clientX, e.clientY];
   const up = (ev) => {
     window.removeEventListener("pointerup", up);
-    if (Math.hypot(ev.clientX - start[0], ev.clientY - start[1]) < 5) openDrawer("link", w.dataset.link);
+    if (Math.hypot(ev.clientX - start[0], ev.clientY - start[1]) < 5) {
+      selLink = w.dataset.link || null;
+      selNode = null;
+      paintSelection();
+      openDrawer("link", w.dataset.link);
+    }
   };
   window.addEventListener("pointerup", up);
 });
@@ -1365,8 +1845,8 @@ wiresEl.addEventListener("pointerdown", (e) => {
 /* hover: focus + tooltip */
 const tip = $("#tip");
 document.addEventListener("mouseover", (e) => {
-  if (pan || $(".node.dragging")) return;
-  const n = e.target.closest("#nodes .node");
+  if (pan || $(".fnode.dragging")) return;
+  const n = e.target.closest("#nodes .fnode");
   const w = e.target.closest(".hit,.wlabel");
   if (!n && !w) {
     if (focus) { focus = null; applyFocus(); tip.classList.remove("show"); }
@@ -1385,39 +1865,62 @@ document.addEventListener("mousemove", (e) => {
   tip.style.left = `${x}px`; tip.style.top = `${e.clientY + 14}px`;
 });
 document.addEventListener("mouseout", (e) => {
-  const from = e.target.closest("#nodes .node,.hit,.wlabel");
-  const to = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest("#nodes .node,.hit,.wlabel");
+  const from = e.target.closest("#nodes .fnode,.hit,.wlabel");
+  const to = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest("#nodes .fnode,.hit,.wlabel");
   if (from && from !== to) { focus = null; applyFocus(); tip.classList.remove("show"); }
 });
 
-$("#btn-discover").onclick = () => {
-  const n = S.links.filter((l) => l.status === "pending" || l.status === "down").length;
-  if (!n) return toast("There is no tunnel that is not built or that is down; the healthy tunnels are left alone");
-  if (!confirm(`${n} tunnels that are not built or that are down will be built/rebuilt by testing every protocol. The healthy tunnels are left alone. Continue?`)) return;
-  act(() => api("POST", "/api/discover", {}), "Building the tunnels has started");
-};
-document.addEventListener("click", (e) => { if (e.target.closest("#observe-pill")) settingsForm(); });
-$("#btn-check").onclick = () => act(() => api("POST", "/api/check"), "The immediate check has started");
-$("#btn-scan").onclick = async () => { const r = await act(() => api("POST", "/api/scan")); toast(r.added ? `${r.added} existing tunnels were found and added` : "No new tunnel was found", "success"); };
-$("#btn-add").onclick = (e) => { e.stopPropagation(); $("#add-pop").classList.toggle("open"); };
-$("#btn-settings").onclick = settingsForm;
+/* the buttons of the page headers are re-created on every render */
+document.addEventListener("click", (e) => {
+  if (e.target.closest("#observe-pill")) settingsForm();
+});
+
 $("#btn-logout").onclick = async () => { await api("POST", "/api/logout"); location.reload(); };
 $("#btn-theme").onclick = () => {
   const cur = document.documentElement.dataset.theme === "light" ? "dark" : "light";
   document.documentElement.dataset.theme = cur;
   try { localStorage.setItem("bt-theme", cur); } catch (_) { /* ignore */ }
+  paintThemeButton();
 };
+function paintThemeButton() {
+  const light = document.documentElement.dataset.theme === "light";
+  // the button offers the other theme, the way the design does
+  $("#theme-label").textContent = light ? "Dark" : "Light";
+  $("#theme-icon").innerHTML = light
+    ? `<path d="M20.5 14.3A8.5 8.5 0 0 1 9.7 3.5a8.5 8.5 0 1 0 10.8 10.8z"/>`
+    : `<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/>`;
+}
+$("#btn-menu").onclick = () => $("#side").classList.toggle("open");
 $("#scrim").onclick = closeDrawer;
 $("#modal").addEventListener("mousedown", (e) => { if (e.target.id === "modal") closeModal(); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeModal(); closeDrawer(); } });
-let lastCanvasW = 0;
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeModal(); closeDrawer(); $("#side").classList.remove("open"); } });
+
+let lastStageW = 0;
 window.addEventListener("resize", () => {
-  const w = canvas.clientWidth;
-  // a different screen (phone <-> desktop): frame everything again
-  if (lastCanvasW && Math.abs(w - lastCanvasW) / lastCanvasW > 0.3) fit();
-  lastCanvasW = w;
+  const w = stage.clientWidth;
+  if (lastStageW && Math.abs(w - lastStageW) / lastStageW > 0.3) fit();
+  lastStageW = w;
   drawWires();
 });
-requestAnimationFrame(() => { lastCanvasW = canvas.clientWidth; });
+requestAnimationFrame(() => { lastStageW = stage.clientWidth; });
 
+/* the clock in the top bar, and the failback countdown */
+setInterval(() => {
+  const d = new Date();
+  $("#clock").textContent = [d.getHours(), d.getMinutes(), d.getSeconds()]
+    .map((n) => String(n).padStart(2, "0")).join(":");
+  if (!S) return;
+  if (drawer && drawer.type === "domain") {
+    const el = $("#failback-timer");
+    if (el) el.textContent = failbackText(S.domains.find((x) => x.id === drawer.id)) || "";
+  }
+}, 1000);
+
+/* the quick settings of the settings page */
+$("#set-body").addEventListener("change", (e) => {
+  if (e.target.matches("[data-set],[data-set-tr]")) saveQuickSettings();
+});
+
+renderActions();
+paintThemeButton();
 boot();
