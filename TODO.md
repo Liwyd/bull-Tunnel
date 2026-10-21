@@ -814,6 +814,32 @@ and the panel accepts that key only from this machine.
 **Done when:** `bull-tunnel` opens the menu and every command does what the
 Python one did ✓.
 
+### Commit 29 — the panel itself, in Go  ✅ done
+
+`cmd/bull-tunnel-panel` is the panel: the API, the web interface, the
+monitor and the bot, in one binary.
+
+* ✅ The HTTP server ✓ (the address and the port of the environment ✓, the
+  certificate of `BT_SSL_CERT` ✓, the health check of the container ✓), the
+  monitor loop ✓ (the cycle ✓, and a check right away when something asks
+  for it ✓) and the Telegram bot ✓.
+* ✅ The key of the management tool of the machine ✓ is written where only
+  the owner can read it ✓, and the panel accepts it only from this
+  machine ✓.
+* ✅ The service ✓ (`deploy/bull-tunnel.service` ✓ — the Go binary ✓), the
+  installer ✓ (`deploy/install.sh` ✓ — it takes the panel of the release ✓,
+  puts the management command on the path ✓ and never touches the data
+  directory ✓) and the image ✓ (`Dockerfile` ✓ — a multi-stage build ✓, a
+  small image ✓, the panel and the engine in it ✓).
+* ✅ The release carries the panel now ✓: `bull-tunnel_linux_<arch>.tar.gz`
+  ✓ holds the panel and the management tool ✓.
+
+**What is left of phase 9:** the Python panel is retired (`bulltunnel/`, the
+Python tests and the wheel go ✓) and the README and the docs say that the
+panel is Go ✓. The Python panel stays in the tree until the last commit of
+the rewrite, so that the two can still be compared — that is what the
+fixtures are for.
+
 ### Phase 9 — the switchover
 
 * The Python panel is retired: `bulltunnel/`, `tests/` (the Python part)
@@ -885,8 +911,9 @@ already work ✓.
 | 26 | The declared dependencies cannot pull a vulnerable version | done |
 | 27 | The Go rewrite — phase 7 (the api) | done |
 | 28 | The Go rewrite — phase 8 (the command) | done |
-| 29 | The Go rewrite — phase 9 (the switchover) | **next** |
-| 30 | The Go rewrite — phase 10 (the dashboard) | later |
+| 29 | The panel itself, in Go | done |
+| 30 | The Go rewrite — phase 9 (the switchover) | **next** |
+| 31 | The Go rewrite — phase 10 (the dashboard) | later |
 
 **All the findings of the audit are closed, and the graph is the type-1
 design.** What is left is the Go rewrite above, and the work that never

@@ -25,6 +25,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -44,6 +45,33 @@ func run(args []string) int {
 	}
 	command := args[0]
 	rest := args[1:]
+	// the password can be given on the command line, the way the installer
+	// gives it: the operator is not there to type it
+	if command == "passwd" {
+		username, password := "", ""
+		for i := 0; i < len(rest); i++ {
+			switch rest[i] {
+			case "--username":
+				if i+1 < len(rest) {
+					username = rest[i+1]
+					i++
+				}
+			case "--password":
+				if i+1 < len(rest) {
+					password = rest[i+1]
+					i++
+				}
+			}
+		}
+		if password != "" {
+			if err := writePassword(filepath.Join(dataDir(), "auth.json"), username, password); err != nil {
+				out.Bad(err.Error())
+				return 1
+			}
+			out.OK("the password was changed; every session is now invalid")
+			return 0
+		}
+	}
 	switch command {
 	case "-h", "--help", "help":
 		usage()

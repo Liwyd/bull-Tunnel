@@ -7,6 +7,20 @@ only adds something.
 
 ## Unreleased
 
+### The panel itself, in Go
+
+`bull-tunnel-panel` is the panel: the API, the web interface, the monitor
+and the bot, in one binary.
+
+- The service, the installer and the image are the panel's now: the
+  installer takes the panel of the release, puts the management command on
+  the path and never touches the data directory; the image is a multi-stage
+  build with the panel and the engine in it.
+- The panel writes the key of the management tool of the machine where only
+  the owner can read it, and accepts it only from this machine.
+- The release carries the panel now: `bull-tunnel_linux_<arch>.tar.gz` holds
+  the panel and the management tool.
+
 ### The management tool of the panel, in Go
 
 `bull-tunnel` is the hand on the panel: it runs on the machine the panel

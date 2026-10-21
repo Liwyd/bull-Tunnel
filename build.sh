@@ -49,6 +49,7 @@ TARGETS=(
 # binary:package  the binaries of this project and where they live
 BINARIES=(
   "bull-tunnel-engine:cmd/bull-tunnel-engine"
+  "bull-tunnel-panel:cmd/bull-tunnel-panel"
   "bull-tunnel:cmd/bull-tunnel"
 )
 
@@ -58,6 +59,9 @@ for t in "${TARGETS[@]}"; do
   rest="${t#*:}"
   goarch="${rest%%:*}"
   goarm="${rest##*:}"
+  # the panel and the tool that manages it travel together: the file of the
+  # release is the one the installer reads
+  panel=""
   for b in "${BINARIES[@]}"; do
     binary="${b%%:*}"
     package="${b#*:}"
@@ -72,6 +76,17 @@ for t in "${TARGETS[@]}"; do
       GOARM="$goarm" GOOS=linux GOARCH=arm go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$OUT/$binary" "./$package"
     else
       GOOS=linux GOARCH="$goarch" go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$OUT/$binary" "./$package"
+    fi
+    if [ "$binary" = "bull-tunnel-panel" ]; then
+      panel="bull-tunnel-panel"
+      continue
+    fi
+    if [ "$binary" = "bull-tunnel" ]; then
+      # the management tool travels with the panel
+      tar -C "$OUT" -czf "$OUT/bull-tunnel_linux_${name}.tar.gz" "bull-tunnel" "$panel"
+      rm -f "$OUT/$binary" "$panel"
+      echo "  bull-tunnel_linux_${name}.tar.gz"
+      continue
     fi
     tar -C "$OUT" -czf "$OUT/${binary}_linux_${name}.tar.gz" "$binary"
     rm -f "$OUT/$binary"

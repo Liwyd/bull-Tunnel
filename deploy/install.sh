@@ -27,33 +27,23 @@ PORT="${BT_PORT:-8080}"
 if [ -f "$ENV_FILE" ]; then
   PORT="$(sed -n 's/^BT_PORT=//p' "$ENV_FILE" | tail -n1)"; PORT="${PORT:-8080}"
 fi
+REPO="${BT_REPO:-Liwyd/bull-Tunnel}"
+VERSION="${BT_VERSION:-latest}"
 
 say() { printf '\n== %s\n' "$*"; }
 die() { printf '\n!! %s\n' "$*" >&2; exit 1; }
 
-# The source of the panel: the checkout this script lives in, or — when the
-# script is piped from the network — the release it belongs to.
-REPO="${BT_REPO:-Liwyd/bull-Tunnel}"
-VERSION="${BT_VERSION:-latest}"
-here="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo .)"
-if [ -d "$here/../bulltunnel" ]; then
-  SRC="$(cd "$here/.." && pwd)"
-elif [ -d "$here/bulltunnel" ]; then
-  SRC="$here"
-else
-  TMP="$(mktemp -d)"
-  if [ "$VERSION" = "latest" ]; then
-    url="https://github.com/$REPO/archive/refs/heads/main.tar.gz"
-  else
-    url="https://github.com/$REPO/archive/refs/tags/v$VERSION.tar.gz"
-  fi
-  say "fetching the panel from $url"
-  command -v curl >/dev/null || die "curl is needed to fetch the panel"
-  curl -fsSL "$url" | tar -xz -C "$TMP"
-  SRC="$(find "$TMP" -maxdepth 1 -mindepth 1 -type d | head -n1)"
-  [ -d "$SRC/bulltunnel" ] || die "the fetched archive does not hold the panel"
-  CLEAN="$TMP"
-fi
+# The machine this runs on: the name of the file of the release.
+arch() {
+  case "$(uname -m)" in
+    x86_64|amd64) echo amd64 ;;
+    aarch64|arm64) echo arm64 ;;
+    i686|i386) echo 386 ;;
+    armv7l) echo armv7 ;;
+    *) uname -m ;;
+  esac
+}
+ARCH="$(arch)"
 
 # Never take a port from something already running here (a live tunnel server
 # may have xray, nginx or another panel on it). Checked before anything is
@@ -67,17 +57,42 @@ if [ -n "$OWNER" ] && ! echo "$OWNER" | grep -q bulltunnel && ! systemctl is-act
   echo "Port $PORT is already in use on this server:"
   echo "  $OWNER"
   echo "Nothing was changed. Pick a free port, e.g.:  BT_PORT=9090 bash deploy/install.sh"
-  echo "Port $PORT is already in use on this server; nothing was changed. Run it with a free port."
   exit 1
 fi
 
-if ! command -v python3 >/dev/null; then
-  apt-get update && apt-get install -y python3 python3-venv
+# The source of the panel: the checkout this script lives in, or — when the
+# script is piped from the network — the release it belongs to.
+here="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo .)"
+if [ -d "$here/../cmd/bull-tunnel-panel" ]; then
+  SRC="$(cd "$here/.." && pwd)"
+  LOCAL=1
+else
+  LOCAL=""
 fi
-python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' || die "Python 3.10+ is required"
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+say "fetching the panel $VERSION for $ARCH"
+command -v curl >/dev/null || die "curl is needed to fetch the panel"
+if [ "$VERSION" = "latest" ]; then
+  url="https://github.com/$REPO/releases/latest/download/bull-tunnel_linux_${ARCH}.tar.gz"
+else
+  url="https://github.com/$REPO/releases/download/v$VERSION/bull-tunnel_linux_${ARCH}.tar.gz"
+fi
+curl -fsSL "$url" -o "$TMP/panel.tar.gz" || die "the panel could not be fetched from $url"
+tar -xzf "$TMP/panel.tar.gz" -C "$TMP"
+[ -f "$TMP/bull-tunnel-panel" ] || die "the fetched file does not hold the panel"
+[ -f "$TMP/bull-tunnel" ] || die "the fetched file does not hold the management tool"
+
+if [ -n "$LOCAL" ]; then
+  # a checkout: the static files of the web interface are here
+  if [ -d "$SRC/bulltunnel/static" ]; then
+    cp -r "$SRC/bulltunnel/static" "$TMP/static"
+  fi
+fi
 
 say "preparing $DEST and $DATA"
-mkdir -p "$DEST" "$DATA"
+mkdir -p "$DEST/bin" "$DATA"
 chmod 700 "$DATA"
 # the service runs as its own unprivileged user
 if ! id -u bulltunnel >/dev/null 2>&1; then
@@ -85,36 +100,28 @@ if ! id -u bulltunnel >/dev/null 2>&1; then
 fi
 chown -R bulltunnel:bulltunnel "$DATA"
 
-say "python environment"
-# Ubuntu ships the venv module without ensurepip until python3-venv (or
-# python3.X-venv) is installed, so "venv --help" passing proves nothing
-if ! python3 -m venv "$DEST/venv" >/dev/null 2>&1; then
-  PYV="$(python3 -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}')')"
-  apt-get update && { apt-get install -y "python$PYV-venv" || apt-get install -y python3-venv; }
-  rm -rf "$DEST/venv"
-  python3 -m venv "$DEST/venv"
-fi
-"$DEST/venv/bin/pip" install -q --upgrade pip
-"$DEST/venv/bin/pip" install -q -r "$SRC/requirements.txt"
-
-say "installing the code"
+say "installing the panel"
 # Stage the new code next to the old one and swap it in one move, with the
-# service stopped: a half-written package can never be imported.
+# service stopped: a half-written binary can never be run.
 STAGE="$(mktemp -d "$DEST/.stage-XXXXXX")"
-# everything this run made is removed when it ends, however it ends
-trap 'rm -rf "$STAGE" ${CLEAN:-}' EXIT
-cp -r "$SRC/bulltunnel" "$STAGE/"
-if [ -f "$SRC/README.md" ]; then cp "$SRC/README.md" "$STAGE/"; fi
+trap 'rm -rf "$STAGE" "$TMP"' EXIT
+cp "$TMP/bull-tunnel-panel" "$STAGE/"
+cp "$TMP/bull-tunnel" "$STAGE/"
+chmod 755 "$STAGE/bull-tunnel-panel" "$STAGE/bull-tunnel"
+if [ -d "$TMP/static" ]; then cp -r "$TMP/static" "$STAGE/"; fi
 systemctl stop bull-tunnel 2>/dev/null || true
-rm -rf "$DEST/bulltunnel"
-mv "$STAGE/bulltunnel" "$DEST/bulltunnel"
-chmod -R a+rX "$DEST/bulltunnel"
+rm -rf "$DEST/bin" "$DEST/static"
+mv "$STAGE/bull-tunnel-panel" "$DEST/bin/"
+mv "$STAGE/bull-tunnel" "$DEST/bin/"
+chmod 755 "$DEST/bin/bull-tunnel-panel" "$DEST/bin/bull-tunnel"
+if [ -d "$STAGE/static" ]; then mv "$STAGE/static" "$DEST/static"; fi
+rmdir "$STAGE" 2>/dev/null || true
 
 say "the management command"
 # The command is put where every shell finds it, the way BackPack's is: the
 # operator runs "bull-tunnel" and the menu opens.
-ln -sf "$DEST/venv/bin/bull-tunnel" /usr/local/bin/bull-tunnel
-echo "bull-tunnel -> $DEST/venv/bin/bull-tunnel"
+ln -sf "$DEST/bin/bull-tunnel" /usr/local/bin/bull-tunnel
+echo "bull-tunnel -> $DEST/bin/bull-tunnel"
 
 if [ ! -f "$ENV_FILE" ]; then
   cat > "$ENV_FILE" <<CONF
@@ -127,14 +134,15 @@ CONF
   chmod 640 "$ENV_FILE"
 fi
 
+CREATED=0
 if [ ! -f "$DATA/auth.json" ] || ! grep -q '"hash"' "$DATA/auth.json"; then
   PASS="$(head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 16)"
-  (cd "$DEST" && "$DEST/venv/bin/python" -m bulltunnel --data "$DATA" passwd --username admin --password "$PASS")
+  "$DEST/bin/bull-tunnel" passwd --username admin --password "$PASS" >/dev/null
   CREATED=1
 fi
 
 say "starting the service"
-cp "$SRC/deploy/bull-tunnel.service" "$UNIT"
+cp "$SRC/deploy/bull-tunnel.service" "$UNIT" 2>/dev/null || cp "$here/bull-tunnel.service" "$UNIT"
 systemctl daemon-reload
 systemctl enable bull-tunnel >/dev/null 2>&1 || true
 systemctl restart bull-tunnel
@@ -154,7 +162,7 @@ fi
 IP="$(curl -fsS4 --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
 echo
 echo "bull-Tunnel is running:  http://$IP:$PORT"
-if [ "${CREATED:-0}" = 1 ]; then
+if [ "$CREATED" = 1 ]; then
   echo "  username: admin"
   echo "  password: $PASS"
   echo "  (change it any time: bull-tunnel passwd)"

@@ -9,7 +9,7 @@ User=bulltunnel
 Group=bulltunnel
 WorkingDirectory=/opt/bull-tunnel
 EnvironmentFile=-/etc/default/bull-tunnel
-ExecStart=/opt/bull-tunnel/venv/bin/python -m bulltunnel --data /var/lib/bull-tunnel serve
+ExecStart=/opt/bull-tunnel/bin/bull-tunnel-panel --data /var/lib/bull-tunnel
 Restart=always
 RestartSec=3
 

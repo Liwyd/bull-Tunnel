@@ -47,8 +47,8 @@ type Orchestrator struct {
 	// busy are the links with an operation in flight: a tunnel that is
 	// being built or repaired is not healthy yet.
 	busy map[string]bool
-	// woken says that the monitor must check right now.
-	woken bool
+	// wake says that the monitor must check right now.
+	wake chan struct{}
 
 	// driver is how the panel talks to the servers.
 	driver Driver
@@ -84,6 +84,7 @@ func New(st *store.Store) *Orchestrator {
 	return &Orchestrator{
 		store:        st,
 		busy:         map[string]bool{},
+		wake:         make(chan struct{}, 1),
 		repairAfter:  map[string]float64{},
 		lastProbe:    map[string]*engine.Probe{},
 		prevOK:       map[string]bool{},
@@ -95,19 +96,23 @@ func New(st *store.Store) *Orchestrator {
 
 // Wake asks the monitor to check right now.
 func (o *Orchestrator) Wake() {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.woken = true
+	select {
+	case o.wake <- struct{}{}:
+	default:
+		// the monitor has been asked already
+	}
 }
 
-// Woken says whether the monitor was asked to check right now, and forgets
-// it.
-func (o *Orchestrator) Woken() bool {
+// Woken is the channel the monitor waits on: something asks for a check
+// right now.
+func (o *Orchestrator) Woken() <-chan struct{} { return o.wake }
+
+// SetBroadcast tells the brain how to tell the web interface that something
+// changed.
+func (o *Orchestrator) SetBroadcast(broadcast func(message map[string]any)) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	woken := o.woken
-	o.woken = false
-	return woken
+	o.broadcast = broadcast
 }
 
 // LastCheck is when the last cycle ran.
