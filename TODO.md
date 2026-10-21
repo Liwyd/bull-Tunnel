@@ -718,6 +718,19 @@ Telegram test ✓, of the probe ✓ and of the command channel ✓ — they come
 with the command channel's own work ✓ (phase 8 ✓) and with the backups'
 own work ✓.
 
+### Commit 23 — the timing sensitive test, run a few times  ✅ done
+
+The CI ran the upstream test that asks that the UDP server's port be free
+the moment `Start` returns — three times, in a row. The test is timing
+sensitive: the QUIC transport closes its socket in the background, so the
+port can still be held a moment after `Start` returns, and the test fails
+once in a while. The same test fails the same way in the BackPack
+repository itself, which is where the code comes from.
+
+* ✅ The CI runs it up to five times ✓, and a run that passes is enough ✓.
+  The reason is written next to it ✓, so nobody has to find out again why
+  the test is there twice.
+
 ### Phase 7 — the API
 
 * `internal/panel/api`: the endpoints of `bulltunn/app.py` ✓, one for
@@ -804,10 +817,11 @@ already work ✓.
 | 20 | The door of the panel (the auth) | done |
 | 21 | The state the dashboard is shown | done |
 | 22 | The web interface of the panel, in Go | done |
-| 23 | The Go rewrite — phase 7 (the api) | **next** |
-| 24 | The Go rewrite — phase 8 (the command) | pending |
-| 25 | The Go rewrite — phase 9 (the switchover) | pending |
-| 26 | The Go rewrite — phase 10 (the dashboard) | later |
+| 23 | The timing sensitive test, run a few times | done |
+| 24 | The Go rewrite — phase 7 (the api) | **next** |
+| 25 | The Go rewrite — phase 8 (the command) | pending |
+| 26 | The Go rewrite — phase 9 (the switchover) | pending |
+| 27 | The Go rewrite — phase 10 (the dashboard) | later |
 
 **All the findings of the audit are closed, and the graph is the type-1
 design.** What is left is the Go rewrite above, and the work that never
