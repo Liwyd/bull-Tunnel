@@ -766,6 +766,17 @@ the Telegram test ✓ and the backups ✓.
   restore ✓ — the state being replaced is kept first ✓, in case it was a
   mistake ✓).
 
+### Commit 26 — the declared dependencies cannot pull a vulnerable version  ✅ done
+
+The floors of the dependencies were old enough to allow versions with known
+faults: `asyncssh>=2.14` allowed the path traversal of the SCP and of the
+`AuthorizedKeysFile` (fixed in 2.23.1), and `cryptography>=3.4` allowed the
+wheels with a vulnerable OpenSSL (fixed in 48.0.1).
+
+* ✅ The floors are raised ✓ (`requirements.txt` ✓ and `pyproject.toml` ✓):
+  the panel asks for versions that are not known to be faulty ✓, and what
+  is installed already was ✓.
+
 ### Phase 7 — the API
 
 * `internal/panel/api`: the endpoints of `bulltunn/app.py` ✓, one for
@@ -855,10 +866,11 @@ already work ✓.
 | 23 | The timing sensitive test, run a few times | done |
 | 24 | The connection test of the panel, in Go | done |
 | 25 | The endpoints that talk to the outside | done |
-| 26 | The Go rewrite — phase 7 (the api) | **next** |
-| 27 | The Go rewrite — phase 8 (the command) | pending |
-| 28 | The Go rewrite — phase 9 (the switchover) | pending |
-| 29 | The Go rewrite — phase 10 (the dashboard) | later |
+| 26 | The declared dependencies cannot pull a vulnerable version | done |
+| 27 | The Go rewrite — phase 7 (the api) | **next** |
+| 28 | The Go rewrite — phase 8 (the command) | pending |
+| 29 | The Go rewrite — phase 9 (the switchover) | pending |
+| 30 | The Go rewrite — phase 10 (the dashboard) | later |
 
 **All the findings of the audit are closed, and the graph is the type-1
 design.** What is left is the Go rewrite above, and the work that never

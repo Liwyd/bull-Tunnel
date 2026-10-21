@@ -7,6 +7,15 @@ only adds something.
 
 ## Unreleased
 
+### The declared dependencies cannot pull a vulnerable version
+
+The floors of the dependencies were old enough to allow versions with known
+faults: `asyncssh>=2.14` allowed the path traversal of the SCP and of the
+`AuthorizedKeysFile` (fixed in 2.23.1), and `cryptography>=3.4` allowed the
+wheels with a vulnerable OpenSSL (fixed in 48.0.1). The floors are raised:
+the panel now asks for versions that are not known to be faulty, and what
+is installed already was.
+
 ### The connection test of an IPv4 server never worked
 
 The file the connection test (the ⚡ button) writes on the far side
