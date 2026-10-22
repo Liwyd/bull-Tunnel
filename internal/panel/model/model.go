@@ -256,7 +256,13 @@ func LinkDefaults() Link {
 
 // Normalize fills the names a tunnel is known by, the way the Python panel
 // does when it builds the link: a managed tunnel is named after its id.
+//
+// A tunnel that has no identifier gets one: the tunnel is known by it in
+// the state file, in the events and in the groups of the domains.
 func (l *Link) Normalize() {
+	if l.ID == "" {
+		l.ID = NewID("l")
+	}
 	if l.IranName == "" {
 		l.IranName = "bt-" + l.ID
 	}

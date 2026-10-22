@@ -877,9 +877,56 @@ takes the tunnels with it. The state was not behind any lock.
 operator (adding a server, saving a tunnel) takes the lock of the state, and
 the cycle holds it while it checks the servers, so the change can wait for
 the check to finish — up to the time a slow server takes to answer. It is
-bounded and rare, and it is better than a panel that falls over; it is fixed
-by letting the cycle give the lock back between its phases, which is a
-bigger change than this commit.
+bounded and rare, and it is better than a panel that falls over. **Fixed in
+commit 32 ✓**: the cycle gives the lock back between its phases, and the
+test says so ✓.
+
+### Commit 32 — the demo, and the lock of the state  ✅ done
+
+The demo is how a newcomer watches the failovers without a server, and the
+Go panel had none. It also carried two bugs of the port, found by writing
+it.
+
+* ✅ **The demo is Go** ✓ (`internal/panel/demo` ✓): the simulated network
+  ✓ (`simnet.go` ✓ — the servers die ✓, the carriers are blocked per pair
+  ✓, the paths flap ✓, every carrier has a latency ✓), the DNS service of
+  the demo ✓ (`simdns.go` ✓ — the records live in the memory ✓, the panel
+  can be watched moving them ✓), the world the panel starts with ✓
+  (`seed.go` ✓ — six servers ✓, two DNS accounts ✓, four domains ✓, and the
+  tunnels that were "set up by hand" before the panel existed ✓), and the
+  chaos ✓ (`chaos.go` ✓ — something breaks every minute ✓).
+  The panel runs it with `BT_DEMO=1` ✓ (`cmd/bull-tunnel-panel` ✓): the
+  same code, the same check cycle, the same decisions ✓ — the network is
+  simulated, nothing else is.
+* ✅ **A tunnel without an identifier gets one** ✓ (`internal/panel/model`
+  ✓). The Python panel gives every tunnel an identifier when it builds it;
+  the Go one did not, so the tunnel the mesh offers ✓ and the tunnel the
+  panel adopts ✓ were all written under the key "" in the state file: one
+  of them survived and the other was lost ✓. The names of the tunnel were
+  "bt-" with nothing after it ✓.
+* ✅ **The set of the state has a lock of its own** ✓
+  (`internal/panel/store/set.go` ✓). The lock of the state keeps the state
+  consistent, but the set itself was read while it was written — and Go
+  stops the whole program when a map is read and written at the same time
+  ✓. The panel could die while the operator added a server ✓. It does not
+  any more ✓, and the test says so ✓ (`set_test.go` ✓).
+* ✅ **The cycle gives the lock back between its phases** ✓: the servers ✓,
+  the tunnels ✓ and the exits ✓ are read under the lock and copied ✓, the
+  network calls are made with the lock released ✓, and what the cycle
+  learned is written to the tunnel that is there now ✓ — the change the
+  operator made while the cycle was working is not lost ✓. The test: the
+  cycle waits for a server that takes its time ✓, and the operator's
+  change does not wait for it ✓
+  (`internal/panel/orch/work_test.go` ✓).
+
+**What is still open (and it is not a fault of the demo):** the *writers* of
+the fields of a tunnel — the repair and the discovery, which run in the
+background ✓ — write them without taking the lock of the state ✓. The
+reader (the cycle) takes it ✓, the writer does not ✓: the race detector
+sees it, and the panel does not fall over (the values are a state and a
+number ✓). The fix is to give the writers the lock as well ✓ — it touches
+every path that changes a tunnel ✓, and it is the change this plan calls
+"bigger" ✓.
 
 ### Phase 9 — the switchover  (in progress)
 
@@ -892,22 +939,16 @@ tool ✓.
 * ✅ The service runs the Go binary ✓, the installer fetches the panel of
   the release ✓ and the image is a multi-stage build with the panel and the
   engine in it ✓.
+* ✅ The demo runs in the Go panel ✓ (commit 32 ✓).
+* ✅ The API does not wait for the cycle ✓ (commit 32 ✓).
 
 **What is left, and why it waits:**
 
-* **The demo.** The demo mode is still the Python panel's, and the Go panel
-  has none: the simulated network and the fake DNS are not ported yet. The
-  demo is how a newcomer watches the failovers without a server, so it is
-  part of the switchover and not an extra.
 * **The Python panel goes last.** It is the reference the fixtures compare
   against — the state file, the configuration of a tunnel, the scripts, the
   backups, the sessions and the decisions of the brain are all pinned by
-  what the Python panel writes. It goes when the demo is ported and the
-  last comparison has been made.
-* **The API waits for the check cycle.** A change made by the operator
-  takes the lock of the state, and the cycle holds it while it checks the
-  servers (commit 31 ✓). It is bounded and rare, and it is fixed by
-  letting the cycle give the lock back between its phases.
+  what the Python panel writes. It goes when the demo is ported ✓ and the
+  last comparison has been made ✓.
 
 **Done when:** a fresh machine installs the panel with the one line ✓, the
 panel comes up ✓, the demo runs ✓, and the release carries the two

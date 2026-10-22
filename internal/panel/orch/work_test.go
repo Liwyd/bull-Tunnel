@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,6 +32,13 @@ type fakeDriver struct {
 	latency float64
 	// calls are the calls the panel made, in order.
 	calls []string
+	// slow, when it is not nothing, is waited for before a server answers:
+	// the panel is left waiting for a server that takes its time.
+	slow chan struct{}
+	// asked is closed when the panel asks a server for the first time.
+	asked chan struct{}
+	// askedOnce guards asked.
+	askedOnce sync.Once
 }
 
 func newFakeDriver() *fakeDriver {
@@ -44,6 +52,12 @@ func newFakeDriver() *fakeDriver {
 }
 
 func (d *fakeDriver) Ping(s *model.Server) (float64, error) {
+	if d.asked != nil {
+		d.askedOnce.Do(func() { close(d.asked) })
+	}
+	if d.slow != nil {
+		<-d.slow
+	}
 	if d.down[s.ID] {
 		return 0, fmt.Errorf("the server does not answer")
 	}
@@ -337,6 +351,49 @@ func TestTheObserveModeChangesNothing(t *testing.T) {
 	}
 }
 
+// TestTheCycleGivesTheLockBackWhileItWaitsForAServer: the change the
+// operator makes must not wait for a slow server. The cycle holds the lock
+// of the state only while it writes it: the network calls are made with it
+// released.
+func TestTheCycleGivesTheLockBackWhileItWaitsForAServer(t *testing.T) {
+	w := newWorld(t)
+	w.driver.asked = make(chan struct{})
+	w.driver.slow = make(chan struct{})
+
+	done := make(chan struct{})
+	go func() {
+		w.orch.CheckAll()
+		close(done)
+	}()
+
+	select {
+	case <-w.driver.asked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the cycle never asked the server")
+	}
+
+	// the cycle is waiting for the server: the lock of the state must be
+	// free, or the operator's change would wait for the server too.
+	free := make(chan struct{})
+	go func() {
+		w.store.Lock()
+		w.store.Unlock()
+		close(free)
+	}()
+	select {
+	case <-free:
+	case <-time.After(5 * time.Second):
+		t.Error("the lock of the state is held while the cycle waits for a server")
+	}
+
+	close(w.driver.slow)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the cycle did not finish")
+	}
+}
+
 // TestTheTunnelsThatAreAlreadyRunningAreAdopted: a tunnel the panel finds
 // on the servers is added to the panel.
 func TestTheTunnelsThatAreAlreadyRunningAreAdopted(t *testing.T) {
@@ -379,6 +436,12 @@ func TestTheTunnelsThatAreAlreadyRunningAreAdopted(t *testing.T) {
 	}
 	if adopted.Token != "abc" {
 		t.Errorf("the token of the tunnel is %q, it must be abc", adopted.Token)
+	}
+	if adopted.ID == "" {
+		t.Error("the tunnel that was found has no identifier, it must have one")
+	}
+	if !w.store.Links.Has(adopted.ID) {
+		t.Errorf("the tunnel %q is not in the panel under its own identifier", adopted.ID)
 	}
 }
 

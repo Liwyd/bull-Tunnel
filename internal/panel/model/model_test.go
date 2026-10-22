@@ -148,3 +148,29 @@ func TestTheAllowedCarriersWin(t *testing.T) {
 		t.Errorf("the carriers are ranked %v, only wsmux is allowed", ranked)
 	}
 }
+
+// TestALinkWithoutAnIdentifierGetsOne: a tunnel the panel builds itself
+// (the mesh it offers, a tunnel it adopts) is known by its identifier: two
+// of them must never share one.
+func TestALinkWithoutAnIdentifierGetsOne(t *testing.T) {
+	first := &Link{IranID: "i1", KharejID: "k1"}
+	second := &Link{IranID: "i2", KharejID: "k2"}
+	first.Normalize()
+	second.Normalize()
+
+	if first.ID == "" || second.ID == "" {
+		t.Fatal("a link without an identifier must get one")
+	}
+	if first.ID == second.ID {
+		t.Errorf("the two links share the identifier %q, they must not", first.ID)
+	}
+	if first.IranName != "bt-"+first.ID {
+		t.Errorf("the name of the link is %q, it must be bt-<id>", first.IranName)
+	}
+	// an identifier that is already there is kept
+	kept := &Link{ID: "l42"}
+	kept.Normalize()
+	if kept.ID != "l42" {
+		t.Errorf("the identifier of the link is %q, it must be l42", kept.ID)
+	}
+}

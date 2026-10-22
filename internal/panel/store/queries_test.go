@@ -218,3 +218,32 @@ func TestTheTunnelsOfAServerAreTakenAway(t *testing.T) {
 		t.Error("the tunnel of the other server was taken away, it must not be")
 	}
 }
+
+// TestTheMeshOffersTunnelsThatCanBeToldApart: the mesh the panel offers
+// gives every pair of servers a tunnel of its own: two tunnels never share
+// an identifier, or one of them would be lost in the state file.
+func TestTheMeshOffersTunnelsThatCanBeToldApart(t *testing.T) {
+	s := aState(t)
+	s.Settings.AutoMesh = true
+
+	created := s.EnsureLinks()
+	if len(created) == 0 {
+		t.Fatal("the mesh offered no tunnel, it must offer one for every pair")
+	}
+	seen := map[string]bool{}
+	for _, link := range created {
+		if link.ID == "" {
+			t.Fatal("a tunnel of the mesh has no identifier, it must have one")
+		}
+		if seen[link.ID] {
+			t.Errorf("two tunnels of the mesh share the identifier %q, they must not", link.ID)
+		}
+		seen[link.ID] = true
+		if !s.Links.Has(link.ID) {
+			t.Errorf("the tunnel %q is not in the panel, it must be", link.ID)
+		}
+	}
+	if len(s.Links.List()) != len(aState(t).Links.List())+len(created) {
+		t.Errorf("the panel has %d tunnels, it must have %d", len(s.Links.List()), len(aState(t).Links.List())+len(created))
+	}
+}

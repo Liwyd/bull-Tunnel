@@ -178,11 +178,17 @@ func (o *Orchestrator) checkServers() {
 		err     error
 	}
 	servers := []*model.Server{}
+	// the servers are read under the lock and copied: the operator may
+	// change one while the cycle is talking to the servers, and the answer
+	// must be about the server that is there now.
+	o.store.RLock()
 	for _, server := range o.store.Servers.List() {
 		if server.Enabled {
-			servers = append(servers, server)
+			copied := *server
+			servers = append(servers, &copied)
 		}
 	}
+	o.store.RUnlock()
 	results := make([]result, len(servers))
 	var wg sync.WaitGroup
 	for i, server := range servers {
@@ -205,7 +211,12 @@ func (o *Orchestrator) checkServers() {
 	o.store.Lock()
 	says := []string{}
 	for _, r := range results {
-		server := r.server
+		// the server as it is now: the operator may have changed it while
+		// the cycle was talking to it.
+		server := o.store.Servers.Get(r.server.ID)
+		if server == nil {
+			continue
+		}
 		kind := "Iran"
 		if server.Role != model.Iran {
 			kind = "foreign"
@@ -248,12 +259,17 @@ func (o *Orchestrator) checkServers() {
 // checkLinks asks every Iran server how its tunnels are doing.
 func (o *Orchestrator) checkLinks() {
 	byIran := map[string][]*model.Link{}
+	// the tunnels are read under the lock and copied: the panel may be
+	// repairing one of them while the cycle is asking about it.
+	o.store.RLock()
 	for _, link := range o.store.Links.List() {
 		if o.Busy(link.ID) || link.Status == model.StatusPending || link.Transport == "" {
 			continue
 		}
-		byIran[link.IranID] = append(byIran[link.IranID], link)
+		copied := *link
+		byIran[link.IranID] = append(byIran[link.IranID], &copied)
 	}
+	o.store.RUnlock()
 	for iranID, links := range byIran {
 		iran := o.store.Servers.Get(iranID)
 		probes := map[string]*engine.Probe{}
@@ -267,10 +283,14 @@ func (o *Orchestrator) checkLinks() {
 		}
 		o.store.Lock()
 		for _, link := range links {
+			current := o.store.Links.Get(link.ID)
+			if current == nil {
+				continue
+			}
 			// the carriers the engine on the Iran side speaks: what the
 			// tunnel may be built with, and what the panel shows
 			if iran != nil && len(iran.EngineTransports) > 0 {
-				link.EngineTransports = append([]string{}, iran.EngineTransports...)
+				current.EngineTransports = append([]string{}, iran.EngineTransports...)
 			}
 		}
 		o.store.Unlock()
@@ -290,7 +310,13 @@ func (o *Orchestrator) checkLinks() {
 // Telegram.
 func (o *Orchestrator) applyProbe(link *model.Link, probe *engine.Probe) {
 	o.store.Lock()
-	says := o.applyProbeLocked(link, probe)
+	// the tunnel as it is now: the operator may have changed it while the
+	// cycle was asking about it.
+	current := o.store.Links.Get(link.ID)
+	says := []aSaying{}
+	if current != nil {
+		says = o.applyProbeLocked(current, probe)
+	}
 	o.store.Unlock()
 	for _, say := range says {
 		o.Emit(say.level, "link", say.message, say.notify, map[string]string{"link": link.ID})
@@ -410,15 +436,14 @@ func (o *Orchestrator) checkExits() {
 	}
 	o.setLastExits(model.Now())
 	for _, kharej := range o.store.Kharejs() {
+		// what is known about the exits of the kharej is read under the
+		// lock: the map of the exits is written by the phase below.
+		o.store.RLock()
 		if !o.Usable(kharej) {
+			o.store.RUnlock()
 			continue
 		}
 		ports, remote := o.store.KharejPorts(kharej.ID, 200)
-		if len(ports) == 0 && len(remote) == 0 {
-			kharej.Exits = map[string]map[string]any{}
-			kharej.ExitReach = map[string]map[string]any{}
-			continue
-		}
 		known := map[string]bool{}
 		for _, hop := range kharej.Exits {
 			for _, target := range targetsOf(hop) {
@@ -427,6 +452,17 @@ func (o *Orchestrator) checkExits() {
 		}
 		for _, target := range remote {
 			known[target] = true
+		}
+		o.store.RUnlock()
+		if len(ports) == 0 && len(remote) == 0 {
+			o.store.Lock()
+			current := o.store.Servers.Get(kharej.ID)
+			if current != nil {
+				current.Exits = map[string]map[string]any{}
+				current.ExitReach = map[string]map[string]any{}
+			}
+			o.store.Unlock()
+			continue
 		}
 		list := []string{}
 		for target := range known {
@@ -441,7 +477,10 @@ func (o *Orchestrator) checkExits() {
 			continue
 		}
 		o.store.Lock()
-		o.updateExits(kharej, ports, found, reach)
+		current := o.store.Servers.Get(kharej.ID)
+		if current != nil {
+			o.updateExits(current, ports, found, reach)
+		}
 		o.store.Unlock()
 	}
 }

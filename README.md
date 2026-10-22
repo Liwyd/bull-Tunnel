@@ -615,9 +615,12 @@ network and breaks something every minute so that the failovers can be
 watched live:
 
 ```bash
-python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
-./venv/bin/python -m bulltunnel demo --port 8080
+BT_DEMO=1 go run ./cmd/bull-tunnel-panel
 ```
+
+The panel answers on <http://127.0.0.1:8080> with six servers, two DNS
+accounts and four domains; the tunnels that were "set up by hand" before the
+panel existed are found by the first scan and adopted ✓.
 
 The panel itself is Go: it is built and tested with the Go toolchain, and
 the dependencies are vendored, so the build needs no network:

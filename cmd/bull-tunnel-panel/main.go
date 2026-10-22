@@ -24,6 +24,7 @@ import (
 	"github.com/Liwyd/bull-Tunnel/internal/panel/api"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/auth"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/backup"
+	"github.com/Liwyd/bull-Tunnel/internal/panel/demo"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/dns"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/engine"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/localauth"
@@ -46,7 +47,7 @@ func main() {
 	data := dataDir()
 	host := envOr("BT_HOST", "0.0.0.0")
 	port := envOr("BT_PORT", "8080")
-	demo := os.Getenv("BT_DEMO") == "1"
+	demoMode := os.Getenv("BT_DEMO") == "1"
 
 	if err := os.MkdirAll(data, 0o700); err != nil {
 		log.Fatalf("the data directory cannot be made: %v", err)
@@ -57,15 +58,36 @@ func main() {
 	pool := ssh.NewPool(10*time.Second, keys)
 	defer pool.Close()
 
-	driver := engine.NewDriver(pool, filepath.Join(data, "cache"), "latest", state.Settings.EngineRelease, state.Settings.EngineSource)
+	// the driver: the real engine, or the simulated network of the demo
+	var driver orch.Driver = engine.NewDriver(pool, filepath.Join(data, "cache"), "latest", state.Settings.EngineRelease, state.Settings.EngineSource)
+	// the DNS: the real service, or the one of the demo
+	var dnsFactory func(provider *model.DNSProvider) (dns.Client, error) = func(provider *model.DNSProvider) (dns.Client, error) {
+		return dns.New(provider, os.Getenv("BT_DNS_PROXY"))
+	}
+	var resolver orch.Resolver = func(fqdn string, resolvers []string) map[string][]string {
+		return dns.ResolveA(fqdn, resolvers, os.Getenv("BT_DNS_PROXY"))
+	}
+
+	stop := make(chan struct{})
+	if demoMode {
+		// the demo: a simulated network and a DNS service that keeps the
+		// records in the memory, so the failovers can be watched without
+		// a server.
+		network := demo.NewSimNet(false)
+		service := demo.NewSimDNS("example.com")
+		demo.Seed(state, network, service)
+		driver = network
+		dnsFactory = func(provider *model.DNSProvider) (dns.Client, error) {
+			return service, nil
+		}
+		resolver = service.Resolver
+		go demo.Chaos(state, network, stop)
+	}
+
 	brain := orch.NewWith(state, orch.Options{
-		Driver: driver,
-		DNS: func(provider *model.DNSProvider) (dns.Client, error) {
-			return dns.New(provider, os.Getenv("BT_DNS_PROXY"))
-		},
-		Resolver: func(fqdn string, resolvers []string) map[string][]string {
-			return dns.ResolveA(fqdn, resolvers, os.Getenv("BT_DNS_PROXY"))
-		},
+		Driver:   driver,
+		DNS:      dnsFactory,
+		Resolver: resolver,
 	})
 
 	bot := telegram.New(func() model.Telegram { return state.Settings.TG() },
@@ -80,14 +102,12 @@ func main() {
 		HostKeys:     keys,
 		LocalKey:     localauth.ReadLocalKey(filepath.Join(data, localauth.KeyName)),
 		Version:      version,
-		Demo:         demo,
+		Demo:         demoMode,
 		Static:       staticDir(),
-		DNS: func(provider *model.DNSProvider) (dns.Client, error) {
-			return dns.New(provider, os.Getenv("BT_DNS_PROXY"))
-		},
-		Bot:     bot,
-		Backups: backup.NewStore(data, "/etc/default/bull-tunnel"),
-		Driver:  driver,
+		DNS:          dnsFactory,
+		Bot:          bot,
+		Backups:      backup.NewStore(data, "/etc/default/bull-tunnel"),
+		Driver:       driver,
 	})
 	brain.SetBroadcast(panel.Broadcast)
 
@@ -98,6 +118,7 @@ func main() {
 	}
 	go bot.Start()
 	defer bot.Stop()
+	defer close(stop)
 
 	server := &http.Server{
 		Addr:              host + ":" + port,
