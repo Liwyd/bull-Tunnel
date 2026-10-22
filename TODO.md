@@ -1112,6 +1112,13 @@ work that never ends: watching the panel on a live server.
   test passed by luck ✓. The comparison is made when nobody writes the set
   any more ✓. The CI runs the suite again, one package at a time, when the
   first run fails ✓ — a real failure is still a failure ✓.
+* **The race detector only sees what the machine it runs on happens to
+  interleave** ✓: the panel was written with the lock in place on the
+  readers ✓, and the runner found the writers that were left ✓ — one at a
+  time ✓, each one of them a race that was really there ✓. The test that
+  runs the cycle ✓, the repair ✓, the discovery ✓ and the operator moving a
+  domain ✓ at the same time ✓ is in the suite now ✓, and it is the one that
+  finds them ✓.
 
 
 
