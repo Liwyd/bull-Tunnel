@@ -134,7 +134,9 @@ func (o *Orchestrator) portsTaken(link *model.Link) string {
 		return fmt.Sprintf("the free ports of %s could not be checked: %v", iran.Name, err)
 	}
 	wanted := map[int]bool{link.TunnelPort: true}
-	for port := range engine.ListenPorts(o.store.LinkPorts(link), 5000) {
+	exposed := []string{}
+	o.read(func() { exposed = o.store.LinkPorts(link) })
+	for port := range engine.ListenPorts(exposed, 5000) {
 		wanted[port] = true
 	}
 	if link.ProbePort != 0 {
@@ -618,7 +620,9 @@ func (o *Orchestrator) redeployIranSide(link *model.Link) bool {
 	if o.driver == nil {
 		return false
 	}
-	if err := o.driver.DeployIran(link, iran, kharej, o.store.LinkPorts(link)); err != nil {
+	ports := []string{}
+	o.read(func() { ports = o.store.LinkPorts(link) })
+	if err := o.driver.DeployIran(link, iran, kharej, ports); err != nil {
 		o.Emit("error", "deploy", fmt.Sprintf("updating the ports of %s failed: %v", o.LinkLabel(link), err), true,
 			map[string]string{"link": link.ID})
 		return false
@@ -629,7 +633,7 @@ func (o *Orchestrator) redeployIranSide(link *model.Link) bool {
 // PortsChanged says that the ports of a tunnel changed: the Iran side that
 // carries them is written again.
 func (o *Orchestrator) PortsChanged(link *model.Link) {
-	carrier := o.store.Links.Get(o.store.Carrier(link.ID))
+	carrier := o.copyLink(o.store.Links.Get(o.store.Carrier(link.ID)))
 	if carrier == nil || carrier.Status == model.StatusPending || carrier.Transport == "" {
 		return
 	}

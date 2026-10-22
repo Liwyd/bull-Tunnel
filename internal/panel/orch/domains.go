@@ -31,8 +31,10 @@ func (o *Orchestrator) evaluateDomains() {
 			o.assignInitial(work)
 			continue
 		}
+		// the group is the tunnels the domain may use: it is copied under
+		// the lock, so that the decisions can be made on it without it.
 		o.store.RLock()
-		group := o.store.GroupOf(work)
+		group := o.copyGroup(o.store.GroupOf(work))
 		hard, soft := o.Cover(work, work.IranID, group, false)
 		o.store.RUnlock()
 		if len(hard) == 0 && len(soft) == 0 {
@@ -62,7 +64,8 @@ func (o *Orchestrator) evaluateDomains() {
 			}
 			continue
 		}
-		plan := o.PlanFor(domain, group)
+		var plan *Plan
+		o.read(func() { plan = o.PlanFor(work, group) })
 		if plan == nil {
 			busy := false
 			for _, link := range group {
@@ -282,7 +285,8 @@ func (o *Orchestrator) releaseHandovers() {
 
 // maybeFailback brings the traffic back to the primary, once it is stable.
 func (o *Orchestrator) maybeFailback(domain *model.Domain, group []*model.Link) {
-	order := o.store.IranOrder(domain)
+	order := []string{}
+	o.read(func() { order = o.store.IranOrder(domain) })
 	if len(order) == 0 || !domain.AutoFailover || o.settings().ObserveOnly {
 		return
 	}
@@ -290,7 +294,8 @@ func (o *Orchestrator) maybeFailback(domain *model.Domain, group []*model.Link) 
 	if primary == domain.IranID || model.Now()-domain.LastSwitch < float64(o.settings().FailbackAfter) {
 		return
 	}
-	hard, soft := o.Cover(domain, primary, group, true)
+	hard, soft := []string{}, []string{}
+	o.read(func() { hard, soft = o.Cover(domain, primary, group, true) })
 	if len(hard) > 0 || len(soft) > 0 {
 		return
 	}
@@ -322,22 +327,31 @@ func (o *Orchestrator) assignInitial(domain *model.Domain) {
 		}
 	}
 	if match != nil {
-		domain.IranID = match.ID
-		if domain.PrimaryIran == "" {
-			domain.PrimaryIran = match.ID
-		}
-		if len(domain.Ports) == 0 && domain.KharejID != "" {
-			domain.Ports = o.store.DomainSpecs(domain)
-		}
-		hard, _ := o.Cover(domain, domain.IranID, o.store.GroupOf(domain), false)
+		ports := []string{}
+		group := []*model.Link{}
+		o.read(func() {
+			ports = o.store.DomainSpecs(domain)
+			group = o.copyGroup(o.store.GroupOf(domain))
+		})
+		hard, _ := []string{}, []string{}
+		o.read(func() { hard, _ = o.Cover(domain, match.ID, group, false) })
+		status := "ok"
 		if len(hard) > 0 {
-			domain.Status = "unknown"
-		} else {
-			domain.Status = "ok"
+			status = "unknown"
 		}
+		o.writeDomain(domain, func(current *model.Domain) {
+			current.IranID = match.ID
+			if current.PrimaryIran == "" {
+				current.PrimaryIran = match.ID
+			}
+			if len(current.Ports) == 0 && current.KharejID != "" {
+				current.Ports = ports
+			}
+			current.Status = status
+		})
 		tail := "set the ports of the domain in the domain panel"
-		if len(o.store.DomainSpecs(domain)) > 0 {
-			tail = "routes: " + o.routesText(domain, domain.IranID)
+		if len(ports) > 0 {
+			tail = "routes: " + o.routesText(domain, match.ID)
 		}
 		o.Emit("info", "domain", fmt.Sprintf("domain %s currently points at %s (%s); %s",
 			domain.FQDN, match.Name, match.IP, tail), false, map[string]string{"domain": domain.ID})
@@ -367,7 +381,11 @@ func (o *Orchestrator) assignInitial(domain *model.Domain) {
 // already points at one of our Iran servers starts from there instead of
 // changing the DNS.
 func (o *Orchestrator) ReadRecord(domain *model.Domain) {
-	provider := o.store.Providers.Get(domain.ProviderID)
+	work := o.copyDomain(domain)
+	if work == nil {
+		return
+	}
+	provider := o.store.Providers.Get(work.ProviderID)
 	if provider == nil {
 		return
 	}
@@ -379,23 +397,31 @@ func (o *Orchestrator) ReadRecord(domain *model.Domain) {
 	if err != nil {
 		return
 	}
-	ips, err := client.GetA(domain.FQDN)
+	ips, err := client.GetA(work.FQDN)
 	if err != nil {
 		message := "DNS read: " + err.Error()
-		if domain.Error != message {
-			domain.Error = message
-			o.Emit("error", "dns", fmt.Sprintf("the record of the domain %s could not be read: %v", domain.FQDN, err), true,
+		changed := false
+		o.writeDomain(domain, func(current *model.Domain) {
+			changed = current.Error != message
+			if changed {
+				current.Error = message
+			}
+		})
+		if changed {
+			o.Emit("error", "dns", fmt.Sprintf("the record of the domain %s could not be read: %v", work.FQDN, err), true,
 				map[string]string{"domain": domain.ID})
 		}
 		o.Changed()
 		return
 	}
+	address := ""
 	if len(ips) > 0 {
-		domain.CurrentIP = ips[0]
-	} else {
-		domain.CurrentIP = ""
+		address = ips[0]
 	}
-	domain.Error = ""
+	o.writeDomain(domain, func(current *model.Domain) {
+		current.CurrentIP = address
+		current.Error = ""
+	})
 	o.Changed()
 }
 
@@ -646,7 +672,7 @@ func (o *Orchestrator) adopt(iran *model.Server, kharej *model.Server, server *e
 		}
 	}
 	if existing != nil {
-		if !o.Busy(existing.ID) && o.store.Handover[existing.ID] == "" && !o.store.HandoverHas(existing.ID) {
+		if !o.Busy(existing.ID) && !o.store.HandedOver(existing.ID) && !o.store.HandoverHas(existing.ID) {
 			// edited outside the panel: follow it
 			existing.Transport = server.Transport()
 			existing.Token = server.Token()

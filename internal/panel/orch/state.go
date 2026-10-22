@@ -55,6 +55,17 @@ func (o *Orchestrator) copyDomain(domain *model.Domain) *model.Domain {
 	return &copied
 }
 
+// copyGroup is the group of a domain, copied: the group is the tunnels a
+// domain may use, and the panel writes them while the cycle watches the
+// domain.
+func (o *Orchestrator) copyGroup(group []*model.Link) []*model.Link {
+	out := []*model.Link{}
+	for _, link := range group {
+		out = append(out, link.Clone())
+	}
+	return out
+}
+
 // write changes a tunnel under the lock of the state. It says whether the
 // tunnel is still in the panel.
 func (o *Orchestrator) write(link *model.Link, change func(*model.Link)) bool {

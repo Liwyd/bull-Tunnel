@@ -987,7 +987,10 @@ taking the lock ✓. The race detector saw it ✓.
   the tunnel that is there now ✓, not to the one it was given ✓ — and the
   same goes for the servers ✓ (the engine and the carriers it speaks ✓) and
   for the domains ✓ (the record that is moved ✓, the propagation that is
-  watched ✓).
+  watched ✓, the record that is read ✓).
+* ✅ **The questions the panel asks its state are asked under the lock** ✓:
+  the group of a domain ✓, the routes ✓, the ports of a tunnel ✓ and the
+  order of the servers ✓ are read while the panel writes them ✓.
 * ✅ The test: the cycle ✓, the repair ✓, the discovery ✓ and the operator
   moving a domain ✓, all at the same time ✓, over and over ✓, under the
   race detector ✓ (`internal/panel/orch/work_test.go` ✓). It fails without
