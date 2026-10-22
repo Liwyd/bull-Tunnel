@@ -955,6 +955,10 @@ against ✓ — and it is gone.
 * ✅ The files of the release are clean ✓: the panel binary that was left
   beside the tarballs is gone ✓ (the path of the removal was relative ✓,
   and the file stayed ✓).
+* ✅ The CI is patient with the tests that measure the time ✓: the runner
+  is slower than a laptop ✓, so a failed run is run again with the
+  packages one after the other ✓ — and a real failure is still a failure
+  ✓.
 
 ### Phase 9 — the switchover  ✅ done
 

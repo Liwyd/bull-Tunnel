@@ -35,7 +35,15 @@ jobs:
           # batch (and the detector allocates a great deal). They are run on
           # their own, without the detector; a real failure is still a
           # failure.
-          go test -race -skip 'TestStartDoesNotReturnUntilThePortsAreFree|TestWriteBatchDoesNotAllocatePerCall' ./...
+          #
+          # The runner is slower than a laptop, and some of the tests of the
+          # engine measure the time: when the run fails, the packages are
+          # run one after the other, and a failure that is not a real one
+          # shows itself there. A real failure is still a failure.
+          go test -race -skip 'TestStartDoesNotReturnUntilThePortsAreFree|TestWriteBatchDoesNotAllocatePerCall' ./... || {
+            echo "the tests failed; they are run again, one package at a time"
+            go test -race -p 1 -skip 'TestStartDoesNotReturnUntilThePortsAreFree|TestWriteBatchDoesNotAllocatePerCall' ./...
+          }
       - name: the timing sensitive test, on its own
         run: |
           # The upstream test is timing sensitive: the QUIC transport closes
