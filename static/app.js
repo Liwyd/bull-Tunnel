@@ -20,9 +20,6 @@ const FA = {
   up: "Up", degraded: "Unstable", down: "Down", testing: "Testing", pending: "Not built",
   online: "Online", offline: "Offline", unknown: "Unknown", ok: "Healthy", broken: "Broken",
 };
-const COL_X = { kharej: 0, iran: 400, domain: 800 };
-const COL_TITLE = { kharej: "Exit servers", iran: "Ingress servers", domain: "DNS domains" };
-const COL_KICKER = { kharej: "EXIT", iran: "INGRESS", domain: "DNS" };
 const NODE_W = 232;
 
 const VIEWS = {
@@ -314,7 +311,7 @@ function bindActions() {
   if (check2) check2.onclick = check.onclick;
   if (discover2) discover2.onclick = discover.onclick;
   const edit = $("#btn-settings");
-  if (edit) edit.onclick = settingsForm;
+  if (edit) edit.onclick = () => openForm("settings");
   $$("#net-actions .menu > .menu-btn, #tun-actions .menu > .menu-btn, #dom-actions .menu > .menu-btn, #inf-actions .menu > .menu-btn")
     .forEach((b) => (b.onclick = (e) => { e.stopPropagation(); toggleMenu(b); }));
 }
@@ -1067,249 +1064,143 @@ function domainDrawer() {
 }
 
 /* ----------------------------------------------------------------- modals */
-function openModal(html, onSubmit) {
+/* The forms are the panel's: the markup comes from /api/form, every field
+   carries the key the API names it by, and the form says where it is sent
+   and what it says when it is done. This is the whole of what the script
+   does with a form: it collects what he wrote, and sends it. */
+function openModal(html) {
   const f = $("#modal-form");
   f.innerHTML = html;
   $("#modal").classList.add("open");
-  f.onsubmit = async (e) => {
-    e.preventDefault();
-    const btn = f.querySelector("[type=submit]");
-    if (btn) btn.disabled = true;
-    // the submit is kept, so that whatever the form does after it — the
-    // test message, for one — waits for it instead of racing with it
-    lastSubmit = (async () => {
-      try { await onSubmit(new FormData(f), f); closeModal(); }
-      catch (err) { toast(err.message, "error"); }
-      finally { if (btn) btn.disabled = false; }
-    })();
-    await lastSubmit;
-  };
   const first = f.querySelector("input:not([type=checkbox]),select,textarea");
   if (first) setTimeout(() => first.focus(), 50);
 }
 function closeModal() { $("#modal").classList.remove("open"); }
-const actions = (label) => `<div class="modal-actions"><button type="button" class="btn ghost" data-close-modal>Cancel</button><button class="btn primary" type="submit">${label}</button></div>`;
 const lines = (v) => String(v || "").split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
 
-function serverForm(role, s) {
-  const k = role === "kharej";
-  const edit = !!s;
-  s = s || { name: "", ip: "", ssh_port: 22, ssh_user: "root", priority: 100, enabled: true, probe_target: "" };
-  openModal(`<h2>${edit ? "Edit" : "Add"} ${k ? "foreign" : "Iran"} server</h2>
-    <div class="grid2"><label>Name<input name="name" required value="${esc(s.name)}" placeholder="${k ? "Hetzner-DE" : "Tehran-1"}"></label>
-    <label>IP address<input name="ip" required class="mono" value="${esc(s.ip)}" placeholder="1.2.3.4"></label></div>
-    <div class="grid2"><label>SSH user<input name="ssh_user" value="${esc(s.ssh_user)}"></label><label>SSH port<input name="ssh_port" type="number" value="${s.ssh_port}"></label></div>
-    <label>SSH password<input name="ssh_password" type="password" autocomplete="new-password" value="${edit && s.ssh_password ? "••••" : ""}" placeholder="${edit ? "empty = unchanged" : ""}"></label>
-    <label>SSH private key (optional)<textarea name="ssh_key" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----">${edit && s.ssh_key ? "••••" : ""}</textarea></label>
-    <label>Host key fingerprint<input name="host_key" class="mono" value="${esc(s.host_key || "")}" placeholder="SHA256:..."></label>
-    <p class="hint">Leave it empty and the panel pins the key it saw the first time. If you copy the fingerprint from the server itself (<span class="mono">ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</span>), only that key is accepted.</p>
-    ${k ? `<label>Health probe target<input name="probe_target" class="mono" value="${esc(s.probe_target)}" placeholder="127.0.0.1:${s.ssh_port}"></label>
-    <p class="hint">To test the real path, the panel connects to this address from inside the tunnel (default: the SSH of this server).</p>` : ""}
-    <div class="grid2"><label>Priority (lower comes first)<input name="priority" type="number" value="${s.priority}"></label>
-    <label class="check" style="align-self:end"><input type="checkbox" name="enabled" ${s.enabled ? "checked" : ""}> Enabled</label></div>
-    <p class="hint">${k ? "When a foreign server fails completely, its ports move to a foreign server with a lower number." : "On a failure, the domain moves to an Iran server with a lower number."} If they are all equal, the order is the alphabetical order of the names. The “primary” server of a domain is a separate thing and does not follow the priority.</p>
-    ${edit ? "" : `<p class="hint">Once it is connected, the panel finds and adds the tunnels that already run on the servers by itself.</p>`}
-    ${actions(edit ? "Save" : "Add")}`, async (f) => {
-    const body = {
-      role, name: f.get("name").trim(), ip: f.get("ip").trim(), ssh_user: f.get("ssh_user").trim() || "root",
-      ssh_port: +f.get("ssh_port") || 22, ssh_password: f.get("ssh_password"), ssh_key: f.get("ssh_key"),
-      priority: +f.get("priority") || 100, enabled: !!f.get("enabled"), probe_target: k ? f.get("probe_target").trim() : "",
-      host_key: f.get("host_key").trim(),
-    };
-    if (edit) await api("PUT", `/api/servers/${s.id}`, body); else await api("POST", "/api/servers", body);
-    toast(edit ? "Saved" : "Server added; connecting and looking for tunnels…", "success");
-  });
+// openForm asks the panel for one of its forms.
+async function openForm(id, params = {}) {
+  const q = new URLSearchParams({ id });
+  for (const [key, value] of Object.entries(params)) if (value) q.set(key, value);
+  try {
+    const answer = await api("GET", `/api/form?${q}`);
+    openModal(answer.html);
+    const f = $("#modal-form");
+    f.dataset.method = answer.method;
+    f.dataset.endpoint = answer.endpoint;
+    f.dataset.done = answer.done || "";
+    f.dataset.after = answer.after || "";
+    f.dataset.reload = answer.reload ? "1" : "";
+  } catch (err) { toast(err.message, "error"); }
 }
 
-function linkForm(preset = {}) {
-  const ir = byRole("iran"), kh = byRole("kharej");
-  if (!ir.length || !kh.length) { toast("Add the Iran and the foreign servers first"); return; }
-  const opt = (list, sel) => list.map((s) => `<option value="${s.id}" ${s.id === sel ? "selected" : ""}>${esc(s.name)} — ${esc(s.ip)}</option>`).join("");
-  openModal(`<h2>New tunnel</h2>
-    <div class="grid2"><label>Foreign server<select name="kharej_id">${opt(kh, preset.kharej_id)}</select></label>
-    <label>Iran server<select name="iran_id">${opt(ir, preset.iran_id)}</select></label></div>
-    <label>Forwarded ports (Iran side)<textarea name="ports" placeholder="443&#10;8443=2096"></textarea></label>
-    <div class="grid2"><label>Protocol<select name="transport"><option value="">Automatic (test them all and pick the best)</option>${S.transports.map((t) => `<option value="${t}">${TNAME[t] || t}</option>`).join("")}</select></label>
-    <label>Display name<input name="label" placeholder="e.g. spare-ws"></label></div>
-    <p class="hint">Between one pair of servers you can have several tunnels with different protocols, and put them in the group of a domain.</p>
-    ${actions("Create")}`, async (f) => {
-    await api("POST", "/api/links", {
-      iran_id: f.get("iran_id"), kharej_id: f.get("kharej_id"), label: f.get("label").trim(),
-      ports: lines(f.get("ports")), transport: f.get("transport") || null,
-    });
-    toast("The tunnel is being built", "success");
-  });
+// put writes a field into the body of the request. The fields of the
+// Telegram settings are one level down: telegram.bot_token.
+function put(body, key, value) {
+  const parts = key.split(".");
+  let at = body;
+  for (const part of parts.slice(0, -1)) at = at[part] = at[part] || {};
+  at = at[parts[parts.length - 1]] = value;
 }
 
-function providerForm(p) {
-  const edit = !!p;
-  p = p || { name: "", kind: "arvan", zone: "", proxied: false };
-  openModal(`<h2>${edit ? "Edit" : "Add"} DNS account</h2>
-    <div class="grid2"><label>Name<input name="name" required value="${esc(p.name)}" placeholder="main Arvan"></label>
-    <label>Provider<select name="kind"><option value="arvan" ${p.kind === "arvan" ? "selected" : ""}>ArvanCloud</option><option value="cloudflare" ${p.kind === "cloudflare" ? "selected" : ""}>Cloudflare</option></select></label></div>
-    <label>Zone (the root domain)<input name="zone" required class="mono" value="${esc(p.zone)}" placeholder="example.ir"></label>
-    <label>API Key / Token<input name="api_token" type="password" class="mono" autocomplete="off" value="${edit ? "••••" : ""}" ${edit ? "" : "required"}></label>
-    <p class="hint">Arvan: the API key (with or without the Apikey prefix). Cloudflare: an API Token with the Zone → DNS → Edit permission.</p>
-    <label class="check"><input type="checkbox" name="proxied" ${p.proxied ? "checked" : ""}> The records are proxied (ArvanCloud / Cloudflare CDN) — usually off for a tunnel</label>
-    ${actions(edit ? "Save" : "Add")}`, async (f) => {
-    const body = { name: f.get("name"), kind: f.get("kind"), zone: f.get("zone"), api_token: f.get("api_token"), proxied: !!f.get("proxied") };
-    if (edit) await api("PUT", `/api/providers/${p.id}`, body); else await api("POST", "/api/providers", body);
-    toast("Saved", "success");
-  });
+// formBody is what he wrote, as the API wants it: every field says which
+// key it holds, whether it is a number, several lines or a group of
+// choices — and the form says where it goes.
+async function formBody(f) {
+  const body = {};
+  for (const el of f.querySelectorAll("[data-field],[data-file]")) {
+    if (el.dataset.file) {  // a file he picked, as the API takes it
+      if (el.files.length) put(body, el.dataset.file, await toBase64(el.files[0]));
+      continue;
+    }
+    const key = el.dataset.field;
+    if (el.type === "radio") { if (el.checked) put(body, key, el.value); continue; }
+    if (el.dataset.checks) { if (el.checked) (body[key] = body[key] || []).push(el.value); continue; }
+    let value;
+    if (el.type === "checkbox") value = el.checked;
+    else if (el.dataset.num) value = (el.value === "" ? +(el.dataset.def || 0) : +el.value) * (+(el.dataset.scale || 1));
+    else if (el.dataset.lines) value = lines(el.value);
+    else value = el.value.trim() || el.dataset.else || "";
+    put(body, key, value);
+  }
+  return body;
 }
 
-function domainForm(d) {
-  if (!S.providers.length) { toast("Add a DNS account first"); return providerForm(); }
-  if (!byRole("kharej").length) { toast("Add the servers first"); return serverForm("kharej"); }
-  const edit = !!d;
-  d = d || { fqdn: "", provider_id: S.providers[0].id, kharej_id: "", ports: [], ttl: 120, auto_failover: true, group: [] };
-  openModal(`<h2>${edit ? "Edit" : "Add"} domain</h2>
-    <label>Domain<input name="fqdn" required class="mono" value="${esc(d.fqdn)}" placeholder="sub.example.ir"></label>
-    <div class="grid2"><label>DNS account<select name="provider_id">${S.providers.map((p) => `<option value="${p.id}" ${p.id === d.provider_id ? "selected" : ""}>${esc(p.name)} (${esc(p.zone)})</option>`).join("")}</select></label>
-    <label>Foreign server (optional)<select name="kharej_id"><option value="">— I will pick the ports myself</option>${byRole("kharej").map((k) => `<option value="${k.id}" ${k.id === d.kharej_id ? "selected" : ""}>${esc(k.name)}</option>`).join("")}</select></label></div>
-    <label>The ports of this domain (optional)<input name="ports" class="mono" value="${esc((d.ports || []).join(", "))}" placeholder="443, 2053"></label>
-    <p class="hint">The ports the users of this domain connect to. Every port can go to a different foreign server. Leave it empty and, once the record has been read, tick the ports in the domain panel from the tunnels of that Iran server (or, if you picked a foreign server, the ports of the tunnels of that foreign server are used).</p>
-    <div class="grid2"><label>TTL (seconds)<input name="ttl" type="number" min="60" value="${d.ttl}"></label>
-    <label class="check" style="align-self:end"><input type="checkbox" name="auto_failover" ${d.auto_failover ? "checked" : ""}> Automatic failover on a failure</label></div>
-    ${actions(edit ? "Save" : "Add")}`, async (f) => {
-    const body = { fqdn: f.get("fqdn"), provider_id: f.get("provider_id"), kharej_id: f.get("kharej_id"), ports: lines(f.get("ports")), ttl: +f.get("ttl") || 120, auto_failover: !!f.get("auto_failover"), group: d.group || [] };
-    if (edit) await api("PUT", `/api/domains/${d.id}`, body);
-    else { const r = await api("POST", "/api/domains", body); selectedDomain = r.domain.id; setTimeout(() => openDrawer("domain", r.domain.id), 300); }
-    toast("Saved", "success");
-  });
+// toBase64 reads a file the way the API takes it: as text of base64.
+async function toBase64(file) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < buf.length; i += 32768) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 32768));
+  return btoa(bin);
 }
 
-function settingsForm() {
-  const s = S.settings, tg = s.telegram;
-  const order = [...s.candidate_transports, ...S.transports.filter((t) => !s.candidate_transports.includes(t))];
-  openModal(`<h2>Settings</h2>
-    <fieldset><legend>Working mode</legend>
-      <label class="check"><input type="checkbox" name="observe_only" ${s.observe_only ? "checked" : ""}> <span><b>Observe mode</b>: only check and report; no DNS record, config or service is changed automatically</span></label>
-      <p class="hint">In this mode, everywhere the panel would have done something, it only says in the events and on Telegram what it would have done. What you do by hand in the panel is still carried out.</p>
-    </fieldset>
-    <fieldset><legend>Monitoring and failover</legend>
-      <div class="grid2"><label>Check interval (seconds)<input name="check_interval" type="number" min="10" value="${s.check_interval}"></label>
-      <label>How many errors in a row count as “down”<input name="fail_threshold" type="number" min="1" value="${s.fail_threshold}"></label></div>
-      <div class="grid2"><label>Fail back after how many minutes of stability<input name="failback_after" type="number" min="1" value="${Math.round(s.failback_after / 60)}"></label>
-      <label>Timeout of each protocol in the test (seconds)<input name="test_timeout" type="number" min="5" value="${s.test_timeout}"></label></div>
-      <div class="grid2"><label>“Unstable” = how many drops<input name="flap_count" type="number" min="2" value="${s.flap_count}"></label>
-      <label>In how many minutes<input name="flap_window" type="number" min="1" value="${Math.round(s.flap_window / 60)}"></label></div>
-      <label class="check"><input type="checkbox" name="auto_repair" ${s.auto_repair ? "checked" : ""}> Rebuild the broken tunnels automatically with other protocols</label>
-      <label>The protocols that are tested</label>
-      <div class="tchecks">${order.map((t) => `<label><input type="checkbox" name="tr" value="${t}" ${s.candidate_transports.includes(t) ? "checked" : ""}>${t}</label>`).join("")}</div>
-    </fieldset>
-    <fieldset><legend>Servers and tunnel engine</legend>
-      <label class="check"><input type="checkbox" name="auto_adopt" ${s.auto_adopt ? "checked" : ""}> Find and add the existing tunnels on the servers automatically</label>
-      <label class="check"><input type="checkbox" name="auto_mesh" ${s.auto_mesh ? "checked" : ""}> Suggest a tunnel for every Iran/foreign pair that has none</label>
-      <div class="grid2"><label>How often to look for tunnels (minutes)<input name="scan_interval" type="number" min="1" value="${Math.round(s.scan_interval / 60)}"></label>
-      <label>Tunnel engine version<input name="engine_release" class="mono" value="${esc(s.engine_release)}" placeholder="latest"></label></div>
-      <label>Tunnel engine source URL<input name="engine_source" class="mono" value="${esc(s.engine_source || "")}" placeholder="https://github.com/Liwyd/bull-Tunnel/releases"></label>
-      <label>Source token (for a private repository)<input name="engine_token" type="password" class="mono" autocomplete="off" value="${esc(s.engine_token || "")}" placeholder="empty = no token"></label>
-      <div class="grid2"><label>First tunnel port<input name="tunnel_port_base" type="number" value="${s.tunnel_port_base}"></label>
-      <label>First probe port (local)<input name="probe_port_base" type="number" value="${s.probe_port_base}"></label></div>
-      <label class="check"><input type="checkbox" name="install_engine" ${s.install_engine ? "checked" : ""}> Install the tunnel engine automatically on the servers that do not have it</label>
-    </fieldset>
-    <fieldset><legend>Command channel (DNS)</legend>
-      <label class="check"><input type="checkbox" name="command_enabled" ${s.command_enabled ? "checked" : ""}> The command channel is on</label>
-      <label>DNS account of the command channel<select name="command_provider_id">
-        <option value="">— not selected —</option>
-        ${S.providers.map((p) => `<option value="${esc(p.id)}" ${s.command_provider_id === p.id ? "selected" : ""}>${esc(p.name)} (${esc(p.zone)})</option>`).join("")}
-      </select></label>
-      <p class="hint">When not even TCP is possible, the panel writes the command into a TXT record and the “agent” on the server reads it over DNS and runs it. For security, create a separate zone with a separate account: a server that has failed must not be able to touch the records of the main domains.</p>
-    </fieldset>
-    <fieldset><legend>Telegram bot</legend>
-      <label class="check"><input type="checkbox" name="tg_enabled" ${tg.enabled ? "checked" : ""}> Send every event to Telegram</label>
-      <label>Bot token<input name="tg_token" type="password" class="mono" autocomplete="off" value="${esc(tg.bot_token)}" placeholder="123456:ABC..."></label>
-      <label>Chat IDs (comma separated)<input name="tg_chats" class="mono" value="${esc((tg.chat_ids || []).join(", "))}" placeholder="123456789, -100987654321"></label>
-      <p class="hint">Do not know the Chat ID? Send <span class="mono">/start</span> to the bot.</p>
-      <div class="grid2"><label>API URL (reverse proxy)<input name="tg_base" class="mono" value="${esc(tg.api_base)}"></label>
-      <label>Proxy<input name="tg_proxy" class="mono" value="${esc(tg.proxy)}" placeholder="socks5://127.0.0.1:1080"></label></div>
-      <div class="btns"><button type="button" class="btn sm" id="tg-test">Send a test message</button></div>
-    </fieldset>
-    <fieldset><legend>Backups</legend>
-      <label class="check"><input type="checkbox" name="backup_enabled" ${s.backup_enabled ? "checked" : ""}> Send a full backup to Telegram every night</label>
-      <div class="grid2"><label>Time<input name="backup_time" class="mono" value="${esc(s.backup_time)}" placeholder="03:00"></label>
-      <label>Time zone<input name="backup_tz" class="mono" value="${esc(s.backup_tz)}" placeholder="Asia/Tehran"></label></div>
-      <div class="grid2"><label>Backup password<input name="backup_password" type="password" class="mono" autocomplete="new-password" value="${esc(s.backup_password)}" placeholder="empty = no password"></label>
-      <label>How many copies to keep on this server<input name="backup_keep" type="number" min="1" max="100" value="${s.backup_keep}"></label></div>
-      <p class="hint">A backup holds every server, the SSH passwords, the tokens, the domains, the settings and the panel login; always set a password and keep a copy of it somewhere else. Without that password the backup cannot be opened.</p>
-      <div class="btns"><button type="button" class="btn sm" id="bk-now">Send a backup now</button><a class="btn sm" href="/api/backups/download" download>Download the backup</a><button type="button" class="btn sm" id="bk-restore">Restore a backup…</button></div>
-    </fieldset>
-    <fieldset><legend>DNS accounts</legend>
-      <div class="opt-list">${S.providers.map((p) => `<div class="opt"><span class="prov ${p.kind}">${p.kind === "cloudflare" ? "CF" : "ARVAN"}</span><span class="grow">${esc(p.name)} <span class="mono muted small">${esc(p.zone)}</span></span>
-        <button type="button" class="btn sm" data-verify-provider="${p.id}">Test</button><button type="button" class="btn sm" data-edit-provider="${p.id}">Edit</button><button type="button" class="btn sm danger" data-del-provider="${p.id}">Delete</button></div>`).join("") || "<span class='muted small'>—</span>"}</div>
-      <div class="btns"><button type="button" class="btn sm" data-add="provider">＋ DNS account</button></div>
-    </fieldset>
-    ${actions("Save")}`, async (f) => {
-    const observe = !!f.get("observe_only");
-    if (S.settings.observe_only && !observe && !confirm("Turn observe mode off? From now on the panel changes the DNS record itself when something fails" + (f.get("auto_repair") ? " and rebuilds the broken tunnels with another protocol" : "") + ".")) return;
-    await api("PUT", "/api/settings", {
-      observe_only: observe,
-      check_interval: +f.get("check_interval"), fail_threshold: +f.get("fail_threshold"), test_timeout: +f.get("test_timeout"),
-      failback_after: Math.round(+f.get("failback_after") * 60), flap_count: +f.get("flap_count"), flap_window: Math.round(+f.get("flap_window") * 60),
-      auto_repair: !!f.get("auto_repair"), auto_adopt: !!f.get("auto_adopt"), auto_mesh: !!f.get("auto_mesh"),
-      scan_interval: Math.round(+f.get("scan_interval") * 60), candidate_transports: f.getAll("tr"),
-      tunnel_port_base: +f.get("tunnel_port_base"), probe_port_base: +f.get("probe_port_base"),
-      engine_release: f.get("engine_release").trim() || "latest", install_engine: !!f.get("install_engine"),
-      engine_source: f.get("engine_source").trim(), engine_token: f.get("engine_token"),
-      backup_enabled: !!f.get("backup_enabled"), backup_time: f.get("backup_time").trim(), backup_tz: f.get("backup_tz").trim() || "Asia/Tehran",
-      command_enabled: !!f.get("command_enabled"), command_provider_id: f.get("command_provider_id"),
-      backup_password: f.get("backup_password"), backup_keep: +f.get("backup_keep") || 14,
-      telegram: { enabled: !!f.get("tg_enabled"), bot_token: f.get("tg_token"), chat_ids: lines(f.get("tg_chats")), api_base: f.get("tg_base").trim() || "https://api.telegram.org", proxy: f.get("tg_proxy").trim() },
-    });
-    toast("Settings saved", "success");
-  });
-  $("#bk-now").onclick = () => act(async () => {
-    const r = await api("POST", "/api/backups/run");
-    if (r.error) throw new Error(`The backup was created but did not reach Telegram: ${r.error}`);
-  }, "The backup was sent to Telegram");
-  $("#bk-restore").onclick = restoreForm;
-  $("#tg-test").onclick = async () => {
-    $("#modal-form").requestSubmit();
-    // the settings must be saved before the message goes out, or the message
-    // is sent with the ones that were in place before
-    await lastSubmit.catch(() => {});
-    await act(() => api("POST", "/api/telegram/test"), "The test message was sent");
-  };
+// dig reads one field of an answer, by its path ("summary").
+const dig = (at, path) => path.split(".").reduce((v, k) => (v == null ? v : v[k]), at);
+
+// a switch he turns off may ask him first, and the question is the form's.
+function formConfirm(f) {
+  for (const el of f.querySelectorAll("[data-confirm]")) {
+    if (el.type !== "checkbox" || !el.defaultChecked || el.checked) continue;
+    let question = el.dataset.confirm;
+    const other = el.dataset.confirm2When && f.querySelector(`[data-field="${el.dataset.confirm2When}"]`);
+    if (other && other.checked && el.dataset.confirm2) question = el.dataset.confirm2;
+    if (!confirm(question)) return false;
+  }
+  return true;
 }
 
-async function restoreForm() {
-  const info = await api("GET", "/api/backups");
-  const size = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`);
-  const rows = info.files.map((f) => `<label class="opt"><input type="radio" name="bk_name" value="${esc(f.name)}">
-    <span class="grow"><span class="mono">${esc(f.name)}</span><span class="sub">${clock(f.mtime)} · ${size(f.size)} ${f.encrypted ? "· 🔒" : ""}</span></span>
-    <a class="btn sm ghost" href="/api/backups/download?name=${encodeURIComponent(f.name)}" download>Download</a></label>`).join("");
-  openModal(`<h2>Restore a backup</h2>
-    <p class="note">Every server, tunnel, domain, DNS account and panel setting is replaced by the content of the backup. Nothing is changed <b>on the servers themselves or in the DNS records</b>; after the restore the panel checks everything again. The current state is backed up separately first.</p>
-    <label>Backup file (from Telegram or downloaded)<input type="file" name="bk_file" accept=".tmbk,.gz,.json"></label>
-    ${rows ? `<label>Or one of the copies on this server</label><div class="opt-list">${rows}</div>` : ""}
-    <label>Backup password<input name="bk_pw" type="password" class="mono" autocomplete="off" placeholder="${info.encrypted ? "empty = the password from the settings" : ""}"></label>
-    <label class="check"><input type="checkbox" name="bk_observe" checked> Stay in observe mode after the restore (recommended)</label>
-    <label class="check"><input type="checkbox" name="bk_login" checked> Restore the panel username and password as well</label>
-    ${actions("Restore")}`, async (f) => {
-    const file = f.get("bk_file");
-    const body = { password: f.get("bk_pw"), observe: !!f.get("bk_observe"), restore_login: !!f.get("bk_login") };
-    if (file && file.size) {
-      const buf = new Uint8Array(await file.arrayBuffer());
-      let bin = "";
-      for (let i = 0; i < buf.length; i += 32768) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 32768));
-      body.data = btoa(bin);
-    } else if (f.get("bk_name")) body.name = f.get("bk_name");
-    else throw new Error("Pick a file or one of the copies");
-    if (!confirm("The current state of the panel is replaced by this backup?")) return;
-    const r = await api("POST", "/api/backups/restore", body);
-    toast(`Restored: ${r.summary}`, "success");
-    if (r.relogin) setTimeout(() => location.reload(), 1200);
-  });
-}
+// The submit: what he wrote, to the endpoint the form names. The promise
+// is kept, so whatever does it after — the test message, for one — waits
+// for it instead of racing with it.
+$("#modal-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  if (!f.dataset.endpoint || !formConfirm(f)) return;
+  const btn = f.querySelector("[type=submit]");
+  if (btn) btn.disabled = true;
+  lastSubmit = (async () => {
+    try {
+      const body = await formBody(f);
+      const missing = f.querySelector("[data-require]");
+      if (missing && !body.data && !body.bk_name) throw new Error(missing.dataset.require);
+      const answer = await api(f.dataset.method, f.dataset.endpoint, body);
+      if (f.dataset.done) toast(f.dataset.done.replace(/\{(\w+(?:\.\w+)*)\}/g, (_, path) => dig(answer, path) ?? ""), "success");
+      closeModal();
+      if (f.dataset.after === "domain" && answer.domain) {
+        // the domain he just added is the one he is looking at
+        selectedDomain = answer.domain.id;
+        setTimeout(() => openDrawer("domain", answer.domain.id), 300);
+      }
+      if (f.dataset.reload) setTimeout(() => location.reload(), 1200);
+      loadViewThenRender();
+    } catch (err) { toast(err.message, "error"); }
+    finally { if (btn) btn.disabled = false; }
+  })();
+  await lastSubmit;
+};
 
-/* --------------------------------------------------------------- clicks */
-function addFlow(kind) {
-  if (kind === "kharej" || kind === "iran") serverForm(kind);
-  else if (kind === "provider") providerForm();
-  else if (kind === "domain") domainForm();
-  else if (kind === "link") linkForm();
-}
+/* A button that does one thing. The panel says which call it is, what it
+   says when it is done, and whether the form it sits in is sent first. */
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-act],[data-act-form]");
+  if (!b) return;
+  if (b.dataset.actForm) return openForm(b.dataset.actForm);
+  const [method, path] = b.dataset.act.split(" ");
+  try {
+    if (b.hasAttribute("data-act-first")) {
+      const form = b.closest("form");
+      if (form) form.requestSubmit();
+      await lastSubmit.catch(() => {});  // the settings go out first
+    }
+    const answer = await api(method, path, {});
+    const field = b.dataset.actError;
+    if (field && answer && answer[field]) {
+      throw new Error(`${b.dataset.actErrorText || "The panel could not do it:"} ${answer[field]}`);
+    }
+    if (b.dataset.done) toast(b.dataset.done, "success");
+  } catch (err) { toast(err.message, "error"); }
+});
+
 function saveDomain(dom, patch) {
   return api("PUT", `/api/domains/${dom.id}`, {
     fqdn: dom.fqdn, provider_id: dom.provider_id, kharej_id: dom.kharej_id, ports: dom.ports || [],
@@ -1327,7 +1218,7 @@ document.addEventListener("click", async (e) => {
   if (t.closest("#wires")) return; // wire clicks are handled below (pointer events)
   const d = t.dataset;
   closeMenus();
-  if (d.add) { closeModal(); return addFlow(d.add); }
+  if (d.add) { closeModal(); return openForm(d.add, { role: d.role }); }
   if ("close" in d) return closeDrawer();
   if ("closeModal" in d) return closeModal();
   if (d.goto) {
@@ -1338,7 +1229,7 @@ document.addEventListener("click", async (e) => {
   }
   if (d.dom) { selectedDomain = d.dom; return loadViewThenRender(); }
   if (d.domPorts) { return openDrawer("domain", d.domPorts); }
-  if (d.openSettings) return settingsForm();  if (d.pick) { selTransport = d.pick; return renderDrawer(true); }
+  if (d.openSettings) return openForm("settings");  if (d.pick) { selTransport = d.pick; return renderDrawer(true); }
   if ("applyTransport" in d) {
     const l = linkById(drawer.id);
     const tr = selTransport || l.transport || S.settings.candidate_transports[0];
@@ -1362,14 +1253,14 @@ document.addEventListener("click", async (e) => {
     return closeDrawer();
   }
   if (d.release) return act(() => api("POST", `/api/links/${d.release}/release`), "The ports came back");
-  if (d.editServer) { const s = srv(d.editServer); return serverForm(s.role, s); }
+  if (d.editServer) return openForm("server", { edit: d.editServer });
   if (d.openServer) return openDrawer("server", d.openServer);
   if (d.testServer) {
     const r = await act(() => api("POST", `/api/servers/${d.testServer}/test`));
     return toast(r.status === "online" ? `SSH is fine — ${ms(r.latency_ms)}` : `SSH failed: ${r.error}`, r.status === "online" ? "success" : "error");
   }
   if ("scan" in d) { const r = await act(() => api("POST", "/api/scan")); return toast(r.added ? `${r.added} existing tunnels were found and added` : "No new tunnel was found", "success"); }
-  if (d.newLink) { const s = srv(d.newLink); return linkForm(s.role === "iran" ? { iran_id: s.id } : { kharej_id: s.id }); }
+  if (d.newLink) return openForm("link", { preset: d.newLink });
   if (d.install) { toast("Installing the tunnel engine…"); const r = await act(() => api("POST", `/api/servers/${d.install}/install`)); return toast(`The tunnel engine ${r.version} is ready`, "success"); }
   if (d.probe) {
     const s = srv(d.probe);
@@ -1460,11 +1351,11 @@ document.addEventListener("click", async (e) => {
     groupDraft = null; return renderDrawer(true);
   }
   if (d.sync) return act(() => api("POST", `/api/domains/${d.sync}/sync`), "The record was read");
-  if (d.editDomain) return domainForm(S.domains.find((x) => x.id === d.editDomain));
+  if (d.editDomain) return openForm("domain", { edit: d.editDomain });
   if (d.delDomain) { if (!confirm("Remove the domain from the panel? (the DNS record is left alone)")) return; await act(() => api("DELETE", `/api/domains/${d.delDomain}`), "Deleted"); return closeDrawer(); }
   if (d.verifyProvider) { const r = await act(() => api("POST", `/api/providers/${d.verifyProvider}/verify`)); return toast(`The connection is fine: ${r.detail}`, "success"); }
-  if (d.editProvider) return providerForm(S.providers.find((p) => p.id === d.editProvider));
-  if (d.delProvider) { if (!confirm("Delete the DNS account?")) return; await act(() => api("DELETE", `/api/providers/${d.delProvider}`), "Deleted"); return settingsForm(); }
+  if (d.editProvider) return openForm("provider", { edit: d.editProvider });
+  if (d.delProvider) { if (!confirm("Delete the DNS account?")) return; await act(() => api("DELETE", `/api/providers/${d.delProvider}`), "Deleted"); return openForm("settings"); }
   if (d.link) return openDrawer("link", d.link);
 });
 // wires & labels live inside the panned stage: open on a clean click only
@@ -1537,7 +1428,7 @@ document.addEventListener("mouseout", (e) => {
 
 /* the buttons of the page headers are re-created on every render */
 document.addEventListener("click", (e) => {
-  if (e.target.closest("#observe-pill")) settingsForm();
+  if (e.target.closest("#observe-pill")) openForm("settings");
 });
 
 $("#btn-logout").onclick = async () => { await api("POST", "/api/logout"); location.reload(); };

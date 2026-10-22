@@ -1060,6 +1060,19 @@ place where the status of a tunnel, the servers in use and the routes of a
 domain are worked out ✓ — not five ✓. What is left of the JavaScript is
 the canvas, the drawer, the forms and the feed of events ✓.
 
+**Commit 38 — the forms are Go** ✓ (`internal/panel/web` ✓): a form is
+the body of the API, drawn ✓ — every field carries the key the API names
+it by ✓, and the form says which endpoint it is sent to ✓, with which
+method ✓, and what it says when it is done ✓. The script collects what the
+operator wrote and sends it ✓; it does not know what a form is for ✓. The
+forms are asked for when they are needed ✓ (`GET /api/form` ✓), filled
+from the state the panel holds ✓ — a server ✓, a tunnel ✓, a DNS account
+✓, a domain ✓, the settings ✓ and the restore ✓ — and a form that cannot
+be filled yet opens the form of what is missing, with a line that says
+why ✓. What a form does not show it still keeps ✓ (the role of a server,
+the server a domain's record is on, its group of tunnels, and the
+secrets, which are shown as the mask of them ✓).
+
 1. **The shell is Go.** ✅ The page is rendered by a Go template ✓
    (`internal/panel/web` ✓): the sidebar ✓, the header ✓, the five views ✓
    and the sign-in card ✓. The template is in the binary ✓, so the panel
@@ -1098,10 +1111,18 @@ the canvas, the drawer, the forms and the feed of events ✓.
    a server with its address ✓ and the settings form field by field ✓ —
    the operator's picks are worked out by the panel ✓, and a fresh panel
    teaches what to do first ✓.
-5. **The forms go through the API.** What the operator changes is written
-   with the API ✓, and the page is rendered again with what the panel now
-   knows ✓ — the forms are the last thing, and they are the reason the
-   front-end is thin ✓.
+5. **The forms go through the API.** ✅ What the operator changes is
+   written with the API ✓, and the page is rendered again with what the
+   panel now knows ✓. The forms themselves are the panel's now ✓
+   (`GET /api/form` ✓): the markup ✓, the fields named as the API names
+   them ✓, the endpoint ✓ and the method ✓ come from the panel, and the
+   script only collects what he wrote and sends it ✓ — which is why the
+   front-end is thin ✓. The test: the form of a server holds the fields
+   the API takes ✓, a form that edits what the panel holds keeps what it
+   does not show ✓, a domain with no DNS account opens the form of the
+   account with a line that says why ✓, the tunnel form starts at the
+   server he came from ✓, and a form the panel does not have is not
+   there ✓.
 6. **The JavaScript goes.** What is left of `static/app.js` is the theme ✓
    and the canvas ✓; everything else is Go ✓.
 
@@ -1165,6 +1186,7 @@ already work ✓.
 | 35 | The dashboard — the shell is Go | done |
 | 36 | The dashboard — the network view and the graph are Go | done |
 | 37 | The dashboard — the other views are Go | done |
+| 38 | The dashboard — the forms are Go | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design
 and the panel is Go.** What is left is the dashboard (phase 10 ✓) and the

@@ -150,7 +150,7 @@ func TestAFreshPanelSaysWhatToDoFirst(t *testing.T) {
 	if !strings.Contains(parts["empty-hint"], "Getting started") {
 		t.Errorf("a fresh panel does not teach what to do first: %s", parts["empty-hint"])
 	}
-	if !strings.Contains(parts["empty-hint"], `data-add="kharej"`) {
+	if !strings.Contains(parts["empty-hint"], `data-add="server" data-role="kharej"`) {
 		t.Errorf("the hint does not offer to add the servers: %s", parts["empty-hint"])
 	}
 	if !strings.Contains(parts["links-table"], "No tunnel yet.") {

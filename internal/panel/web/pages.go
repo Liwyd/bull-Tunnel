@@ -129,8 +129,8 @@ func (f *Facts) sidebar(parts Parts) {
 // the buttons in the header of every page.
 var addMenu = `<div class="menu"><button class="btn primary menu-btn">` + iconAdd + ` Add</button>
     <div class="menu-pop">
-      <button data-add="kharej">Foreign server</button>
-      <button data-add="iran">Iran server</button>
+      <button data-add="server" data-role="kharej">Foreign server</button>
+      <button data-add="server" data-role="iran">Iran server</button>
       <button data-add="link">New tunnel</button>
       <button data-add="provider">DNS account</button>
       <button data-add="domain">Domain</button>
@@ -226,7 +226,7 @@ func (f *Facts) onboarding(parts Parts) {
 		lines = append(lines, fmt.Sprintf(`<li class="%s">%s%s</li>`, class, tick, step.text))
 	}
 	parts["empty-hint"] = `<div class="empty-card"><h3>Getting started</h3><ol>` + strings.Join(lines, "") + `</ol>` +
-		`<div class="btns"><button class="btn primary sm" data-add="kharej">` + iconAdd + ` Foreign server</button>` +
-		`<button class="btn sm" data-add="iran">` + iconAdd + ` Iran server</button>` +
+		`<div class="btns"><button class="btn primary sm" data-add="server" data-role="kharej">` + iconAdd + ` Foreign server</button>` +
+		`<button class="btn sm" data-add="server" data-role="iran">` + iconAdd + ` Iran server</button>` +
 		`<button class="btn sm" data-add="domain">` + iconAdd + ` Domain</button></div></div>`
 }

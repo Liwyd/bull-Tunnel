@@ -124,6 +124,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/logout", s.logout)
 	mux.HandleFunc("/api/state", s.authed(s.read(s.state)))
 	mux.HandleFunc("/api/view", s.authed(s.read(s.view)))
+	mux.HandleFunc("/api/form", s.authed(s.read(s.form)))
 	mux.HandleFunc("/api/layout", s.authed(s.write(s.layout)))
 	mux.HandleFunc("/api/check", s.authed(s.check))
 	mux.HandleFunc("/api/scan", s.authed(s.scan))
@@ -334,6 +335,36 @@ func (s *Server) view(w http.ResponseWriter, r *http.Request) {
 		Pending:  query.Get("pending") == "1" || query.Get("pending") == "true",
 	}
 	writeJSON(w, http.StatusOK, web.New(s.store, now(), s.orch.LastCheck(), s.busy(), s.flapping(), opts))
+}
+
+// form is one form of the dashboard, worked out by the panel: what the
+// fields hold, and where what the operator writes is sent. A form is the
+// body of the API, drawn — the script collects what he wrote and sends it
+// to the endpoint the form names, so the panel keeps the last word about
+// what a form is for.
+func (s *Server) form(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/api/form" {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	query := r.URL.Query()
+	var copies []backup.File
+	if s.backupsStore != nil {
+		copies = s.backupsStore.List()
+	}
+	facts := web.ReadFacts(s.store, now(), s.orch.LastCheck(), s.busy(), s.flapping())
+	answer, ok := facts.Form(web.FormOpts{
+		ID:     query.Get("id"),
+		Edit:   query.Get("edit"),
+		Role:   query.Get("role"),
+		Preset: query.Get("preset"),
+		Copies: copies,
+	})
+	if !ok {
+		writeError(w, http.StatusNotFound, "no such form")
+		return
+	}
+	writeJSON(w, http.StatusOK, answer)
 }
 
 // now is the time in seconds.
