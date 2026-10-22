@@ -1017,7 +1017,7 @@ tool ✓.
 panel comes up ✓, the demo runs ✓, and the release carries the two
 binaries ✓. **It does.**
 
-### Phase 10 — the dashboard in Go (later)
+### Phase 10 — the dashboard in Go  (in progress)
 
 The API carries the whole truth, so the dashboard can be rewritten without
 touching the server: the network graph is a canvas ✓, the pages are
@@ -1025,7 +1025,36 @@ server-rendered or a small Go template ✓, and the live feed is the
 websocket that exists today ✓.
 
 **This phase is not part of the port.** It is the next thing after it, and
-it is free of the panel's internals ✓.
+it is free of the panel's internals ✓. It is the last thing the plan asks
+for ✓, and it is done in steps ✓ — the dashboard is 2031 lines of
+JavaScript ✓, and the panel runs on a live server ✓: a half-rewritten
+dashboard is a broken dashboard ✓, so every step is shipped, verified and
+never breaks what is there ✓.
+
+**The steps, in order:**
+
+1. **The shell is Go.** The page is rendered by a Go template ✓
+   (`internal/panel/web` ✓): the sidebar ✓, the header ✓, the five views ✓
+   and the sign-in card ✓. The stylesheet stays the one that is there ✓
+   (the classes do not change ✓).
+2. **The network view is Go.** The cards of the servers ✓, of the domains ✓
+   and the strip of the state ✓ are rendered by the template ✓ from the
+   same snapshot the API answers ✓ — one truth, two shapes ✓.
+3. **The graph is Go.** The layout of the nodes ✓ is worked out in Go ✓
+   (the type-1 design ✓) and sent with the state ✓; the canvas draws what
+   it is given ✓, and the script that draws it is small ✓.
+4. **The other views are Go.** The tunnels ✓, the domains ✓, the
+   infrastructure ✓ and the settings ✓ are rendered by the template ✓.
+5. **The forms go through the API.** What the operator changes is written
+   with the API ✓, and the page is rendered again with what the panel now
+   knows ✓ — the forms are the last thing, and they are the reason the
+   front-end is thin ✓.
+6. **The JavaScript goes.** What is left of `static/app.js` is the theme ✓
+   and the canvas ✓; everything else is Go ✓.
+
+**Done when:** the panel serves the dashboard from Go ✓, the websocket
+carries the state as it does today ✓, the operator does the same things he
+did before ✓, and `static/app.js` is the theme and the canvas ✓.
 
 ### The order, and what may not be skipped
 
@@ -1079,7 +1108,7 @@ already work ✓.
 | 31 | The panel does not fall over its own state | done |
 | 32 | The Go rewrite — phase 9 (the switchover) | done |
 | 33 | The writers of the state take the lock too | done |
-| 34 | The Go rewrite — phase 10 (the dashboard) | later |
+| 34 | The Go rewrite — phase 10 (the dashboard) | **in progress** |
 
 **All the findings of the audit are closed, the graph is the type-1 design
 and the panel is Go.** What is left is the dashboard (phase 10 ✓) and the
