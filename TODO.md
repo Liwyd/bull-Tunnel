@@ -959,6 +959,11 @@ against ✓ — and it is gone.
   is slower than a laptop ✓, so a failed run is run again with the
   packages one after the other ✓ — and a real failure is still a failure
   ✓.
+* ✅ The test of the set does not compare the state of the set with itself
+  ✓: it compared the number of models with the number of models the set
+  gave a moment later ✓, while another goroutine was writing it ✓ — on a
+  slow runner the two numbers are never the same ✓. The comparison is made
+  when nobody writes the set any more ✓.
 
 ### Phase 9 — the switchover  ✅ done
 
@@ -1067,16 +1072,14 @@ work that never ends: watching the panel on a live server.
   under the race detector — the same tests fail the same way in the
   BackPack repository itself, which is where the code comes from. The CI
   skips them there and runs them on their own, without the detector.
-* **The test job of the CI fails on the runner and nowhere else.** The
-  whole suite passes here — as root ✓, as another user ✓, in a clean
-  checkout ✓, with the race detector ✓ — and the runner's job fails at the
-  same step every time ✓, even when the packages are run one after the
-  other ✓. The logs of a job need the rights of an administrator, so the
-  failing test could not be named ✓; the CI now runs the suite again, one
-  package at a time ✓, when the first run fails ✓. The release of 1.2.0 was
-  published from the build script of the repository ✓ — the same files the
-  CI would have built ✓ — so that the release exists while the runner is
-  looked at ✓.
+* **The test job of the CI failed on the runner for a while** — and the
+  fault was in a test of this repository, not in the panel: the test of the
+  set compared the number of models with the number of models the set gave
+  a moment later ✓, while another goroutine was writing the set ✓. On a
+  slow runner the two numbers are never the same ✓, and on a laptop the
+  test passed by luck ✓. The comparison is made when nobody writes the set
+  any more ✓. The CI runs the suite again, one package at a time, when the
+  first run fails ✓ — a real failure is still a failure ✓.
 
 
 

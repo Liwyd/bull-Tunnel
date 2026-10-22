@@ -32,18 +32,25 @@ func TestTheSetCanBeReadWhileItIsWritten(t *testing.T) {
 		}
 	}()
 
+	// The set is read while it is written: what the test says is that the
+	// program does not stop — Go throws "concurrent map read and map write"
+	// when a map is read and written at the same time, and the race
+	// detector says so too. The number of models is not compared: the set
+	// changes between two calls, and the count is not a thing here.
 	for i := 0; i < 500; i++ {
 		for _, server := range set.List() {
 			if server.Name == "" {
 				t.Error("the set gave a server without a name")
 			}
 		}
-		if set.Len() != len(set.List()) {
-			t.Error("the set does not know how many models it holds")
-		}
 	}
 	close(stop)
 	writer.Wait()
+
+	// what the set holds when nobody writes it any more
+	if set.Len() != len(set.List()) {
+		t.Errorf("the set says it holds %d models and gives %d, they must be the same", set.Len(), len(set.List()))
+	}
 }
 
 // TestTheSetKeepsTheOrderTheModelsCameIn: the order is not a detail: the
