@@ -1,5 +1,5 @@
 bull-Tunnel
-Copyright (C) 2026 bull-Tunnel contributors. All rights reserved.
+Copyright (C) 2026 Liwyd. All rights reserved.
 
 The control panel (everything outside the `internal/engine/` directory) is
 licensed under the MIT licence; see the LICENSE file.
