@@ -331,6 +331,7 @@ func (f *Facts) linkForm(o FormOpts) FormAnswer {
 		pick("Foreign server", "kharej_id", kharej, options(f.Kharej)) +
 		pick("Iran server", "iran_id", iran, options(f.Iran)) + `</div>`)
 	body.WriteString(area("Forwarded ports (Iran side)", "ports", "", "443\n8443=2096"))
+	body.WriteString(check("accept_udp", false, "Forward UDP through the tunnel as well"))
 	body.WriteString(`<div class="grid2">` +
 		pick("Protocol", "transport", "", protocols) +
 		text("Display name", "label", "", "e.g. spare-ws", "") + `</div>`)

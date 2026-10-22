@@ -24,7 +24,9 @@ func TestTheTunnelFormIsWorkedByGo(t *testing.T) {
 		t.Errorf("the form says %q when it is done", answer.Done)
 	}
 	for _, want := range []string{`data-field="kharej_id"`, `data-field="iran_id"`, `data-field="ports"`,
-		`data-field="transport"`, `data-field="label"`, "Automatic (test them all and pick the best)",
+		`data-field="transport"`, `data-field="label"`, `data-field="accept_udp"`,
+		"Forward UDP through the tunnel as well",
+		"Automatic (test them all and pick the best)",
 		"WebSocket", "TCP Mux", "203.0.113.7", "198.51.100.4"} {
 		if !strings.Contains(answer.HTML, want) {
 			t.Errorf("the form of a tunnel does not have %q in it", answer.HTML)
