@@ -123,6 +123,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/login", s.login)
 	mux.HandleFunc("/api/logout", s.logout)
 	mux.HandleFunc("/api/state", s.authed(s.read(s.state)))
+	mux.HandleFunc("/api/view/network", s.authed(s.read(s.viewNetwork)))
 	mux.HandleFunc("/api/layout", s.authed(s.write(s.layout)))
 	mux.HandleFunc("/api/check", s.authed(s.check))
 	mux.HandleFunc("/api/scan", s.authed(s.scan))
@@ -293,7 +294,10 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	content, err := web.Shell(s.version)
+	s.store.RLock()
+	view := web.Network(s.store, now(), s.orch.LastCheck(), s.busy(), s.flapping())
+	s.store.RUnlock()
+	content, err := web.Dashboard(s.version, view)
 	if err != nil {
 		// the page could not be rendered: the one that is on the disk is
 		// better than nothing.
@@ -307,6 +311,17 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Write(content)
+}
+
+// viewNetwork is the network view worked out by the panel: the cards, the
+// columns, the wires and the numbers of the strip. The browser draws what
+// it is given — the panel decides what the dashboard says.
+func (s *Server) viewNetwork(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/api/view/network" {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, web.Network(s.store, now(), s.orch.LastCheck(), s.busy(), s.flapping()))
 }
 
 // now is the time in seconds.

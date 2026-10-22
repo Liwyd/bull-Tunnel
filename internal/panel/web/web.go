@@ -22,9 +22,22 @@ var Pages = struct {
 	shell *template.Template
 }{}
 
+// Dashboard is the dashboard's page with the network view in it: the cards,
+// the titles of the columns and the numbers of the strip are in the page
+// before the script runs, and the script draws the same view over them when
+// the state changes.
+func Dashboard(version string, view *NetworkView) ([]byte, error) {
+	return render(version, view)
+}
+
 // Shell is the dashboard's page: the sidebar, the header, the views and the
-// sign-in card. The browser fills the views with the state the API answers.
+// sign-in card, without the network view in it.
 func Shell(version string) ([]byte, error) {
+	return render(version, nil)
+}
+
+// render writes the page.
+func render(version string, view *NetworkView) ([]byte, error) {
 	Pages.Lock()
 	defer Pages.Unlock()
 	if Pages.shell == nil {
@@ -34,7 +47,9 @@ func Shell(version string) ([]byte, error) {
 		}
 		Pages.shell = parsed
 	}
-	var out struct{ Version string }
-	out.Version = version
-	return render(Pages.shell, "shell.html", out)
+	out := struct {
+		Version string
+		Graph   *NetworkView
+	}{Version: version, Graph: view}
+	return renderPage(Pages.shell, "shell.html", out)
 }

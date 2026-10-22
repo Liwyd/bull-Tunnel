@@ -231,11 +231,25 @@ function connectWS() {
 }
 setInterval(() => { if (wsAlive) try { ws.send("ping"); } catch (_) { /* ignore */ } }, 25000);
 
+/* The network view is worked out by the panel: the cards, the columns, the
+   wires and the numbers of the strip. The page fetches it with the state
+   and draws what it is given — the browser owns the pixels, the panel owns
+   the truth. */
+let VIEW = null;
+let viewSeq = 0;
+async function loadView() {
+  const mine = ++viewSeq;
+  try {
+    const answer = await api("GET", "/api/view/network");
+    if (mine === viewSeq) VIEW = answer;
+  } catch (_) { /* the page keeps the view it already has */ }
+}
+
 function setState(st) {
   S = st;
   skew = st.now - Date.now() / 1000;
   showErrors(st.errors || []);
-  renderAll();
+  loadView().then(renderAll);
 }
 
 /* the problems the panel has with its own files: a state file or a login
@@ -304,12 +318,7 @@ function renderStrip() {
   const dok = S.domains.filter((d) => d.status === "ok").length;
   const next = S.last_check ? Math.max(0, S.settings.check_interval - (nowS() - S.last_check)) : S.settings.check_interval;
   const cell = (k, v, cls = "") => `<div><span class="k">${k}</span><span class="v ${cls}">${v}</span></div>`;
-  const strip = cell("Servers online", `${on} / ${S.servers.length}`, on === S.servers.length && S.servers.length ? "ok" : "warn")
-    + cell("Stable tunnels", `${up} / ${live.length}`, "ok")
-    + cell("Unstable tunnels", String(deg), deg ? "warn" : "")
-    + cell("Healthy domains", `${dok} / ${S.domains.length}`, dok === S.domains.length && S.domains.length ? "ok" : "warn")
-    + cell("Next check", `${Math.round(next)} s`, "test");
-  $("#net-strip").innerHTML = strip;
+  if (VIEW) $("#net-strip").innerHTML = VIEW.strip.map((c) => `<div><span class="k">${esc(c.key)}</span><span class="v ${esc(c.class)}">${esc(c.value)}</span></div>`).join("");
   $("#tun-strip").innerHTML = cell("Tunnels", String(S.links.length))
     + cell("Healthy", String(up), "ok")
     + cell("Unstable", String(deg), deg ? "warn" : "")
@@ -429,106 +438,39 @@ function fit() {
   applyView();
 }
 
-/* The card of a server, in the shape of the type-1 design
-   (new-ui/type1/graphs.svg): the name with its dot, the address, and a quiet
-   line of meta. The panel around it is type 2; the graph is the one place
-   where the older, softer card is kept. */
-function nodeCard(s) {
-  const st = s.status;
-  const links = S.links.filter((l) => l.status !== "pending" && (l.iran_id === s.id || l.kharej_id === s.id));
-  const up = links.filter((l) => l.status === "up").length;
-  const meta = [];
-  if (s.ssh_latency_ms != null) meta.push(`ssh ${ms(s.ssh_latency_ms)}`);
-  if (s.role === "kharej") {
-    const ex = serverExits(s.id);
-    if (ex.length) {
-      meta.push(`<span title="${esc(ex.map((e) => `${e.port} → ${exitText(e)} (${e.method})`).join("\n"))}">${ex.length} forwarded</span>`);
-    }
-  }
-  if (s.role === "iran") {
-    const doms = S.domains.filter((d) => d.iran_id === s.id).length;
-    if (doms) meta.push(`${doms} domain${doms > 1 ? "s" : ""}`);
-  }
-  const role = s.role === "iran" ? "Iran" : "Foreign";
-  return {
-    cls: ["fnode", st === "offline" ? "dead" : "", s.enabled ? "" : "dim"].join(" "),
-    html: `<div class="r1"><span class="nm">${esc(s.name)}</span><span class="dot ${st}"></span></div>
-      <div class="ip">${esc(s.ip)}</div>
-      <div class="r3"><span class="role">${role}</span>
-      <span class="meta">${up}/${links.length} tunnels</span></div>
-      ${meta.length ? `<div class="r3"><span class="meta" style="margin-left:0">${meta.join(" · ")}</span></div>` : ""}`,
-  };
-}
-
-function domainCard(d) {
-  const p = provider(d.provider_id);
-  const routes = (d.routes || []).slice(0, 3);
-  // The routes of the type-1 card: the one the traffic really uses is in
-  // the text colour, the others are quiet.
-  const lines = routes.map((r) => {
-    const l = linkById(r.link_id);
-    const ex = r.exit ? ` → ${exitText(r.exit)}` : "";
-    const on = l && l.iran_id === d.iran_id && r.healthy;
-    return `<span class="route ${on ? "on" : r.healthy ? "" : "bad"}" title="${esc(l ? linkName(l) : "no tunnel")}">${esc(r.spec)} → ${esc(l ? nm(l.kharej_id) : "?")}${esc(ex)}</span>`;
-  }).join("");
-  const more = (d.routes || []).length - routes.length;
-  const flags = [];
-  if (d.iran_id && d.primary_iran && d.iran_id !== d.primary_iran) flags.push("standby");
-  if (d.pending_ip) flags.push("awaiting DNS");
-  if (!d.auto_failover) flags.push("manual");
-  if (d.error) flags.push(`<span title="${esc(d.error)}">error</span>`);
-  return {
-    cls: "fnode domain",
-    html: `<div class="r1"><span class="nm">${esc(d.fqdn)}</span><span class="dot ${d.status}"></span></div>
-      <div class="ip"><span>${esc(d.current_ip || "—")}</span><span class="pname">${p ? (p.kind === "cloudflare" ? "Cloudflare" : "ArvanCloud") : "no account"}</span></div>
-      ${lines ? `<div class="routes">${lines}${more > 0 ? `<span class="route muted">+${more} more</span>` : ""}</div>` : ""}
-      <div class="r3"><span class="role">${d.ttl}s TTL</span>
-      <span class="meta">${flags.join(" · ")}</span></div>`,
-  };
-}
-
+/* The cards, their places and the wires between them are worked out by the
+   panel (VIEW): the browser puts a card where the panel says, keeps the hand
+   of the operator on the card he is dragging, and draws the wires between
+   the cards it can measure. */
 function renderFlow() {
-  const items = [];
-  for (const s of byRole("kharej")) items.push(["kharej", s.id, nodeCard(s)]);
-  for (const s of byRole("iran")) items.push(["iran", s.id, nodeCard(s)]);
-  const iranRank = Object.fromEntries(byRole("iran").map((s, i) => [s.id, i]));
-  const rank = (d) => iranRank[d.iran_id] ?? 99;
-  for (const d of [...S.domains].sort((a, b) => rank(a) - rank(b) || a.fqdn.localeCompare(b.fqdn))) items.push(["domain", d.id, domainCard(d)]);
-
+  if (!S || !VIEW) return;
   const seen = new Set();
-  for (const [col, id, card] of items) {
-    seen.add(id);
-    let el = els[id];
+  for (const n of VIEW.nodes) {
+    seen.add(n.id);
+    let el = els[n.id];
     if (!el) {
       el = document.createElement("div");
-      el.dataset.id = id;
-      el.dataset.type = col === "domain" ? "domain" : "server";
-      el.dataset.col = col;
+      el.dataset.id = n.id;
+      el.dataset.type = n.type;
+      el.dataset.col = n.col;
       nodesEl.appendChild(el);
-      els[id] = el;
+      els[n.id] = el;
       bindDrag(el);
     }
-    if (el.dataset.html !== card.html) { el.innerHTML = card.html; el.dataset.html = card.html; }
+    if (el.dataset.html !== n.html) { el.innerHTML = n.html; el.dataset.html = n.html; }
     const keep = ["dragging", "hl", "sel"].filter((c) => el.classList.contains(c)).join(" ");
-    const cls = `${card.cls} ${keep}`.trim();
+    const cls = `${n.class} ${keep}`.trim();
     if (el.className !== cls) el.className = cls;
+    if (el.classList.contains("dragging")) continue; // a hand is on the card
+    pos[n.id] = [n.x, n.y];
+    el.style.left = `${n.x}px`;
+    el.style.top = `${n.y}px`;
+    el.style.height = `${n.height}px`;
   }
   for (const id of Object.keys(els)) if (!seen.has(id)) { els[id].remove(); delete els[id]; delete pos[id]; }
 
-  const bottom = { kharej: 30, iran: 30, domain: 30 };
-  for (const [col, id] of items) if (pos[id]) bottom[col] = Math.max(bottom[col], pos[id][1] + els[id].offsetHeight + 16);
-  for (const [col, id] of items) {
-    if (!pos[id]) {
-      const saved = S.layout[id];
-      pos[id] = saved ? [saved[0], saved[1]] : [COL_X[col], bottom[col]];
-      bottom[col] = Math.max(bottom[col], pos[id][1] + els[id].offsetHeight + 16);
-    }
-    els[id].style.left = `${pos[id][0]}px`;
-    els[id].style.top = `${pos[id][1]}px`;
-  }
-  renderColumns(items);
-  const live = S.links.filter((l) => l.status !== "pending").length;
-  $("#flow-badge").innerHTML = `<i class="dot ok"></i><span>${live} tunnel${live === 1 ? "" : "s"} checked</span>`;
+  renderColumns();
+  $("#flow-badge").innerHTML = `<i class="dot ok"></i><span>${esc(VIEW.badge)}</span>`;
   if (firstState) {
     firstState = false;
     const sameScreen = cam.cw && Math.abs(cam.cw - stage.clientWidth) / stage.clientWidth < 0.3;
@@ -537,10 +479,14 @@ function renderFlow() {
   drawWires();
 }
 
-function renderColumns(items) {
+/* The title above a column: what it is called and how many cards it holds
+   comes from the panel, and where it sits follows the cards — the operator
+   may have dragged one. */
+function renderColumns() {
+  const list = (VIEW && VIEW.columns) || [];
   let titles = $$(".ct", colsEl);
   if (!titles.length) {
-    for (const col of Object.keys(COL_X)) {
+    for (const col of ["kharej", "iran", "domain"]) {
       const t = document.createElement("div");
       t.className = "ct"; t.dataset.col = col;
       colsEl.appendChild(t);
@@ -548,13 +494,19 @@ function renderColumns(items) {
     titles = $$(".ct", colsEl);
   }
   for (const t of titles) {
-    const mine = items.filter((i) => i[0] === t.dataset.col).map((i) => pos[i[1]]);
-    if (!mine.length) { t.style.display = "none"; continue; }
+    const col = list.find((c) => c.col === t.dataset.col);
+    if (!col) { t.style.display = "none"; continue; }
     t.style.display = "";
-    t.innerHTML = `<span class="n">${String(mine.length).padStart(2, "0")} / ${COL_KICKER[t.dataset.col]}</span><span class="t">${COL_TITLE[t.dataset.col]}</span>`;
-    t.style.left = `${Math.min(...mine.map((p) => p[0]))}px`;
-    t.style.top = `${Math.min(...mine.map((p) => p[1])) - 40}px`;
-    t.style.width = `${NODE_W}px`;
+    t.innerHTML = `<span class="n">${String(col.count).padStart(2, "0")} / ${esc(col.kicker)}</span><span class="t">${esc(col.title)}</span>`;
+    let x = col.x, y = col.y;
+    for (const id of Object.keys(els)) {
+      if (els[id].dataset.col !== col.col || !pos[id]) continue;
+      x = Math.min(x, pos[id][0]);
+      y = Math.min(y, pos[id][1] - 40);
+    }
+    t.style.left = `${x}px`;
+    t.style.top = `${y}px`;
+    t.style.width = `${col.width}px`;
   }
 }
 
@@ -583,50 +535,29 @@ function drawWires() {
   wiresQueued = true;
   requestAnimationFrame(() => { wiresQueued = false; drawWiresNow(); });
 }
+/* The wires between the cards: which wires exist, what they are called and
+   what colour they are comes from the panel (VIEW.edges). The browser draws
+   the curve between the two cards, and where it meets them. */
 function drawWiresNow() {
-  if (!S) return;
+  if (!S || !VIEW) return;
   const showStandby = $("#show-standby").checked;
   const showPending = $("#show-pending").checked;
-  const active = activeLinkIds();
   const parts = [], labels = [];
   const edges = [];
-  for (const l of S.links) {
-    if (l.status === "pending" && !isBusy(l) && !showPending) continue;
-    const a = box(l.kharej_id), b = box(l.iran_id);
+  for (const w of VIEW.edges) {
+    if (w.status === "pending" && !showPending) continue;
+    if (w.standby && !showStandby) continue;
+    const a = box(w.from), b = box(w.to);
     if (!a || !b) continue;
-    const st = lstatus(l);
-    const standby = st === "up" && !active.has(l.id) && !handedOver(l);
-    if (standby && !showStandby) continue;
-    edges.push({ kind: "link", l, from: l.kharej_id, to: l.iran_id, a, b, st, act: active.has(l.id), standby });
-  }
-  for (const d of S.domains) {
-    if (!d.iran_id) continue;
-    const a = box(d.iran_id), b = box(d.id);
-    if (!a || !b) continue;
-    edges.push({ kind: "domain", d, from: d.iran_id, to: d.id, a, b });
-  }
-  // a foreign server that sends its ports on to another registered server
-  for (const k of byRole("kharej")) {
-    const to = {};
-    for (const e of serverExits(k.id)) for (const t of e.targets) {
-      if (!t.server_id || t.server_id === k.id) continue;
-      const g = (to[t.server_id] ||= { ports: [], methods: new Set(), bad: false });
-      if (!g.ports.includes(e.port)) g.ports.push(e.port);
-      g.methods.add(e.method);
-      g.bad ||= t.ok === false;
-    }
-    for (const [tid, g] of Object.entries(to)) {
-      const a = box(k.id), b = box(tid);
-      if (a && b) edges.push({ kind: "hop", from: k.id, to: tid, a, b, g });
-    }
+    edges.push({ w, a, b });
   }
   const sides = {};
   for (const e of edges) {
-    e.loop = e.kind === "hop" && Math.abs(e.b.cx - e.a.cx) < NODE_W;
+    e.loop = e.w.kind === "hop" && Math.abs(e.b.cx - e.a.cx) < NODE_W;
     e.dir1 = e.loop ? -1 : e.b.cx >= e.a.cx ? 1 : -1;
     e.dir2 = e.loop ? -1 : -e.dir1;
-    (sides[`${e.from}|${e.dir1}`] ||= []).push([e, "a"]);
-    (sides[`${e.to}|${e.dir2}`] ||= []).push([e, "b"]);
+    (sides[`${e.w.from}|${e.dir1}`] ||= []).push([e, "a"]);
+    (sides[`${e.w.to}|${e.dir2}`] ||= []).push([e, "b"]);
   }
   for (const list of Object.values(sides)) {
     list.sort((p, q) => (p[1] === "a" ? p[0].b.cy : p[0].a.cy) - (q[1] === "a" ? q[0].b.cy : q[0].a.cy));
@@ -659,42 +590,29 @@ function drawWiresNow() {
       + `<text x="${(pw / 2).toFixed(1)}" y="15" text-anchor="middle">${esc(txt)}</text></g>`;
   };
   for (const e of edges) {
+    const w = e.w;
     const x1 = e.dir1 > 0 ? e.a.x + e.a.w : e.a.x;
     const x2 = e.dir2 > 0 ? e.b.x + e.b.w : e.b.x;
     const c = bezier(x1, e.y_a, x2, e.y_b, e.dir1, e.dir2, e.loop ? 30 + Math.abs(e.y_b - e.y_a) * 0.1 : 0);
-    if (e.kind === "hop") {
-      const hop = `${e.from}|${e.to}`;
-      parts.push(`<path class="xwire ${e.g.bad ? "down" : ""}" d="${c.d}" data-hop="${hop}"/>`);
-      const txt = `↪ ${e.g.ports.join(",")} · ${[...e.g.methods].join("/")}${e.g.bad ? " ✕" : ""}`;
-      const w = txt.length * 6.6;
-      const [lx, ly] = e.loop ? ((p) => [p[0] - w / 2 - 4, p[1]])(bezAt(c.p, 0.5)) : placeLabel(c, w);
-      labels.push(wireLabel(txt, lx, ly, `hop ${e.g.bad ? "down" : ""}`, `data-hop="${hop}"`, false));
-    } else if (e.kind === "link") {
-      const l = e.l;
-      const moved = handedOver(l) && e.st === "up";
-      const sel = selLink === l.id;
-      const cls = `wire ${moved ? "handover" : e.st}${sel ? " sel" : ""}${e.standby ? " standby" : ""}`;
-      parts.push(`<path class="${cls}" d="${c.d}" data-link="${l.id}"/>`);
-      parts.push(`<path class="hit" d="${c.d}" data-link="${l.id}"/>`);
-      // the points where the wire meets the card, in the colour of the wire:
-      // the type-1 design draws them, and they say which side of the card the
-      // path uses
-      const colour = e.st === "up" ? "var(--ok)" : e.st === "down" ? "var(--down)"
-        : e.st === "degraded" ? "var(--degraded)" : e.st === "testing" ? "var(--testing)"
-        : moved ? "var(--forward)" : "var(--muted)";
-      parts.push(`<circle class="anchor" cx="${x1.toFixed(1)}" cy="${e.y_a.toFixed(1)}" r="4" fill="${colour}"/>`);
-      parts.push(`<circle class="anchor" cx="${x2.toFixed(1)}" cy="${e.y_b.toFixed(1)}" r="4" fill="${colour}"/>`);
-      let txt;
-      if (e.st === "testing") txt = "testing…";
-      else if (moved) txt = `${l.transport} · ports moved`;
-      else txt = `${l.transport || "—"}${e.st === "up" && l.latency_ms != null ? ` · ${Math.round(l.latency_ms)}ms` : e.st === "down" ? " ✕" : ""}${isFlapping(l) ? " ⚡" : ""}`;
-      const w = txt.length * 6.6;
-      const [lx, ly] = placeLabel(c, w);
-      labels.push(wireLabel(txt, lx, ly, `${moved ? "handover" : e.st}${sel ? " sel" : ""}${e.standby ? " standby" : ""}`,
-        `data-link="${l.id}"`, sel));
+    if (w.kind === "hop") {
+      parts.push(`<path class="xwire ${w.down ? "down" : ""}" d="${c.d}" data-hop="${w.ref}"/>`);
+      const wd = w.label.length * 6.6;
+      const [lx, ly] = e.loop ? ((p) => [p[0] - wd / 2 - 4, p[1]])(bezAt(c.p, 0.5)) : placeLabel(c, wd);
+      labels.push(wireLabel(w.label, lx, ly, `hop ${w.down ? "down" : ""}`, `data-hop="${w.ref}"`, false));
+    } else if (w.kind === "link") {
+      const sel = selLink === w.ref;
+      const cls = `wire ${w.moved ? "handover" : w.status}${sel ? " sel" : ""}${w.standby ? " standby" : ""}`;
+      parts.push(`<path class="${cls}" d="${c.d}" data-link="${w.ref}"/>`);
+      parts.push(`<path class="hit" d="${c.d}" data-link="${w.ref}"/>`);
+      // the points where the wire meets the card, in the colour of the wire
+      parts.push(`<circle class="anchor" cx="${x1.toFixed(1)}" cy="${e.y_a.toFixed(1)}" r="4" fill="${w.colour}"/>`);
+      parts.push(`<circle class="anchor" cx="${x2.toFixed(1)}" cy="${e.y_b.toFixed(1)}" r="4" fill="${w.colour}"/>`);
+      const wd = w.label.length * 6.6;
+      const [lx, ly] = placeLabel(c, wd);
+      labels.push(wireLabel(w.label, lx, ly, `${w.moved ? "handover" : w.status}${sel ? " sel" : ""}${w.standby ? " standby" : ""}`,
+        `data-link="${w.ref}"`, sel));
     } else {
-      const d = e.d;
-      parts.push(`<path class="dwire ${d.pending_ip ? "pending-dns" : d.status}" d="${c.d}" data-domain="${d.id}"/>`);
+      parts.push(`<path class="dwire ${w.status}" d="${c.d}" data-domain="${w.ref}"/>`);
       // the domain card is reached from the left, and the point is marked too
       parts.push(`<circle class="anchor" cx="${x2.toFixed(1)}" cy="${e.y_b.toFixed(1)}" r="4" fill="var(--muted)"/>`);
     }
@@ -755,16 +673,13 @@ function bindDrag(el) {
       el.removeEventListener("pointerup", up);
       el.removeEventListener("pointercancel", up);
       el.classList.remove("dragging");
-      if (moved) { saveLayout({ [id]: pos[id] }); renderColumns(currentItems()); }
+      if (moved) { saveLayout({ [id]: pos[id] }); renderColumns(); }
       else { selNode = id; selLink = null; paintSelection(); openDrawer(el.dataset.type, id); }
     };
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", up);
     el.addEventListener("pointercancel", up);
   });
-}
-function currentItems() {
-  return Object.values(els).map((el) => [el.dataset.col, el.dataset.id]);
 }
 let pendingLayout = {};
 function saveLayout(p) {

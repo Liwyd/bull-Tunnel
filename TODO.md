@@ -1038,18 +1038,42 @@ the dashboard ✓ is in the binary ✓, the panel renders it ✓ (and falls back
 to the file on the disk if the rendering fails ✓), and the version of the
 panel is in the page ✓.
 
+**Commit 36 — the network view and the graph are Go** ✓
+(`internal/panel/web` ✓): the cards ✓, the columns ✓, the wires ✓ and the
+numbers of the strip ✓ are worked out by the panel ✓; the page holds the
+dashboard before the script runs ✓; the browser draws the curves between
+the cards it can measure ✓, keeps the hand of the operator on the card he
+is dragging ✓, and fetches the view again when the state changes ✓. The
+panel decides what a wire says and what colour it is ✓ — and a route of a
+domain is now drawn as what it really is ✓ (the JavaScript read two fields
+the panel never sent, so every route of every domain was drawn as broken ✓
+— the panel works it out now ✓).
+
 1. **The shell is Go.** ✅ The page is rendered by a Go template ✓
    (`internal/panel/web` ✓): the sidebar ✓, the header ✓, the five views ✓
    and the sign-in card ✓. The template is in the binary ✓, so the panel
    shows its dashboard even when nothing is beside it ✓; the stylesheet
    stays the one that is there ✓ (the classes do not change ✓). The test:
    the page is rendered ✓ and has no mark of the template left in it ✓.
-2. **The network view is Go.** The cards of the servers ✓, of the domains ✓
-   and the strip of the state ✓ are rendered by the template ✓ from the
-   same snapshot the API answers ✓ — one truth, two shapes ✓.
-3. **The graph is Go.** The layout of the nodes ✓ is worked out in Go ✓
-   (the type-1 design ✓) and sent with the state ✓; the canvas draws what
-   it is given ✓, and the script that draws it is small ✓.
+2. **The network view is Go.** ✅ The cards of the servers ✓, of the domains
+   ✓ and the strip of the state ✓ are worked out by the panel ✓
+   (`internal/panel/web` ✓) from the state the API answers ✓ — one truth,
+   two shapes ✓. The page holds them before the script runs ✓, so the
+   dashboard is there even when the browser has not run a line of
+   JavaScript ✓. The test: the cards, the columns, the wires and the
+   numbers of the strip are worked out from a state ✓, a name in the state
+   is escaped before it goes into the page ✓, and a tunnel no domain uses
+   is a standby ✓.
+3. **The graph is Go.** ✅ The layout of the nodes ✓ is worked out in Go ✓
+   (the type-1 design ✓) and sent with the page ✓ and with
+   `/api/view/network` ✓; the canvas draws what it is given ✓, and what is
+   left of the script is the curves, the camera and the hand of the
+   operator ✓ — which wires exist, what they are called and what colour
+   they are is the panel's ✓. The card is as tall as the panel says it is
+   ✓, which is why the panel can stack the cards without measuring them ✓.
+   The test: a card sits in its column ✓, the cards of a column are stacked
+   with the gap ✓, and a card the operator dragged stays where he left
+   it ✓.
 4. **The other views are Go.** The tunnels ✓, the domains ✓, the
    infrastructure ✓ and the settings ✓ are rendered by the template ✓.
 5. **The forms go through the API.** What the operator changes is written
@@ -1117,6 +1141,7 @@ already work ✓.
 | 33 | The writers of the state take the lock too | done |
 | 34 | The Go rewrite — phase 10 (the dashboard) | **in progress** |
 | 35 | The dashboard — the shell is Go | done |
+| 36 | The dashboard — the network view and the graph are Go | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design
 and the panel is Go.** What is left is the dashboard (phase 10 ✓) and the

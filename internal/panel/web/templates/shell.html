@@ -107,7 +107,7 @@
         <div class="actions" id="net-actions"></div>
       </div>
 
-      <div class="strip" id="net-strip"></div>
+      <div class="strip" id="net-strip">{{if .Graph}}{{.Graph.StripHTML}}{{end}}</div>
 
       <div class="bar">
         <div class="search grow">
@@ -127,7 +127,7 @@
       <div class="flow" id="flow">
         <div class="flow-head">
           <h2>Network flow</h2>
-          <span class="badge" id="flow-badge"><i class="dot ok"></i><span>0 tunnels checked</span></span>
+          <span class="badge" id="flow-badge"><i class="dot ok"></i><span>{{if .Graph}}{{.Graph.Badge}}{{else}}0 tunnels checked{{end}}</span></span>
           <div class="right">
             <label class="check" style="font-size:12px"><input type="checkbox" id="show-standby" checked> <span>Standby tunnels</span></label>
             <label class="check" style="font-size:12px"><input type="checkbox" id="show-pending"> <span>Not built yet</span></label>
@@ -136,8 +136,8 @@
         <div class="flow-stage" id="stage">
           <div class="flow-world" id="world">
             <svg class="flow-wires" id="wires"></svg>
-            <div class="flow-cols" id="cols"></div>
-            <div id="nodes"></div>
+            <div class="flow-cols" id="cols">{{if .Graph}}{{.Graph.ColumnsHTML}}{{end}}</div>
+            <div id="nodes">{{if .Graph}}{{.Graph.NodesHTML}}{{end}}</div>
           </div>
           <div class="empty-hint hidden" id="empty-hint"></div>
           <div class="flow-tools" id="tools">
