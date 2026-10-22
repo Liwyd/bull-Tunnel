@@ -66,7 +66,7 @@ func (d *dnsAPI) SetTXT(ctx context.Context, name, text string) error {
 // The command the panel writes is JSON, so it is full of quotes. A record
 // that is not escaped is not a record: Cloudflare refuses it, and the agent
 // never sees the command. This is the same rule the panel's own DNS client
-// follows — see quote_txt in bulltunnel/dns/base.py.
+// follows — see QuoteTXT in internal/panel/dns.
 func quoteTxt(text string) string {
 	out := strings.ReplaceAll(text, `\`, `\\`)
 	out = strings.ReplaceAll(out, `"`, `\"`)

@@ -26,7 +26,7 @@ traffic down.
 ## How the panel controls tunnels on different servers
 
 Everything the panel does on a server goes through **one SSH connection per
-server**, kept open and reused (`bulltunnel/ssh.py`):
+server**, kept open and reused (`internal/panel/ssh`):
 
 | Action | How |
 |---|---|

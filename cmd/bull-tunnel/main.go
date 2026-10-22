@@ -28,11 +28,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/Liwyd/bull-Tunnel/internal/panel"
 )
 
 // version is the version of the panel. It is stamped at link time by
-// build.sh.
-var version = "1.1.3"
+// build.sh; without the stamp it is the one of the panel's own package.
+var version = panel.Version
 
 func main() {
 	os.Exit(run(os.Args[1:]))

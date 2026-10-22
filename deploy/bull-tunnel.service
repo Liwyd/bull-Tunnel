@@ -9,6 +9,8 @@ User=bulltunnel
 Group=bulltunnel
 WorkingDirectory=/opt/bull-tunnel
 EnvironmentFile=-/etc/default/bull-tunnel
+# the web interface: the files the panel serves
+Environment=BT_STATIC_DIR=/opt/bull-tunnel/static
 ExecStart=/opt/bull-tunnel/bin/bull-tunnel-panel --data /var/lib/bull-tunnel
 Restart=always
 RestartSec=3

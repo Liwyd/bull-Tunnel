@@ -20,23 +20,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
           cache-dependency-path: go.sum
-      - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
-      - name: check the workflow files
-        run: |
-          python -m pip install --quiet pyyaml
-          python -c "import glob, yaml; [yaml.safe_load(open(f)) for f in glob.glob('.github/workflows/*.yml')]"
-      - name: ruff
-        run: ruff check .
-      - name: pytest
-        run: python -m pytest -q
+      - name: the go vet
+        run: go vet ./...
       - name: the go tests
         run: |
           # The race detector is on: it is what keeps the engine honest.
@@ -73,6 +62,7 @@ jobs:
           test -f /tmp/dist/SHA256SUMS
           for a in amd64 arm64 386 armv7; do
             test -f "/tmp/dist/bull-tunnel-engine_linux_${a}.tar.gz"
+            test -f "/tmp/dist/bull-tunnel_linux_${a}.tar.gz"
           done
 
   image:
@@ -126,22 +116,11 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
-      - run: python -m pip install --upgrade pip build
-      - name: build the panel
-        run: python -m build --sdist --wheel --outdir dist
       - name: build the binaries
         run: bash build.sh dist
-      - name: checksums
-        # the panel looks for SHA256SUMS next to the engine files
-        run: |
-          cd dist
-          sha256sum bull_tunnel-[0-9]*.whl bull_tunnel-[0-9]*.tar.gz >> SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
           files: |

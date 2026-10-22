@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Liwyd/bull-Tunnel/internal/panel"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/api"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/auth"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/backup"
@@ -36,18 +38,34 @@ import (
 )
 
 // version is the version of the panel. It is stamped at link time by
-// build.sh.
-var version = "1.1.3"
+// build.sh; without the stamp it is the one of the panel's own package.
+var version = panel.Version
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "--check" {
+	// the flags of the panel: they come before the environment, and the
+	// environment comes before the defaults.
+	flags := flag.NewFlagSet("bull-tunnel-panel", flag.ExitOnError)
+	dataFlag := flags.String("data", "", "the directory the panel keeps its files in")
+	hostFlag := flags.String("host", "", "the address the panel answers on")
+	portFlag := flags.String("port", "", "the port the panel answers on")
+	demoFlag := flags.Bool("demo", false, "run with a simulated network: no server is needed")
+	checkFlag := flags.Bool("check", false, "ask the panel's own API and say whether it answers")
+	flags.Parse(os.Args[1:])
+
+	if *checkFlag {
 		// the health of the panel: it asks its own API
 		os.Exit(check())
 	}
-	data := dataDir()
+	data := dataDir(*dataFlag)
 	host := envOr("BT_HOST", "0.0.0.0")
+	if *hostFlag != "" {
+		host = *hostFlag
+	}
 	port := envOr("BT_PORT", "8080")
-	demoMode := os.Getenv("BT_DEMO") == "1"
+	if *portFlag != "" {
+		port = *portFlag
+	}
+	demoMode := os.Getenv("BT_DEMO") == "1" || *demoFlag
 
 	if err := os.MkdirAll(data, 0o700); err != nil {
 		log.Fatalf("the data directory cannot be made: %v", err)
@@ -191,7 +209,10 @@ func check() int {
 }
 
 // dataDir is where the panel keeps its files.
-func dataDir() string {
+func dataDir(flagValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
 	if dir := os.Getenv("BT_DATA_DIR"); dir != "" {
 		return dir
 	}
@@ -199,6 +220,9 @@ func dataDir() string {
 }
 
 // staticDir is where the files of the web interface are.
+//
+// The panel looks beside itself first — that is where a checkout leaves them
+// — and then one folder up, which is where the installer puts them.
 func staticDir() string {
 	if dir := os.Getenv("BT_STATIC_DIR"); dir != "" {
 		return dir
@@ -207,7 +231,15 @@ func staticDir() string {
 	if err != nil {
 		return "static"
 	}
-	return filepath.Join(filepath.Dir(executable), "static")
+	beside := filepath.Join(filepath.Dir(executable), "static")
+	if _, err := os.Stat(beside); err == nil {
+		return beside
+	}
+	up := filepath.Join(filepath.Dir(executable), "..", "static")
+	if _, err := os.Stat(up); err == nil {
+		return up
+	}
+	return beside
 }
 
 // envOr is a variable of the environment, or something else.

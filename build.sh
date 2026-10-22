@@ -8,10 +8,8 @@
 #
 # The engine is the BackPack engine (github.com/AminMGMT/BackPack), vendored
 # under internal/engine/ and changed only in the way the import paths had to
-# change. The panel is written in Go as well (internal/panel/), but it is
-# still the Python one that runs: the Go panel arrives with phase 8 of the
-# rewrite, and its tarball appears here with it. Until then this script says
-# so out loud instead of pretending the binary is there.
+# change. The panel is written in Go as well (internal/panel/), and it is the
+# one that runs.
 #
 # The build is hermetic: the dependencies are vendored under vendor/, so no
 # network is needed and the result is the same everywhere.
@@ -22,11 +20,10 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="${1:-$HERE/dist}"
 
-# The version has one home: the panel's own package. When the Go panel
-# replaces the Python one (phase 9 of the rewrite) the home moves with it and
-# this line follows it there.
-VERSION="$(grep -oE '__version__ = "[^"]+"' "$HERE/bulltunnel/__init__.py" | head -n1 | cut -d'"' -f2)"
-[ -n "$VERSION" ] || { echo "cannot read the version from bulltunnel/__init__.py"; exit 1; }
+# The version has one home: the panel's own package. The build script reads
+# it there and stamps it into the binaries.
+VERSION="$(grep -oE 'Version = "[^"]+"' "$HERE/internal/panel/version.go" | head -n1 | cut -d'"' -f2)"
+[ -n "$VERSION" ] || { echo "cannot read the version from internal/panel/version.go"; exit 1; }
 
 export CGO_ENABLED=0
 export GOFLAGS=-mod=vendor
@@ -65,13 +62,6 @@ for t in "${TARGETS[@]}"; do
   for b in "${BINARIES[@]}"; do
     binary="${b%%:*}"
     package="${b#*:}"
-    if [ ! -d "$HERE/$package" ]; then
-      # The Go panel is not written yet: the release carries the Python
-      # wheel until it is. Saying it is better than shipping a file that is
-      # not there.
-      echo "  skipping $binary: $package does not exist yet"
-      continue
-    fi
     if [ "$goarch" = "arm" ]; then
       GOARM="$goarm" GOOS=linux GOARCH=arm go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$OUT/$binary" "./$package"
     else
@@ -82,9 +72,15 @@ for t in "${TARGETS[@]}"; do
       continue
     fi
     if [ "$binary" = "bull-tunnel" ]; then
-      # the management tool travels with the panel
-      tar -C "$OUT" -czf "$OUT/bull-tunnel_linux_${name}.tar.gz" "bull-tunnel" "$panel"
-      rm -f "$OUT/$binary" "$panel"
+      # the management tool travels with the panel, and so does the web
+      # interface: the panel serves it from the folder next to it. A release
+      # without it would install a panel that answers the API and shows no
+      # page.
+      rm -rf "$OUT/static"
+      cp -r "$HERE/static" "$OUT/static"
+      tar -C "$OUT" -czf "$OUT/bull-tunnel_linux_${name}.tar.gz" "bull-tunnel" "$panel" "static"
+      rm -f "$OUT/$binary" "$OUT/$panel"
+      rm -rf "$OUT/static"
       echo "  bull-tunnel_linux_${name}.tar.gz"
       continue
     fi

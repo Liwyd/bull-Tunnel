@@ -86,10 +86,12 @@ tar -xzf "$TMP/panel.tar.gz" -C "$TMP"
 
 if [ -n "$LOCAL" ]; then
   # a checkout: the static files of the web interface are here
-  if [ -d "$SRC/bulltunnel/static" ]; then
-    cp -r "$SRC/bulltunnel/static" "$TMP/static"
+  if [ -d "$SRC/static" ]; then
+    rm -rf "$TMP/static"
+    cp -r "$SRC/static" "$TMP/static"
   fi
 fi
+[ -d "$TMP/static" ] || die "the panel was fetched without its web interface"
 
 say "preparing $DEST and $DATA"
 mkdir -p "$DEST/bin" "$DATA"

@@ -928,7 +928,35 @@ number ✓). The fix is to give the writers the lock as well ✓ — it touches
 every path that changes a tunnel ✓, and it is the change this plan calls
 "bigger" ✓.
 
-### Phase 9 — the switchover  (in progress)
+### Commit 33 — the Python panel is gone  ✅ done
+
+The panel is Go, from the first line to the last: the binary, the service,
+the installer, the image, the management tool and the demo. The Python panel
+that was the reference of the rewrite has done its job — the state file, the
+configuration of a tunnel, the scripts, the backups, the sessions and the
+decisions of the brain are all pinned by the fixtures the Go panel is tested
+against ✓ — and it is gone.
+
+* ✅ The Python package, its tests and its wheel are removed ✓; the
+  repository is Go only ✓ and the CI builds and tests the Go module alone
+  ✓ (`go vet` ✓, `go test -race` ✓, the build ✓, the files of the release
+  ✓).
+* ✅ The web interface moved to `static/` ✓, where the panel serves it from
+  ✓ — and it is **in the release** ✓: the tarball of the panel carries it ✓,
+  or an installation from the release would have a panel that answers the
+  API and shows no page ✓.
+* ✅ The version has one home ✓ (`internal/panel/version.go` ✓), the build
+  script reads it there ✓ and the binaries carry it ✓.
+* ✅ The panel takes its flags ✓ (`--data` ✓, `--host` ✓, `--port` ✓,
+  `--demo` ✓, `--check` ✓): the service and the README already used
+  `--data` ✓, and the Go panel ignored it ✓.
+* ✅ The panel finds the web interface where the installer puts it ✓ (beside
+  it ✓, or one folder up ✓), and the service says where it is ✓.
+* ✅ The files of the release are clean ✓: the panel binary that was left
+  beside the tarballs is gone ✓ (the path of the removal was relative ✓,
+  and the file stayed ✓).
+
+### Phase 9 — the switchover  ✅ done
 
 The panel is Go now: the binary, the service, the installer and the image
 are the Go panel's ✓, and the release carries the panel and the management
@@ -941,18 +969,13 @@ tool ✓.
   engine in it ✓.
 * ✅ The demo runs in the Go panel ✓ (commit 32 ✓).
 * ✅ The API does not wait for the cycle ✓ (commit 32 ✓).
-
-**What is left, and why it waits:**
-
-* **The Python panel goes last.** It is the reference the fixtures compare
-  against — the state file, the configuration of a tunnel, the scripts, the
-  backups, the sessions and the decisions of the brain are all pinned by
-  what the Python panel writes. It goes when the demo is ported ✓ and the
-  last comparison has been made ✓.
+* ✅ The Python panel is gone ✓ (commit 33 ✓): the repository is Go only ✓,
+  the release carries the two binaries and the web interface ✓, and the
+  version has one home ✓.
 
 **Done when:** a fresh machine installs the panel with the one line ✓, the
 panel comes up ✓, the demo runs ✓, and the release carries the two
-binaries ✓.
+binaries ✓. **It does.**
 
 ### Phase 10 — the dashboard in Go (later)
 
@@ -1014,12 +1037,12 @@ already work ✓.
 | 29 | The panel itself, in Go | done |
 | 30 | The image is built again | done |
 | 31 | The panel does not fall over its own state | done |
-| 32 | The Go rewrite — phase 9 (the switchover) | **in progress** |
+| 32 | The Go rewrite — phase 9 (the switchover) | done |
 | 33 | The Go rewrite — phase 10 (the dashboard) | later |
 
-**All the findings of the audit are closed, and the graph is the type-1
-design.** What is left is the Go rewrite above, and the work that never
-ends: watching the panel on a live server.
+**All the findings of the audit are closed, the graph is the type-1 design
+and the panel is Go.** What is left is the dashboard (phase 10 ✓) and the
+work that never ends: watching the panel on a live server.
 
 ### What is left to do, and is not a fault
 

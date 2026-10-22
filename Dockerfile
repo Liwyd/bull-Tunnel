@@ -33,7 +33,7 @@ ENV PATH="/opt/bull-tunnel/bin:${PATH}" \
 RUN useradd --system --uid 10001 --create-home --home-dir /home/bulltunnel bulltunnel
 COPY --from=build /out/bull-tunnel-panel /opt/bull-tunnel/bin/
 COPY --from=build /out/bull-tunnel-engine /opt/bull-tunnel/bin/
-COPY bulltunnel/static /opt/bull-tunnel/static
+COPY static /opt/bull-tunnel/static
 RUN mkdir -p /data && chown bulltunnel:bulltunnel /data
 
 USER bulltunnel

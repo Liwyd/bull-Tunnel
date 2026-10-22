@@ -1,18 +1,10 @@
 .git
 .github
 .gitignore
-.pytest_cache
-.ruff_cache
-__pycache__
-*.pyc
 data
-venv
-.venv
 docs/*.png
-# the Python tests are not in the image
-tests
-pyproject.toml
-requirements.txt
 new-ui
 deploy
 build.sh
+# the tests are not in the image
+tests

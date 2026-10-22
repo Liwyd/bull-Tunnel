@@ -5,7 +5,63 @@ All the versions of bull-Tunnel. The project follows
 change that may break a configuration, the one after it is a change that
 only adds something.
 
-## Unreleased
+## 1.2.0 — 2026-10-22
+
+The panel is Go, from the first line to the last: the binary, the service,
+the installer, the image, the management tool and the demo. The Python panel
+that was the reference of the rewrite has done its job — the state file, the
+configuration of a tunnel, the scripts, the backups, the sessions and the
+decisions of the brain are all pinned by the fixtures the Go panel is tested
+against — and it is gone.
+
+- The repository is Go only: the Python package, its tests and its wheel are
+  removed, and the CI builds and tests the Go module alone.
+- The web interface moved to `static/`, where the panel serves it from.
+- The version has one home: the panel's own package (`internal/panel`), and
+  the build script reads it there.
+- The release carries the two binaries of the panel and the engine, and
+  nothing else.
+
+### The demo, in Go
+
+The demo is how a newcomer watches the failovers without a server, and it
+runs the panel itself: the same code, the same check cycle, the same
+decisions — only the network is simulated.
+
+- The simulated network: the servers die, the carriers are blocked per pair
+  of servers, the paths flap, and every carrier has a latency.
+- The DNS service of the demo: the records live in the memory, and the panel
+  can be watched moving them.
+- The world the panel starts with: six servers, two DNS accounts, four
+  domains, and the tunnels that were "set up by hand" before the panel
+  existed — the first scan adopts them.
+- The chaos: something breaks every minute, so the failover can be watched.
+
+```bash
+BT_DEMO=1 go run ./cmd/bull-tunnel-panel
+```
+
+### A tunnel without an identifier gets one
+
+The Python panel gives every tunnel an identifier when it builds it; the Go
+one did not. The tunnel the mesh offers and the tunnel the panel adopts
+were both written under the key "" in the state file: one of them survived
+and the other was lost. Their names were "bt-" with nothing after it.
+
+### The set of the state has a lock of its own
+
+The lock of the state keeps the state consistent, but the set itself was
+read while it was written — and Go stops the whole program when a map is
+read and written at the same time. The panel could die while the operator
+added a server.
+
+### The operator's change does not wait for the cycle
+
+The cycle gives the lock of the state back between its phases: the servers,
+the tunnels and the exits are read under the lock and copied, the network
+calls are made with it released, and what the cycle learned is written to
+the tunnel that is there now — the change the operator made while the cycle
+was working is not lost.
 
 ### The panel does not fall over its own state
 
