@@ -97,123 +97,27 @@ type NetworkView struct {
 // The caller holds the lock of the state: this reads the servers, the
 // tunnels, the domains and the layout of the canvas.
 func Network(state *store.Store, now, lastCheck float64, busy, flapping []string) *NetworkView {
+	return network(ReadFacts(state, now, lastCheck, busy, flapping))
+}
+
+// network is the view of the canvas, from one reading of the state.
+func network(f *Facts) *NetworkView {
 	view := &NetworkView{Strip: []Cell{}, Nodes: []Node{}, Columns: []Column{}, Edges: []Edge{}}
+	state, links, working, statusOf := f.State, f.Links, f.Busy, f.Status
 
-	servers := state.Servers.List()
-	links := state.Links.List()
-	domains := state.Domains.List()
-
-	working := map[string]bool{}
-	for _, id := range busy {
-		working[id] = true
-	}
-	flappy := map[string]bool{}
-	for _, id := range flapping {
-		flappy[id] = true
-	}
-
-	// the name of a server, looked up by its id
-	name := map[string]string{"": "—"}
-	for _, server := range servers {
-		name[server.ID] = server.Name
-	}
-	serverOf := map[string]*model.Server{}
-	for _, server := range servers {
-		serverOf[server.ID] = server
-	}
-
-	// a tunnel is "testing" while the panel is working on it, whatever its
-	// own status says: the number on the card is the truth of the moment.
-	statusOf := map[string]string{}
-	for _, link := range links {
-		if working[link.ID] {
-			statusOf[link.ID] = "testing"
-		} else {
-			statusOf[link.ID] = link.Status
-		}
-	}
-
-	view.Strip = strip(state, servers, links, domains, statusOf, flappy, now, lastCheck)
-	view.Badge = badge(links, working)
+	view.Strip = strip(f)
+	view.Badge = badge(f)
 
 	// ─────────────────────────────────────────── the cards, column by column
-	// The nodes a column holds, in the order the operator prefers them.
-	var kharej, iran []*model.Server
-	for _, server := range servers {
-		switch server.Role {
-		case "kharej":
-			kharej = append(kharej, server)
-		case "iran":
-			iran = append(iran, server)
-		}
-	}
-	byPriority := func(list []*model.Server) {
-		sort.SliceStable(list, func(i, j int) bool {
-			if list[i].Priority != list[j].Priority {
-				return list[i].Priority < list[j].Priority
-			}
-			return list[i].Name < list[j].Name
-		})
-	}
-	byPriority(kharej)
-	byPriority(iran)
-
-	// The domains stand under the Iran server they point at: the column
-	// reads as one path from the exit servers to the records.
-	rank := map[string]int{}
-	for i, server := range iran {
-		rank[server.ID] = i
-	}
-	ordered := make([]*model.Domain, len(domains))
-	copy(ordered, domains)
-	sort.SliceStable(ordered, func(i, j int) bool {
-		a, b := rank[ordered[i].IranID], rank[ordered[j].IranID]
-		if len(ordered[i].IranID) == 0 {
-			a = len(iran) + 1
-		}
-		if len(ordered[j].IranID) == 0 {
-			b = len(iran) + 1
-		}
-		if a != b {
-			return a < b
-		}
-		return ordered[i].FQDN < ordered[j].FQDN
-	})
-
-	// The exits of a foreign server: the ports it forwards, with the server
-	// the traffic ends up at.
-	exitsOf := exits(state, name, serverOf, links)
-
-	live := 0
-	for _, link := range links {
-		if statusOf[link.ID] != "pending" {
-			live++
-		}
-	}
-	// the tunnels a domain really uses, so that the wire of a standby
-	// tunnel is told apart from the wire of the tunnel in use
-	inUse := map[string]bool{}
-	for _, domain := range domains {
-		for _, one := range routes(state, domain, statusOf, exitsOf) {
-			if one.LinkID != "" {
-				inUse[one.LinkID] = true
-			}
-		}
-	}
-
-	type column struct {
-		col   string
-		items []Node
-	}
 	columns := map[string][]Node{}
-	for _, server := range kharej {
-		columns["kharej"] = append(columns["kharej"], serverNode(server, links, domains, statusOf, exitsOf))
+	for _, server := range f.Kharej {
+		columns["kharej"] = append(columns["kharej"], serverNode(server, links, f.Domains, statusOf, f.Exits))
 	}
-	for _, server := range iran {
-		columns["iran"] = append(columns["iran"], serverNode(server, links, domains, statusOf, exitsOf))
+	for _, server := range f.Iran {
+		columns["iran"] = append(columns["iran"], serverNode(server, links, f.Domains, statusOf, f.Exits))
 	}
-	for _, domain := range ordered {
-		columns["domain"] = append(columns["domain"], domainNode(domain, state, statusOf, exitsOf))
+	for _, domain := range f.Ordered {
+		columns["domain"] = append(columns["domain"], domainNode(domain, state, statusOf, f.Exits))
 	}
 
 	// ──────────────────────────────────────────────────────── where they sit
@@ -271,85 +175,44 @@ func Network(state *store.Store, now, lastCheck float64, busy, flapping []string
 	}
 
 	// ──────────────────────────────────────────────────────────────── wires
-	view.Edges = append(view.Edges, tunnelWires(links, statusOf, working, inUse, state)...)
-	view.Edges = append(view.Edges, domainWires(domains, statusOf)...)
-	view.Edges = append(view.Edges, hopWires(kharej, exitsOf)...)
+	view.Edges = append(view.Edges, tunnelWires(links, statusOf, working, f.InUse, state)...)
+	view.Edges = append(view.Edges, domainWires(f.Domains, statusOf)...)
+	view.Edges = append(view.Edges, hopWires(f.Kharej, f.Exits)...)
 	return view
 }
 
-// strip is the row of numbers at the top of the page.
-func strip(state *store.Store, servers []*model.Server, links []*model.Link, domains []*model.Domain,
-	statusOf map[string]string, flappy map[string]bool, now, lastCheck float64) []Cell {
-
-	online, total := 0, len(servers)
-	for _, server := range servers {
-		if server.Status == "online" {
-			online++
-		}
-	}
-	live, up := 0, 0
-	for _, link := range links {
-		if statusOf[link.ID] == "pending" {
-			continue
-		}
-		live++
-		if statusOf[link.ID] == "up" {
-			up++
-		}
-	}
-	unstable := 0
-	seen := map[string]bool{}
-	for _, link := range links {
-		if statusOf[link.ID] == "degraded" {
-			seen[link.ID] = true
-		}
-	}
-	for id := range flappy {
-		seen[id] = true
-	}
-	unstable = len(seen)
-	healthy, doms := 0, len(domains)
-	for _, domain := range domains {
-		if domain.Status == "ok" {
-			healthy++
-		}
-	}
-	next := float64(state.Settings.CheckInterval)
-	if lastCheck > 0 {
-		if left := next - (now - lastCheck); left > 0 {
+// strip is the row of numbers at the top of a page.
+func strip(f *Facts) []Cell {
+	next := float64(f.State.Settings.CheckInterval)
+	if f.LastCheck > 0 {
+		if left := next - (f.Now - f.LastCheck); left > 0 {
 			next = left
 		} else {
 			next = 0
 		}
 	}
 	all := func(count int) string {
-		if count == total && total > 0 {
+		if count == len(f.Servers) && len(f.Servers) > 0 {
 			return "ok"
 		}
 		return "warn"
 	}
 	return []Cell{
-		{Key: "Servers online", Value: strconv.Itoa(online) + " / " + strconv.Itoa(total), Class: all(online)},
-		{Key: "Stable tunnels", Value: strconv.Itoa(up) + " / " + strconv.Itoa(live), Class: "ok"},
-		{Key: "Unstable tunnels", Value: strconv.Itoa(unstable), Class: warn(unstable > 0)},
-		{Key: "Healthy domains", Value: strconv.Itoa(healthy) + " / " + strconv.Itoa(doms), Class: all(healthy)},
+		{Key: "Servers online", Value: strconv.Itoa(f.Online) + " / " + strconv.Itoa(len(f.Servers)), Class: all(f.Online)},
+		{Key: "Stable tunnels", Value: strconv.Itoa(f.Up) + " / " + strconv.Itoa(f.Live), Class: "ok"},
+		{Key: "Unstable tunnels", Value: strconv.Itoa(f.Unstable), Class: warn(f.Unstable > 0)},
+		{Key: "Healthy domains", Value: strconv.Itoa(f.Healthy) + " / " + strconv.Itoa(len(f.Domains)), Class: all(f.Healthy)},
 		{Key: "Next check", Value: strconv.Itoa(int(next+0.5)) + " s", Class: "test"},
 	}
 }
 
 // badge is the line at the top of the canvas.
-func badge(links []*model.Link, working map[string]bool) string {
-	live := 0
-	for _, link := range links {
-		if link.Status != "pending" || working[link.ID] {
-			live++
-		}
-	}
+func badge(f *Facts) string {
 	word := "tunnels"
-	if live == 1 {
+	if f.Live == 1 {
 		word = "tunnel"
 	}
-	return strconv.Itoa(live) + " " + word + " checked"
+	return strconv.Itoa(f.Live) + " " + word + " checked"
 }
 
 // warn is the class of a number that is worth looking at.

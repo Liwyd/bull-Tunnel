@@ -31,23 +31,46 @@ func TestTheNetworkViewIsAnAnswerOfThePanel(t *testing.T) {
 	}
 
 	// the view is not for someone who is not signed in
-	if status, _ := aGet(t, server, http.MethodGet, "/api/view/network", "", nil); status != http.StatusUnauthorized {
+	if status, _ := aGet(t, server, http.MethodGet, "/api/view", "", nil); status != http.StatusUnauthorized {
 		t.Errorf("the view is %d without a session, it must be 401", status)
 	}
-	status, view := aGet(t, server, http.MethodGet, "/api/view/network", "", cookie)
+	status, view := aGet(t, server, http.MethodGet, "/api/view", "", cookie)
 	if status != http.StatusOK {
 		t.Fatalf("the view is %d, it must be 200", status)
 	}
-	for _, key := range []string{"strip", "badge", "nodes", "columns", "edges"} {
-		if _, there := view[key]; !there {
-			t.Errorf("the view does not have %q in it", key)
+	// one truth, two shapes: the parts of the pages, and the canvas
+	parts, _ := view["parts"].(map[string]any)
+	if parts == nil {
+		t.Fatalf("the view has no parts in it")
+	}
+	for _, key := range []string{"ss-on", "net-strip", "links-table", "tun-table", "tun-protocols",
+		"dom-list", "dom-detail", "inf-kharej", "inf-iran", "set-body", "set-index", "empty-hint"} {
+		if _, there := parts[key]; !there {
+			t.Errorf("the pages do not have %q in them", key)
 		}
 	}
-	if _, ok := view["nodes"].([]any); !ok {
-		t.Errorf("the cards of the view are %T, they must be a list", view["nodes"])
+	graph, _ := view["network"].(map[string]any)
+	if graph == nil {
+		t.Fatalf("the view has no canvas in it")
 	}
-	if _, ok := view["strip"].([]any); !ok {
-		t.Errorf("the numbers of the view are %T, they must be a list", view["strip"])
+	for _, key := range []string{"strip", "badge", "nodes", "columns", "edges"} {
+		if _, there := graph[key]; !there {
+			t.Errorf("the canvas does not have %q in it", key)
+		}
+	}
+	if _, ok := graph["nodes"].([]any); !ok {
+		t.Errorf("the cards of the canvas are %T, they must be a list", graph["nodes"])
+	}
+
+	// the search of the table is the panel's: the same state, filtered
+	_, filtered := aGet(t, server, http.MethodGet, "/api/view?q=nothing-matches&filter=down", "", cookie)
+	rows, _ := filtered["parts"].(map[string]any)
+	if table, ok := rows["links-table"].(string); ok {
+		if !strings.Contains(table, "No tunnel matches") && !strings.Contains(table, "No tunnel yet") {
+			t.Errorf("a search that matches nothing does not say so: %s", table)
+		}
+	} else {
+		t.Error("the search of the table did not change the page")
 	}
 }
 

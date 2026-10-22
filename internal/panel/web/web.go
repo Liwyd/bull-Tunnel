@@ -22,11 +22,11 @@ var Pages = struct {
 	shell *template.Template
 }{}
 
-// Dashboard is the dashboard's page with the network view in it: the cards,
+// Page is the dashboard's page with the network view in it: the cards, the
 // the titles of the columns and the numbers of the strip are in the page
 // before the script runs, and the script draws the same view over them when
 // the state changes.
-func Dashboard(version string, view *NetworkView) ([]byte, error) {
+func Page(version string, view *NetworkView) ([]byte, error) {
 	return render(version, view)
 }
 

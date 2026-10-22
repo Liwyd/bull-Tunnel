@@ -1049,6 +1049,17 @@ domain is now drawn as what it really is ✓ (the JavaScript read two fields
 the panel never sent, so every route of every domain was drawn as broken ✓
 — the panel works it out now ✓).
 
+**Commit 37 — the other views are Go** ✓ (`internal/panel/web` ✓): the
+five pages and the canvas are one answer to one question ✓ —
+`GET /api/view` holds what an element holds, by its id ✓, and the view the
+canvas draws ✓. The script swaps the parts into the elements and binds the
+buttons again ✓; the search ✓, the filter ✓, the order ✓ and the domain
+that is open ✓ are worked out by the panel ✓, so the browser is told, not
+asked ✓. One reading of the state answers both shapes ✓, and there is one
+place where the status of a tunnel, the servers in use and the routes of a
+domain are worked out ✓ — not five ✓. What is left of the JavaScript is
+the canvas, the drawer, the forms and the feed of events ✓.
+
 1. **The shell is Go.** ✅ The page is rendered by a Go template ✓
    (`internal/panel/web` ✓): the sidebar ✓, the header ✓, the five views ✓
    and the sign-in card ✓. The template is in the binary ✓, so the panel
@@ -1074,8 +1085,19 @@ the panel never sent, so every route of every domain was drawn as broken ✓
    The test: a card sits in its column ✓, the cards of a column are stacked
    with the gap ✓, and a card the operator dragged stays where he left
    it ✓.
-4. **The other views are Go.** The tunnels ✓, the domains ✓, the
-   infrastructure ✓ and the settings ✓ are rendered by the template ✓.
+4. **The other views are Go.** ✅ The five pages are worked out by one
+   reading of the state ✓ and answered by one endpoint ✓ (`GET /api/view`
+   ✓): what an element holds, by its id ✓, and the view the canvas draws
+   ✓. The tunnels ✓, the domains ✓, the infrastructure ✓ and the settings
+   ✓ come from the same facts the network view is worked out from ✓ —
+   there is one answer to the question, not five ✓. The script swaps the
+   parts into the elements and binds the buttons again ✓, and the search ✓,
+   the filter ✓, the order ✓ and the domain that is open ✓ are the panel's
+   work ✓. The test: the pages hold what a state says ✓ — the tunnel with
+   its two servers and its port ✓, a domain with the routes to its ports ✓,
+   a server with its address ✓ and the settings form field by field ✓ —
+   the operator's picks are worked out by the panel ✓, and a fresh panel
+   teaches what to do first ✓.
 5. **The forms go through the API.** What the operator changes is written
    with the API ✓, and the page is rendered again with what the panel now
    knows ✓ — the forms are the last thing, and they are the reason the
@@ -1142,6 +1164,7 @@ already work ✓.
 | 34 | The Go rewrite — phase 10 (the dashboard) | **in progress** |
 | 35 | The dashboard — the shell is Go | done |
 | 36 | The dashboard — the network view and the graph are Go | done |
+| 37 | The dashboard — the other views are Go | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design
 and the panel is Go.** What is left is the dashboard (phase 10 ✓) and the
@@ -1159,6 +1182,12 @@ work that never ends: watching the panel on a live server.
 * **The engine's experimental carriers** (`xdi`, `pck`, `spoof`) are not
   offered to the panel: they need raw sockets and root, and an unattended
   repair must not ask for either.
+* **The dashboard does not show how much of a domain's ports a healthy
+  tunnel covers, nor when the domain would fail back** — the API never
+  answers those two numbers, so the page says "—" and nothing. Both are
+  worked out inside the panel ✓ (the covering of a domain is a question the
+  orchestrator answers ✓, and the failback timer runs there ✓ and writes
+  what it does to the events ✓); they are not carried to the page yet ✓.
 * **The panel does not manage the layer-3 and the direct tunnels** of the
   engine: they are not reverse tunnels, and the panel's model has no place
   for them.

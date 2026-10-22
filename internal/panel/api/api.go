@@ -123,7 +123,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/login", s.login)
 	mux.HandleFunc("/api/logout", s.logout)
 	mux.HandleFunc("/api/state", s.authed(s.read(s.state)))
-	mux.HandleFunc("/api/view/network", s.authed(s.read(s.viewNetwork)))
+	mux.HandleFunc("/api/view", s.authed(s.read(s.view)))
 	mux.HandleFunc("/api/layout", s.authed(s.write(s.layout)))
 	mux.HandleFunc("/api/check", s.authed(s.check))
 	mux.HandleFunc("/api/scan", s.authed(s.scan))
@@ -295,9 +295,9 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.store.RLock()
-	view := web.Network(s.store, now(), s.orch.LastCheck(), s.busy(), s.flapping())
+	view := web.ReadFacts(s.store, now(), s.orch.LastCheck(), s.busy(), s.flapping()).View()
 	s.store.RUnlock()
-	content, err := web.Dashboard(s.version, view)
+	content, err := web.Page(s.version, view)
 	if err != nil {
 		// the page could not be rendered: the one that is on the disk is
 		// better than nothing.
@@ -313,15 +313,27 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	w.Write(content)
 }
 
-// viewNetwork is the network view worked out by the panel: the cards, the
-// columns, the wires and the numbers of the strip. The browser draws what
-// it is given — the panel decides what the dashboard says.
-func (s *Server) viewNetwork(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/api/view/network" {
+// view is what the pages of the dashboard hold, worked out by the panel:
+// the parts of the five pages and the view of the canvas. The browser draws
+// what it is given — the panel decides what the dashboard says.
+//
+// The panel holds only the truth about itself ✓, and the dashboard holds
+// only what the panel told it ✓: the pages are the same truth in the other
+// shape.
+func (s *Server) view(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/api/view" {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, web.Network(s.store, now(), s.orch.LastCheck(), s.busy(), s.flapping()))
+	query := r.URL.Query()
+	opts := web.Opts{
+		Query:    query.Get("q"),
+		Filter:   query.Get("filter"),
+		Sort:     query.Get("sort"),
+		Selected: query.Get("selected"),
+		Pending:  query.Get("pending") == "1" || query.Get("pending") == "true",
+	}
+	writeJSON(w, http.StatusOK, web.New(s.store, now(), s.orch.LastCheck(), s.busy(), s.flapping(), opts))
 }
 
 // now is the time in seconds.

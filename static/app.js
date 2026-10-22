@@ -92,11 +92,6 @@ const lstatus = (l) => (isBusy(l) ? "testing" : l.status);
 const isFlapping = (l) => S.flapping.includes(l.id);
 /* the tunnels that are not steady: the ones that are degraded, and the ones
    that keep flapping. A tunnel that is both is counted once. */
-function unstableCount() {
-  const ids = new Set(S.links.filter((l) => lstatus(l) === "degraded").map((l) => l.id));
-  for (const id of S.flapping) ids.add(id);
-  return ids.size;
-}
 const handedOver = (l) => !!S.handover[l.id];
 const ms = (v) => (v == null ? "—" : `${Math.round(v)}ms`);
 const provider = (id) => S.providers.find((p) => p.id === id);
@@ -115,11 +110,6 @@ function linkCell(l, extra = "") {
   const st = lstatus(l);
   const sub = [l.label, l.transport, st === "up" ? ms(l.latency_ms) : FA[st]].filter(Boolean).join(" · ");
   return `<span class="grow"><span>${esc(linkName(l))}</span><span class="sub mono">${esc(sub)}${extra}</span></span>`;
-}
-function activeLinkIds() {
-  const set = new Set();
-  for (const d of S.domains) for (const r of d.routes || []) if (r.link_id) set.add(r.link_id);
-  return set;
 }
 function ago(ts) {
   if (!ts) return "—";
@@ -231,18 +221,37 @@ function connectWS() {
 }
 setInterval(() => { if (wsAlive) try { ws.send("ping"); } catch (_) { /* ignore */ } }, 25000);
 
-/* The network view is worked out by the panel: the cards, the columns, the
-   wires and the numbers of the strip. The page fetches it with the state
-   and draws what it is given — the browser owns the pixels, the panel owns
-   the truth. */
-let VIEW = null;
+/* The dashboard is worked out by the panel: the parts of the five pages and
+   the view of the canvas come from one reading of the state, and the page
+   draws what it is given — the browser owns the pixels, the panel owns the
+   truth. The panel holds only the truth about itself, and the dashboard
+   holds only what the panel told it: the pages are the same truth in the
+   other shape. */
+let VIEW = null;   // the canvas: the cards, the columns, the wires
+let PARTS = null;  // the pages: what an element holds, by its id
 let viewSeq = 0;
 async function loadView() {
   const mine = ++viewSeq;
+  const params = new URLSearchParams({ q: netQuery, filter: netFilter, sort: $("#tun-sort").value, selected: selectedDomain });
+  if ($("#show-pending-2").checked) params.set("pending", "1");
   try {
-    const answer = await api("GET", "/api/view/network");
-    if (mine === viewSeq) VIEW = answer;
+    const answer = await api("GET", `/api/view?${params}`);
+    if (mine === viewSeq) { VIEW = answer.network; PARTS = answer.parts; }
   } catch (_) { /* the page keeps the view it already has */ }
+}
+
+/* What a page holds is the panel's: this puts it in the element with that
+   id. The buttons carry the same marks as before, so the clicks they
+   answer are the same, and the few that need a handler are bound again. */
+function applyParts() {
+  if (!PARTS) return;
+  for (const [id, html] of Object.entries(PARTS)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (id === "empty-hint") el.classList.toggle("hidden", !html); // no hint: nothing to show
+    if (el.innerHTML !== html) el.innerHTML = html;
+  }
+  bindActions();
 }
 
 function setState(st) {
@@ -264,17 +273,18 @@ function showErrors(list) {
 
 function renderAll() {
   if (!S) return;
-  renderSide();
-  renderStrip();
-  renderFlow();
-  renderTable();
-  renderTunnels();
-  renderDomains();
-  renderInfra();
-  renderSettings();
-  renderEmpty();
-  renderDrawer();
+  applyParts();   // the five pages, from the panel
+  renderFlow();   // the canvas, from the panel
+  renderDrawer(); // what the operator has open
 }
+
+// The search, the filter and the order are worked out by the panel: the
+// controls only say what the operator picked, and ask for the page again.
+function loadViewThenRender() { loadView().then(renderAll); }
+$("#net-q").oninput = (e) => { netQuery = e.target.value; loadViewThenRender(); };
+$("#net-filter").onchange = (e) => { netFilter = e.target.value; loadViewThenRender(); };
+$("#net-search").onclick = () => { netQuery = $("#net-q").value; netFilter = $("#net-filter").value; loadViewThenRender(); };
+$("#tun-sort").onchange = loadViewThenRender;
 
 /* ---------------------------------------------------------------- router */
 function route() {
@@ -289,81 +299,26 @@ function route() {
 window.addEventListener("hashchange", route);
 
 /* --------------------------------------------------------------- sidebar */
-function renderSide() {
-  const on = S.servers.filter((s) => s.status === "online").length;
-  const deg = unstableCount();
-  const dom = S.domains.filter((d) => d.status === "ok").length;
-  $("#ss-on").textContent = `${on} / ${S.servers.length}`;
-  $("#ss-deg").textContent = String(deg);
-  $("#ss-dom").textContent = String(dom);
-  $("#ss-user").textContent = signedInAs;
-  $("#ss-ver").textContent = `v${S.version}`;
-  const foot = S.demo ? "demo environment" : "production";
-  const sync = S.last_check ? `last check ${ago(S.last_check)}` : "waiting for the first check";
-  $("#foot-note").innerHTML = `<span class="label" style="color:var(--muted)">${esc(foot.toUpperCase())}</span><span>·</span><span>${esc(sync)}</span>`;
-  // the flags of the top bar: what the panel is doing right now
-  const flags = [];
-  if (S.settings.observe_only) flags.push(`<button class="flag observe" id="observe-pill" title="The panel only observes and reports; nothing is changed automatically">● Observe mode</button>`);
-  if (S.busy.length) flags.push(`<span class="flag busy" title="Operations that are running right now">⚙ ${S.busy.length} running</span>`);
-  $("#top-flags").innerHTML = flags.join("");
-}
-
 /* the strip of counters under the page title */
-function renderStrip() {
-  if (!S) return;
-  const on = S.servers.filter((s) => s.status === "online").length;
-  const live = S.links.filter((l) => l.status !== "pending");
-  const up = live.filter((l) => l.status === "up").length;
-  const deg = unstableCount();
-  const dok = S.domains.filter((d) => d.status === "ok").length;
-  const next = S.last_check ? Math.max(0, S.settings.check_interval - (nowS() - S.last_check)) : S.settings.check_interval;
-  const cell = (k, v, cls = "") => `<div><span class="k">${k}</span><span class="v ${cls}">${v}</span></div>`;
-  if (VIEW) $("#net-strip").innerHTML = VIEW.strip.map((c) => `<div><span class="k">${esc(c.key)}</span><span class="v ${esc(c.class)}">${esc(c.value)}</span></div>`).join("");
-  $("#tun-strip").innerHTML = cell("Tunnels", String(S.links.length))
-    + cell("Healthy", String(up), "ok")
-    + cell("Unstable", String(deg), deg ? "warn" : "")
-    + cell("Pinned", String(S.links.filter((l) => l.pinned).length))
-    + cell("Not built", String(S.links.filter((l) => l.status === "pending").length));
-  $("#dom-strip").innerHTML = cell("Domains", String(S.domains.length))
-    + cell("Healthy", String(dok), "ok")
-    + cell("Broken", String(S.domains.filter((d) => d.status === "broken").length), "warn")
-    + cell("Awaiting DNS", String(S.domains.filter((d) => d.pending_ip).length))
-    + cell("Manual failover", String(S.domains.filter((d) => !d.auto_failover).length));
-  $("#inf-strip").innerHTML = cell("Foreign servers", String(byRole("kharej").length))
-    + cell("Iran servers", String(byRole("iran").length))
-    + cell("Online", `${S.servers.filter((s) => s.status === "online").length} / ${S.servers.length}`, "ok")
-    + cell("Tunnels", String(S.links.length))
-    + cell("Domains", String(S.domains.length));
-}
-
 /* the buttons in the header of every page */
-function renderActions() {
-  const add = `<div class="menu"><button class="btn primary menu-btn">${ICON.add} Add</button>
-    <div class="menu-pop">
-      <button data-add="kharej">Foreign server</button>
-      <button data-add="iran">Iran server</button>
-      <button data-add="link">New tunnel</button>
-      <button data-add="provider">DNS account</button>
-      <button data-add="domain">Domain</button>
-    </div></div>`;
-  const net = `<button class="btn" id="btn-scan">${ICON.scan} Find tunnels</button>
-    <button class="btn" id="btn-check">${ICON.check} Check</button>
-    <button class="btn primary" id="btn-discover">${ICON.zap} Test &amp; connect</button>${add}`;
-  $("#net-actions").innerHTML = net;
-  $("#tun-actions").innerHTML = `<button class="btn" id="btn-scan-2">${ICON.scan} Find tunnels</button>
-    <button class="btn" id="btn-check-2">${ICON.check} Check</button>
-    <button class="btn primary" id="btn-discover-2">${ICON.zap} Test &amp; connect</button>${add}`;
-  $("#dom-actions").innerHTML = add;
-  $("#inf-actions").innerHTML = add;
-  $("#set-actions").innerHTML = `<button class="btn" id="btn-settings">${ICON.edit} Edit the settings</button>`;
-
-  $("#btn-scan").onclick = $("#btn-scan-2").onclick = scanNow;
-  $("#btn-check").onclick = $("#btn-check-2").onclick = () => act(() => api("POST", "/api/check"), "The immediate check has started");
-  $("#btn-discover").onclick = $("#btn-discover-2").onclick = discoverNow;
-  $("#btn-settings").onclick = settingsForm;
-  $$(".menu > .menu-btn").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); toggleMenu(b); }));
+/* The buttons of a page come with the parts; what they do is the script's:
+   the handlers are bound to the ids, and the parts are swapped under them. */
+function bindActions() {
+  const scan = $("#btn-scan"), check = $("#btn-check"), discover = $("#btn-discover");
+  if (!scan) return;
+  scan.onclick = () => act(scanNow, "Scan started");
+  check.onclick = () => act(() => api("POST", "/api/check", {}), "Check started");
+  discover.onclick = () => act(discoverNow, "Test and connection started");
+  const scan2 = $("#btn-scan-2"), check2 = $("#btn-check-2"), discover2 = $("#btn-discover-2");
+  if (scan2) scan2.onclick = scan.onclick;
+  if (check2) check2.onclick = check.onclick;
+  if (discover2) discover2.onclick = discover.onclick;
+  const edit = $("#btn-settings");
+  if (edit) edit.onclick = settingsForm;
+  $$("#net-actions .menu > .menu-btn, #tun-actions .menu > .menu-btn, #dom-actions .menu > .menu-btn, #inf-actions .menu > .menu-btn")
+    .forEach((b) => (b.onclick = (e) => { e.stopPropagation(); toggleMenu(b); }));
 }
-/* only one popup of the “Add” buttons is open at a time */
+
 function toggleMenu(btn) {
   const pop = btn.parentElement.querySelector(".menu-pop");
   const was = pop.classList.contains("open");
@@ -748,8 +703,8 @@ $("#tools").addEventListener("click", async (e) => {
   }
 });
 $("#show-standby").onchange = drawWires;
-$("#show-pending").onchange = (e) => { $("#show-pending-2").checked = e.target.checked; drawWires(); renderTable(); };
-$("#show-pending-2").onchange = (e) => { $("#show-pending").checked = e.target.checked; drawWires(); renderTable(); };
+$("#show-pending").onchange = (e) => { $("#show-pending-2").checked = e.target.checked; drawWires(); loadViewThenRender(); };
+$("#show-pending-2").onchange = (e) => { $("#show-pending").checked = e.target.checked; drawWires(); loadViewThenRender(); };
 
 /* hover: light up a node's whole path, dim the rest */
 let focus = null;
@@ -801,39 +756,6 @@ function linkTip(l) {
 }
 
 /* --------------------------------------------------------- tunnels table */
-function renderTable() {
-  const showPending = $("#show-pending-2").checked;
-  const active = activeLinkIds();
-  const q = netQuery.trim().toLowerCase();
-  let rows = S.links.filter((l) => showPending || l.status !== "pending")
-    .sort((a, b) => nm(a.kharej_id).localeCompare(nm(b.kharej_id)) || nm(a.iran_id).localeCompare(nm(b.iran_id)) || a.priority - b.priority);
-  if (q) rows = rows.filter((l) => `${linkName(l)} ${l.label || ""} ${l.transport || ""} ${(l.ports || []).join(" ")}`.toLowerCase().includes(q));
-  if (netFilter !== "all") rows = rows.filter((l) => lstatus(l) === netFilter);
-  if (!rows.length) {
-    $("#links-table").innerHTML = `<tbody><tr><td class="muted" style="padding:20px 14px">${S.links.length ? "No tunnel matches this filter." : "No tunnel yet. Add the servers; the tunnels that already run on them are found automatically."}</td></tr></tbody>`;
-    return;
-  }
-  $("#links-table").innerHTML = `<thead><tr><th></th><th>Path</th><th>Name</th><th>Protocol</th><th>Latency</th><th>Ports (Iran side)</th><th>Kind</th><th>History</th></tr></thead><tbody>` +
-    rows.map((l) => {
-      const st = lstatus(l);
-      const tags = [];
-      if (active.has(l.id)) tags.push(`<span class="chip ok">● traffic</span>`);
-      if (handedOver(l)) tags.push(`<span class="chip purple">ports on ${esc(linkName(linkById(S.handover[l.id])))}</span>`);
-      if (isFlapping(l)) tags.push(`<span class="chip warn">unstable</span>`);
-      return `<tr data-link="${l.id}"><td><span class="dot ${st}"></span></td>
-        <td class="pair">${esc(linkName(l))} ${tags.join(" ")}</td>
-        <td class="muted">${esc(l.label || "")}</td>
-        <td class="mono">${esc(st === "testing" ? "…" : l.transport || "—")}${l.pinned ? " 🔒" : ""}</td>
-        <td class="mono">${st === "up" ? ms(l.latency_ms) : `<span class="muted">${FA[st] || st}</span>`}</td>
-        <td class="mono">${esc((l.ports || []).join(", ") || "—")}</td>
-        <td>${l.managed ? `<span class="chip">panel</span>` : `<span class="chip info" title="It was already on the server">existing</span>`}</td>
-        <td>${spark(l.history, 90, 18)}</td></tr>`;
-    }).join("") + "</tbody>";
-}
-$("#show-pending-2").onchange = renderTable;
-$("#net-q").oninput = (e) => { netQuery = e.target.value; renderTable(); };
-$("#net-filter").onchange = (e) => { netFilter = e.target.value; renderTable(); };
-$("#net-search").onclick = () => { netQuery = $("#net-q").value; netFilter = $("#net-filter").value; renderTable(); };
 
 /* --------------------------------------------------------------- events */
 function renderEvents(newId) {
@@ -849,271 +771,10 @@ $$("#ev-filter button").forEach((b) => (b.onclick = () => {
 }));
 
 /* ================================================== tunnels & protocols */
-function renderTunnels() {
-  if (!S) return;
-  const sort = $("#tun-sort").value;
-  let rows = [...S.links];
-  if (sort === "latency") rows.sort((a, b) => (a.latency_ms ?? 1e9) - (b.latency_ms ?? 1e9));
-  else if (sort === "status") rows.sort((a, b) => String(lstatus(a)).localeCompare(String(lstatus(b))));
-  else rows.sort((a, b) => linkName(a).localeCompare(linkName(b)));
-  $("#tun-table").innerHTML = `<thead><tr><th></th><th>Path</th><th>Protocol</th><th>Latency</th><th>Ports (Iran side)</th><th>Kind</th><th>Engine</th></tr></thead><tbody>` +
-    (rows.map((l) => {
-      const st = lstatus(l);
-      return `<tr data-link="${l.id}"><td><span class="dot ${st}"></span></td>
-        <td class="pair">${esc(linkName(l))}</td>
-        <td class="mono">${esc(st === "testing" ? "…" : l.transport || "—")}${l.pinned ? " 🔒" : ""}</td>
-        <td class="mono">${st === "up" ? ms(l.latency_ms) : `<span class="muted">${FA[st] || st}</span>`}</td>
-        <td class="mono">${esc((l.ports || []).join(", ") || "—")}</td>
-        <td>${l.managed ? `<span class="chip">panel</span>` : `<span class="chip info">existing</span>`}</td>
-        <td class="mono muted">${esc(l.engine_version || "—")}</td></tr>`;
-    }).join("") || `<tr><td class="muted" style="padding:20px 14px">No tunnel yet.</td></tr>`) + "</tbody>";
-
-  // the carriers the panel knows about
-  const all = [...new Set([...S.transports])];
-  const cand = S.settings.candidate_transports;
-  $("#tun-protocols").innerHTML = `
-    <p class="note">The carriers the tunnel engine speaks. The ones that are ticked are tested on every check and used to repair a tunnel that breaks.</p>
-    <div class="tchecks">${all.map((t) => `<label><input type="checkbox" ${cand.includes(t) ? "checked" : ""} disabled>${esc(t)}</label>`).join("")}</div>
-    <dl class="kv" style="margin-top:6px">
-      <dt>Enabled</dt><dd class="mono">${cand.length} / ${all.length}</dd>
-      <dt>Timeout</dt><dd class="mono">${S.settings.test_timeout}s</dd>
-      <dt>Check interval</dt><dd class="mono">${S.settings.check_interval}s</dd>
-      <dt>Auto repair</dt><dd>${S.settings.auto_repair ? "on" : "off"}</dd>
-      <dt>Mode</dt><dd>${S.settings.observe_only ? "observe only" : "acting"}</dd>
-    </dl>
-    <div class="btns"><button class="btn sm" id="btn-settings-2">${ICON.edit} Edit the protocols</button></div>`;
-  $("#btn-settings-2").onclick = settingsForm;
-}
-$("#tun-sort").onchange = renderTunnels;
 
 /* ============================================================== domains */
-function renderDomains() {
-  if (!S) return;
-  if (!S.domains.length) {
-    $("#dom-list").innerHTML = `<p class="note">No domain yet. Add one with a DNS account (ArvanCloud or Cloudflare) and the panel keeps its record pointed at a healthy Iran server.</p>`;
-    $("#dom-detail").innerHTML = "";
-    return;
-  }
-  if (!selectedDomain || !S.domains.some((d) => d.id === selectedDomain)) selectedDomain = S.domains[0].id;
-  $("#dom-list").innerHTML = `<div class="opt-list">${S.domains.map((d) => {
-    const st = d.status;
-    return `<div class="opt click ${d.id === selectedDomain ? "on" : ""}" data-dom="${d.id}">
-      <span class="dot ${st}"></span>
-      <span class="grow"><span class="mono">${esc(d.fqdn)}</span>
-      <span class="sub">${esc(d.current_ip || "—")} · ${d.ttl}s · ${esc((provider(d.provider_id) || {}).name || "no account")}</span></span>
-      ${d.pending_ip ? `<span class="chip warn">pending</span>` : ""}
-      ${d.error ? `<span class="chip bad" title="${esc(d.error)}">error</span>` : ""}
-    </div>`;
-  }).join("")}</div>`;
-  const d = S.domains.find((x) => x.id === selectedDomain);
-  $("#dom-detail").innerHTML = d ? domainDetail(d) : "";
-}
-
-function domainDetail(d) {
-  const p = provider(d.provider_id);
-  const iran = srv(d.iran_id);
-  const routeRows = (d.routes || []).map((r) => {
-    const l = linkById(r.link_id);
-    const st = l ? lstatus(l) : "down";
-    const sub = l ? [l.label, l.transport, st === "up" ? ms(l.latency_ms) : FA[st]].filter(Boolean).join(" · ") : "no tunnel opens this port on this server";
-    return `<div class="opt"><span class="dot ${r.healthy ? "up" : st}"></span>
-      <span class="grow"><span class="mono">${esc(r.spec)} → ${esc(l ? nm(l.kharej_id) : "?")}${r.exit ? ` ↪ ${esc(exitText(r.exit))}` : ""}</span>
-      <span class="sub mono">${esc(sub)}</span></span>
-      ${l ? `<button class="btn sm" data-link="${l.id}">Tunnel</button>` : ""}</div>`;
-  }).join("");
-  const cov = (d.coverage || []).map((c) => {
-    const s = srv(c.iran_id);
-    if (!s) return "";
-    const tags = [];
-    if (c.iran_id === d.primary_iran) tags.push(`<span class="chip">primary</span>`);
-    if (c.iran_id === d.iran_id) tags.push(`<span class="chip ok">current</span>`);
-    const sub = c.ok ? "all the ports are healthy" : (c.problems[0] || "");
-    return `<div class="opt ${c.ok ? "" : "off"}"><span class="dot ${c.ok ? "up" : "down"}"></span>
-      <span class="grow"><span>${esc(s.name)} <span class="mono muted small">${esc(s.ip)}</span></span>
-      <span class="sub">${esc(sub)}${c.problems.length > 1 ? ` (+${c.problems.length - 1})` : ""}</span></span>
-      ${tags.join("")}
-      ${c.iran_id !== d.primary_iran ? `<button class="btn sm ghost" data-primary="${c.iran_id}" data-dom-of="${d.id}" title="Once the failure is over, the traffic comes back to this server">Make it primary</button>` : ""}
-      ${c.ok && c.iran_id !== d.iran_id ? `<button class="btn sm" data-switch="${c.iran_id}" data-dom-of="${d.id}">Switch</button>` : ""}</div>`;
-  }).join("");
-  const fb = failbackText(d);
-  return `
-  <div class="panel">
-    <div class="panel-head">
-      <span class="idx">01 / RECORD</span>
-      <h2 class="mono">${esc(d.fqdn)}</h2>
-      <div class="right">
-        ${p ? `<span class="prov ${p.kind}">${p.kind === "cloudflare" ? "CF" : "ARVAN"}</span>` : ""}
-        <span class="chip ${d.status === "ok" ? "ok" : d.status === "broken" ? "bad" : ""}"><span class="dot ${d.status}"></span>${FA[d.status] || d.status}</span>
-      </div>
-    </div>
-    <div class="panel-body">
-      <div class="pathline">
-        <span class="chip">User</span><span class="arrow">→</span>
-        <span class="chip mono">${esc(d.fqdn)}</span><span class="arrow">→</span>
-        <span class="chip">${esc(iran ? `${iran.name} ${iran.ip}` : "—")}</span>
-      </div>
-      ${iran ? "" : `<p class="note" style="color:var(--degraded)">The record of this domain points at none of the registered Iran servers. Pick the right one below.</p>`}
-      ${d.pending_ip ? `<p class="note" style="color:var(--degraded)">The record was changed to <span class="mono">${esc(d.pending_ip)}</span>; waiting for the change to reach the public DNS servers (${ago(d.pending_since)})…</p>` : ""}
-      ${fb ? `<p class="note"><span id="failback-timer">${esc(fb)}</span></p>` : ""}
-      <dl class="kv">
-        <dt>Record IP</dt><dd class="mono">${esc(d.current_ip || "—")}</dd>
-        <dt>TTL</dt><dd class="mono">${d.ttl}s</dd>
-        <dt>Last switch</dt><dd>${ago(d.last_switch)}</dd>
-        <dt>Automatic failover</dt><dd>${d.auto_failover ? "on" : "off"}</dd>
-        <dt>Provider</dt><dd>${esc(p ? `${p.name} (${p.zone})` : "no DNS account")}</dd>
-        ${d.error ? `<dt>Error</dt><dd style="color:var(--down)">${esc(d.error)}</dd>` : ""}
-      </dl>
-      <div class="btns">
-        <button class="btn sm" data-edit-domain="${d.id}">${ICON.edit} Edit</button>
-        <button class="btn sm" data-sync="${d.id}">${ICON.refresh} Read the record from DNS</button>
-        <button class="btn sm danger" data-del-domain="${d.id}">${ICON.trash} Delete</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="panel">
-    <div class="panel-head">
-      <span class="idx">02 / ROUTES</span>
-      <h2>Paths and routes</h2>
-      <div class="right"><span class="label">${esc(iran ? iran.name : "no Iran server")}</span></div>
-    </div>
-    <div class="panel-body">
-      <div class="opt-list">${routeRows || `<span class="note">No port has been selected for this domain yet.</span>`}</div>
-      <div class="btns"><button class="btn sm" data-dom-ports="${d.id}">${ICON.edit} Choose the ports</button></div>
-    </div>
-  </div>
-
-  <div class="panel">
-    <div class="panel-head">
-      <span class="idx">03 / FAILOVER</span>
-      <h2>Failover order</h2>
-    </div>
-    <div class="panel-body">
-      <p class="note">On a failure, the record moves to the first server in this list that has <b>all the ports of the domain</b> healthy. The “primary” comes back behind the domain again after ${Math.round(S.settings.failback_after / 60)} minutes of complete stability.</p>
-      <div class="opt-list">${cov || `<span class="note">—</span>`}</div>
-    </div>
-  </div>`;
-}
-
 /* ========================================================= infrastructure */
-function renderInfra() {
-  if (!S) return;
-  const card = (s) => {
-    const links = S.links.filter((l) => l.iran_id === s.id || l.kharej_id === s.id);
-    const built = links.filter((l) => l.status !== "pending");
-    const broken = built.filter((l) => l.status !== "up");
-    const exits = s.role === "kharej" ? serverExits(s.id) : [];
-    return `<div class="card">
-      <header>
-        <span class="dot ${s.status}"></span>
-        <span class="nm">${esc(s.name)}</span>
-        <div class="right">
-          <span class="label">P${s.priority}</span>
-          ${s.enabled ? "" : `<span class="chip warn">disabled</span>`}
-        </div>
-      </header>
-      <div class="card-body">
-        <div class="ip">${esc(s.ip)} · ${esc(s.ssh_user)}@${esc(s.ip)}:${s.ssh_port}</div>
-        <dl class="kv">
-          <dt>SSH latency</dt><dd class="mono">${ms(s.ssh_latency_ms)}</dd>
-          <dt>Last seen</dt><dd>${ago(s.last_seen)}</dd>
-          <dt>Engine</dt><dd class="mono">${esc(s.engine_version || "—")}</dd>
-          <dt>Tunnels</dt><dd class="mono">${built.length} built · ${links.length - built.length} pending</dd>
-          ${s.error ? `<dt>Error</dt><dd style="color:var(--down)">${esc(s.error)}</dd>` : ""}
-        </dl>
-        ${exits.length ? `<div><span class="label">Forwarded ports</span><div class="opt-list" style="margin-top:6px">${exits.map((e) => `<div class="opt"><span class="dot ${exitBad(e) ? "down" : "up"}"></span><span class="grow"><span class="mono">${esc(e.port)}</span><span class="sub">→ ${esc(exitText(e))} · ${esc(e.method)}</span></span></div>`).join("")}</div></div>` : ""}
-      </div>
-      <div class="card-foot">
-        <button class="btn sm" data-open-server="${s.id}">Open</button>
-        <button class="btn sm" data-edit-server="${s.id}">${ICON.edit} Edit</button>
-        <button class="btn sm" data-test-server="${s.id}">Test SSH</button>
-        ${broken.length ? `<button class="btn sm" data-discover-links="${broken.map((l) => l.id).join(",")}">Rebuild the broken ones</button>` : ""}
-      </div>
-    </div>`;
-  };
-  const list = (role) => {
-    const arr = byRole(role);
-    return arr.length ? `<div class="cards">${arr.map(card).join("")}</div>`
-      : `<p class="note">No ${role === "iran" ? "Iran" : "foreign"} server yet. Add one with its IP address and its SSH credentials; the panel finds the tunnels that already run on it.</p>`;
-  };
-  $("#inf-kharej").innerHTML = list("kharej");
-  $("#inf-iran").innerHTML = list("iran");
-}
-
 /* ============================================================== settings */
-function renderSettings() {
-  if (!S) return;
-  // never wipe what the operator is typing in: a field that has the focus
-  // is left alone, and the section is not rebuilt under it
-  const body = $("#set-body");
-  const active = document.activeElement;
-  if (active && body.contains(active) && active.matches("input,textarea,select")) return;
-  const s = S.settings, tg = s.telegram;
-  const order = [...s.candidate_transports, ...S.transports.filter((t) => !s.candidate_transports.includes(t))];
-  const sec = (n, title, kicker, body) => `<div class="section" id="set-${n}">
-    <header><span class="n">${n}</span><h3>${title}</h3><span class="k">${kicker}</span></header>
-    <div class="modal-body">${body}</div></div>`;
-  $("#set-body").innerHTML =
-    sec("01", "Operating mode", "OBSERVE / MUTATE", `
-      <label class="check"><input type="checkbox" data-set="observe_only" ${s.observe_only ? "checked" : ""}>
-        <span><b>Observe mode</b>: only check and report; no DNS record, config or service is changed automatically</span></label>
-      <p class="hint">In this mode, everywhere the panel would have done something, it only says in the events and on Telegram what it would have done. What you do by hand in the panel is still carried out.</p>
-      <div class="btns"><button class="btn sm" data-open-settings>Open the full settings</button></div>`)
-    + sec("02", "Monitor and recover", "MONITOR / RECOVER", `
-      <div class="grid2">
-        <label>Check interval (seconds)<input data-set="check_interval" type="number" min="10" value="${s.check_interval}"></label>
-        <label>Errors in a row that count as “down”<input data-set="fail_threshold" type="number" min="1" value="${s.fail_threshold}"></label>
-      </div>
-      <div class="grid2">
-        <label>Fail back after (minutes)<input data-set="failback_after" type="number" min="1" value="${Math.round(s.failback_after / 60)}"></label>
-        <label>Timeout of each protocol in the test (seconds)<input data-set="test_timeout" type="number" min="5" value="${s.test_timeout}"></label>
-      </div>
-      <div class="grid2">
-        <label>“Unstable” = how many drops<input data-set="flap_count" type="number" min="2" value="${s.flap_count}"></label>
-        <label>In how many minutes<input data-set="flap_window" type="number" min="1" value="${Math.round(s.flap_window / 60)}"></label>
-      </div>
-      <label class="check"><input type="checkbox" data-set="auto_repair" ${s.auto_repair ? "checked" : ""}> Rebuild the broken tunnels automatically with other protocols</label>
-      <span class="label">Protocols that are tested</span>
-      <div class="tchecks">${order.map((t) => `<label><input type="checkbox" data-set-tr value="${t}" ${s.candidate_transports.includes(t) ? "checked" : ""}>${esc(t)}</label>`).join("")}</div>`)
-    + sec("03", "Discovery and engine", "DISCOVERY / ENGINE", `
-      <label class="check"><input type="checkbox" data-set="auto_adopt" ${s.auto_adopt ? "checked" : ""}> Find and add the existing tunnels on the servers automatically</label>
-      <label class="check"><input type="checkbox" data-set="auto_mesh" ${s.auto_mesh ? "checked" : ""}> Suggest a tunnel for every Iran/foreign pair that has none</label>
-      <div class="grid2">
-        <label>How often to look for tunnels (minutes)<input data-set="scan_interval" type="number" min="1" value="${Math.round(s.scan_interval / 60)}"></label>
-        <label>Tunnel engine version<input data-set="engine_release" class="mono" value="${esc(s.engine_release)}" placeholder="latest"></label>
-      </div>
-      <label>Tunnel engine source URL<input data-set="engine_source" class="mono" value="${esc(s.engine_source || "")}" placeholder="https://github.com/Liwyd/bull-Tunnel/releases"></label>
-      <div class="grid2">
-        <label>First tunnel port<input data-set="tunnel_port_base" type="number" value="${s.tunnel_port_base}"></label>
-        <label>First probe port (local)<input data-set="probe_port_base" type="number" value="${s.probe_port_base}"></label>
-      </div>
-      <label class="check"><input type="checkbox" data-set="install_engine" ${s.install_engine ? "checked" : ""}> Install the tunnel engine automatically on the servers that do not have it</label>`)
-    + sec("04", "DNS accounts", "PROVIDERS", `
-      <div class="opt-list">${S.providers.map((p) => `<div class="opt"><span class="prov ${p.kind}">${p.kind === "cloudflare" ? "CF" : "ARVAN"}</span>
-        <span class="grow">${esc(p.name)} <span class="mono muted small">${esc(p.zone)}</span></span>
-        <button class="btn sm" data-verify-provider="${p.id}">Test</button>
-        <button class="btn sm" data-edit-provider="${p.id}">${ICON.edit} Edit</button>
-        <button class="btn sm danger" data-del-provider="${p.id}">${ICON.trash}</button></div>`).join("") || `<span class="note">No DNS account yet.</span>`}</div>
-      <div class="btns"><button class="btn sm" data-add="provider">${ICON.add} Add a DNS account</button></div>`)
-    + sec("05", "Reporting and backups", "TELEGRAM / BACKUP", `
-      <label class="check"><input type="checkbox" data-set="tg_enabled" ${tg.enabled ? "checked" : ""}> Send every event to Telegram</label>
-      <label class="check"><input type="checkbox" data-set="backup_enabled" ${s.backup_enabled ? "checked" : ""}> Send a full backup to Telegram every night</label>
-      <div class="grid2">
-        <label>Backup time<input data-set="backup_time" class="mono" value="${esc(s.backup_time)}" placeholder="03:00"></label>
-        <label>Backup time zone<input data-set="backup_tz" class="mono" value="${esc(s.backup_tz)}" placeholder="Asia/Tehran"></label>
-      </div>
-      <div class="btns"><button class="btn sm" data-open-settings>Open the full settings</button></div>`);
-
-  $("#set-index").innerHTML = `<span class="label">Sections</span>
-    <div class="index">
-      <button data-goto="set-01" class="on"><span class="n">01</span><span class="t">Operating mode</span><span class="d">Watch only, or act.</span></button>
-      <button data-goto="set-02"><span class="n">02</span><span class="t">Monitor and recover</span><span class="d">How often, and when to give up.</span></button>
-      <button data-goto="set-03"><span class="n">03</span><span class="t">Discovery and engine</span><span class="d">Find the tunnels, push the engine.</span></button>
-      <button data-goto="set-04"><span class="n">04</span><span class="t">DNS accounts</span><span class="d">ArvanCloud and Cloudflare.</span></button>
-      <button data-goto="set-05"><span class="n">05</span><span class="t">Reporting and backups</span><span class="d">Telegram and the nightly copy.</span></button>
-    </div>`;
-}
-
 /* save the quick settings of the settings page */
 async function saveQuickSettings() {
   const s = S.settings;
@@ -1162,22 +823,6 @@ async function saveQuickSettings() {
 }
 
 /* ------------------------------------------------------------ onboarding */
-function renderEmpty() {
-  const kh = byRole("kharej"), ir = byRole("iran");
-  const steps = [
-    ["Add the foreign and the Iran servers (only the IP and SSH)", kh.length > 0 && ir.length > 0],
-    ["The tunnels that already run are found automatically; build the rest with “Test & connect”", S.links.some((l) => l.status === "up")],
-    ["Add a DNS account (ArvanCloud/Cloudflare) and the domains", S.domains.length > 0],
-  ];
-  const el = $("#empty-hint");
-  if (!el) return;
-  const show = S.servers.length < 2 || (!S.domains.length && S.servers.length < 3);
-  el.classList.toggle("hidden", !show);
-  if (!show) return;
-  el.innerHTML = `<div class="empty-card"><h3>Getting started</h3><ol>${steps.map(([t, ok]) => `<li class="${ok ? "done" : ""}">${ok ? "✓ " : ""}${t}</li>`).join("")}</ol>
-    <div class="btns"><button class="btn primary sm" data-add="kharej">${ICON.add} Foreign server</button><button class="btn sm" data-add="iran">${ICON.add} Iran server</button><button class="btn sm" data-add="domain">${ICON.add} Domain</button></div></div>`;
-}
-
 /* ---------------------------------------------------------------- drawer */
 function openDrawer(type, id) {
   drawer = { type, id };
@@ -1691,7 +1336,7 @@ document.addEventListener("click", async (e) => {
     for (const b of $$("#set-index .index button")) b.classList.toggle("on", b === t);
     return;
   }
-  if (d.dom) { selectedDomain = d.dom; renderDomains(); return; }
+  if (d.dom) { selectedDomain = d.dom; return loadViewThenRender(); }
   if (d.domPorts) { return openDrawer("domain", d.domPorts); }
   if (d.openSettings) return settingsForm();  if (d.pick) { selTransport = d.pick; return renderDrawer(true); }
   if ("applyTransport" in d) {
@@ -1941,6 +1586,5 @@ $("#set-body").addEventListener("change", (e) => {
   if (e.target.matches("[data-set],[data-set-tr]")) saveQuickSettings();
 });
 
-renderActions();
 paintThemeButton();
 boot();
