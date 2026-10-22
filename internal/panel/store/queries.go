@@ -86,6 +86,8 @@ func (s *Store) LinksOf(serverID string) []*model.Link {
 // Carrier follows the handover chain: which link exposes this link's ports
 // now.
 func (s *Store) Carrier(linkID string) string {
+	s.handoverMu.RLock()
+	defer s.handoverMu.RUnlock()
 	seen := map[string]bool{}
 	for {
 		next, there := s.Handover[linkID]
@@ -103,6 +105,8 @@ func (s *Store) Carrier(linkID string) string {
 // exposed by two tunnels at once, and the engine would refuse to start with
 // two listeners on the same port.
 func (s *Store) SetHandover(srcID string, dstID string) bool {
+	s.handoverMu.Lock()
+	defer s.handoverMu.Unlock()
 	if srcID == dstID {
 		delete(s.Handover, srcID)
 		return true
@@ -120,9 +124,39 @@ func (s *Store) SetHandover(srcID string, dstID string) bool {
 	return true
 }
 
+// Handovers is the map of the handovers, copied: the panel writes it while
+// the cycle reads it.
+func (s *Store) Handovers() map[string]string {
+	s.handoverMu.RLock()
+	defer s.handoverMu.RUnlock()
+	out := map[string]string{}
+	for src, dst := range s.Handover {
+		out[src] = dst
+	}
+	return out
+}
+
+// ReleaseHandover gives the ports of a tunnel back to it: the handover is
+// over.
+func (s *Store) ReleaseHandover(srcID string) {
+	s.handoverMu.Lock()
+	defer s.handoverMu.Unlock()
+	delete(s.Handover, srcID)
+}
+
+// HandedOver tells whether a tunnel gave its ports to another one.
+func (s *Store) HandedOver(linkID string) bool {
+	s.handoverMu.RLock()
+	defer s.handoverMu.RUnlock()
+	_, there := s.Handover[linkID]
+	return there
+}
+
 // HandoverHas tells whether a tunnel is the one that exposes the ports of
 // another one.
 func (s *Store) HandoverHas(linkID string) bool {
+	s.handoverMu.RLock()
+	defer s.handoverMu.RUnlock()
 	for _, dst := range s.Handover {
 		if dst == linkID {
 			return true
@@ -138,7 +172,7 @@ func (s *Store) LinkPorts(link *model.Link) []string {
 	if link == nil {
 		return nil
 	}
-	if _, there := s.Handover[link.ID]; there {
+	if s.HandedOver(link.ID) {
 		return []string{}
 	}
 	out := []string{}
@@ -232,6 +266,8 @@ func (s *Store) RemoveLink(linkID string) *model.Link {
 		return nil
 	}
 	s.Links.Remove(linkID)
+	s.handoverMu.Lock()
+	defer s.handoverMu.Unlock()
 	for src, dst := range s.Handover {
 		if src == linkID || dst == linkID {
 			delete(s.Handover, src)
@@ -348,7 +384,7 @@ func (s *Store) portMapKey(iranID string) string {
 		parts = append(parts, link.ID+"|"+link.Status+"|"+strings.Join(link.Ports, ","))
 	}
 	handover := []string{}
-	for src, dst := range s.Handover {
+	for src, dst := range s.Handovers() {
 		handover = append(handover, src+">"+dst)
 	}
 	sort.Strings(handover)

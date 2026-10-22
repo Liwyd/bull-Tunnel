@@ -71,7 +71,7 @@ func (s *Store) Snapshot() map[string]any {
 		"links":     links,
 		"domains":   domains,
 		"providers": providers,
-		"handover":  s.Handover,
+		"handover":  s.Handovers(),
 		"layout":    s.Layout,
 	}
 }

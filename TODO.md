@@ -919,14 +919,12 @@ it.
   change does not wait for it ✓
   (`internal/panel/orch/work_test.go` ✓).
 
-**What is still open (and it is not a fault of the demo):** the *writers* of
-the fields of a tunnel — the repair and the discovery, which run in the
-background ✓ — write them without taking the lock of the state ✓. The
-reader (the cycle) takes it ✓, the writer does not ✓: the race detector
-sees it, and the panel does not fall over (the values are a state and a
-number ✓). The fix is to give the writers the lock as well ✓ — it touches
-every path that changes a tunnel ✓, and it is the change this plan calls
-"bigger" ✓.
+**What was still open (and it is not a fault of the demo):** the *writers*
+of the fields of a tunnel — the repair and the discovery, which run in the
+background ✓ — wrote them without taking the lock of the state ✓. The
+reader (the cycle) took it ✓, the writer did not ✓: the race detector saw
+it ✓, and the panel did not fall over (the values are a state and a
+number ✓). **Fixed in commit 34 ✓**.
 
 ### Commit 33 — the Python panel is gone  ✅ done
 
@@ -964,6 +962,33 @@ against ✓ — and it is gone.
   gave a moment later ✓, while another goroutine was writing it ✓ — on a
   slow runner the two numbers are never the same ✓. The comparison is made
   when nobody writes the set any more ✓.
+
+### Commit 34 — the writers of the state take the lock too  ✅ done
+
+Commit 32 gave the lock of the state to the readers — the cycle ✓ — and
+said what was left: the *writers* of the fields of a tunnel ✓, the repair ✓
+and the discovery ✓, which run in the background ✓, wrote them without
+taking the lock ✓. The race detector saw it ✓.
+
+* ✅ **Every change to the state goes through the lock** ✓
+  (`internal/panel/orch/state.go` ✓): the tunnel that is there *now* is
+  written ✓ (`write` ✓), the domain ✓ (`writeDomain` ✓), and the long
+  operations — a discovery ✓, a repair ✓ — work on a copy ✓ (`copyLink` ✓,
+  `copyDomain` ✓, `copyServer` ✓) taken under the lock ✓, so they can be
+  read without it ✓.
+* ✅ **The tunnel is copied, maps and all** ✓ (`model.Link.Clone` ✓): the
+  tests of the carriers ✓ and the configuration of the tunnel are maps ✓,
+  and a map that is read and written at the same time stops the whole
+  program ✓.
+* ✅ **The handovers have a lock of their own** ✓
+  (`internal/panel/store` ✓): the map of the handovers was written by the
+  cycle ✓ and read by the panel ✓ — and it is a map ✓.
+* ✅ **The change the operator made is not lost** ✓: the repair writes to
+  the tunnel that is there now ✓, not to the one it was given ✓.
+* ✅ The test: the cycle ✓, the repair ✓, the discovery ✓ and the operator
+  moving a domain ✓, all at the same time ✓, over and over ✓, under the
+  race detector ✓ (`internal/panel/orch/work_test.go` ✓). It fails without
+  the lock ✓.
 
 ### Phase 9 — the switchover  ✅ done
 
@@ -1047,7 +1072,8 @@ already work ✓.
 | 30 | The image is built again | done |
 | 31 | The panel does not fall over its own state | done |
 | 32 | The Go rewrite — phase 9 (the switchover) | done |
-| 33 | The Go rewrite — phase 10 (the dashboard) | later |
+| 33 | The writers of the state take the lock too | done |
+| 34 | The Go rewrite — phase 10 (the dashboard) | later |
 
 **All the findings of the audit are closed, the graph is the type-1 design
 and the panel is Go.** What is left is the dashboard (phase 10 ✓) and the

@@ -271,6 +271,37 @@ func (l *Link) Normalize() {
 	}
 }
 
+// Clone is the tunnel, copied: the maps and the lists are copied as well,
+// so that the copy can be read and worked on while the panel is writing
+// the original.
+//
+// The panel is written and read at the same time — the monitor writes the
+// state, the web interface reads it, and the repairs run in the background
+// — and Go does not forgive a map that is read and written at the same
+// time: it stops the whole program.
+func (l *Link) Clone() *Link {
+	if l == nil {
+		return nil
+	}
+	out := *l
+	out.Tests = map[string]map[string]any{}
+	for carrier, entry := range l.Tests {
+		copied := map[string]any{}
+		for key, value := range entry {
+			copied[key] = value
+		}
+		out.Tests[carrier] = copied
+	}
+	out.IranBase = l.IranBase.Clone()
+	out.KharejBase = l.KharejBase.Clone()
+	out.Ports = append([]string{}, l.Ports...)
+	out.Allowed = append([]string{}, l.Allowed...)
+	out.EngineTransports = append([]string{}, l.EngineTransports...)
+	out.Flaps = append([]float64{}, l.Flaps...)
+	out.History = append([][]float64{}, l.History...)
+	return &out
+}
+
 // RankedTransports returns the candidates ordered by the last test: the
 // working ones, the fastest first, then the untested ones in the order they
 // were given, then the ones that failed.

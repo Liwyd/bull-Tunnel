@@ -21,39 +21,43 @@ import (
 // stop answering while the DNS service is slow.
 func (o *Orchestrator) evaluateDomains() {
 	for _, domain := range o.store.Domains.List() {
-		if domain.IranID == "" {
-			o.assignInitial(domain)
+		// the domain is read as a copy: the panel writes the state while
+		// the cycle watches the domains
+		work := o.copyDomain(domain)
+		if work == nil {
+			continue
+		}
+		if work.IranID == "" {
+			o.assignInitial(work)
 			continue
 		}
 		o.store.RLock()
-		group := o.store.GroupOf(domain)
-		hard, soft := o.Cover(domain, domain.IranID, group, false)
+		group := o.store.GroupOf(work)
+		hard, soft := o.Cover(work, work.IranID, group, false)
 		o.store.RUnlock()
 		if len(hard) == 0 && len(soft) == 0 {
-			if domain.Status != "ok" {
-				o.store.Lock()
-				domain.Status = "ok"
-				domain.Error = ""
-				o.store.Unlock()
+			if work.Status != "ok" {
+				o.writeDomain(domain, func(current *model.Domain) {
+					current.Status = "ok"
+					current.Error = ""
+				})
 			}
 			if o.suggestedOf(domain.ID) != "" {
 				o.clearSuggested(domain.ID)
-				o.Emit("success", "observe", fmt.Sprintf("domain %s is healthy again (observe mode: nothing was changed)", domain.FQDN), true,
+				o.Emit("success", "observe", fmt.Sprintf("domain %s is healthy again (observe mode: nothing was changed)", work.FQDN), true,
 					map[string]string{"domain": domain.ID})
 			}
-			o.maybeFailback(domain, group)
+			o.maybeFailback(work, group)
 			continue
 		}
 		if len(hard) == 0 {
 			continue // dropped a check or two: not a reason to move yet
 		}
 		why := strings.Join(firstN(hard, 3), "; ")
-		if !domain.AutoFailover {
-			if domain.Status != "broken" {
-				o.store.Lock()
-				domain.Status = "broken"
-				o.store.Unlock()
-				o.Emit("error", "domain", fmt.Sprintf("domain %s: %s (automatic failover is off)", domain.FQDN, why), true,
+		if !work.AutoFailover {
+			if work.Status != "broken" {
+				o.writeDomain(domain, func(current *model.Domain) { current.Status = "broken" })
+				o.Emit("error", "domain", fmt.Sprintf("domain %s: %s (automatic failover is off)", work.FQDN, why), true,
 					map[string]string{"domain": domain.ID})
 			}
 			continue
@@ -69,32 +73,28 @@ func (o *Orchestrator) evaluateDomains() {
 			if busy {
 				continue // a tunnel of the group is being built or repaired right now
 			}
-			if domain.Status != "broken" {
-				o.store.Lock()
-				domain.Status = "broken"
-				o.store.Unlock()
+			if work.Status != "broken" {
+				specs := []string{}
+				o.read(func() { specs = o.store.DomainSpecs(work) })
+				o.writeDomain(domain, func(current *model.Domain) { current.Status = "broken" })
 				o.Emit("error", "domain", fmt.Sprintf("domain %s: %s — and no other Iran server has all of its ports (%s) healthy; the record was left untouched",
-					domain.FQDN, why, strings.Join(o.store.DomainSpecs(domain), ", ")), true,
+					work.FQDN, why, strings.Join(specs, ", ")), true,
 					map[string]string{"domain": domain.ID})
 			}
 			o.kick(group)
 			continue
 		}
 		if o.settings().ObserveOnly {
-			o.store.Lock()
-			domain.Status = "broken"
-			o.store.Unlock()
-			o.suggest(domain, plan, why)
+			o.writeDomain(domain, func(current *model.Domain) { current.Status = "broken" })
+			o.suggest(work, plan, why)
 			continue
 		}
 		if plan.DNS {
-			o.moveDomain(domain, plan.IranID, why, false)
+			o.moveDomain(work, plan.IranID, why, false)
 			continue
 		}
-		o.handOver(plan.Owner, plan.Target, fmt.Sprintf("domain %s, port %s: %s", domain.FQDN, plan.Spec, why))
-		o.store.Lock()
-		domain.LastSwitch = model.Now()
-		o.store.Unlock()
+		o.handOver(plan.Owner, plan.Target, fmt.Sprintf("domain %s, port %s: %s", work.FQDN, plan.Spec, why))
+		o.writeDomain(domain, func(current *model.Domain) { current.LastSwitch = model.Now() })
 	}
 }
 
@@ -127,15 +127,22 @@ func (o *Orchestrator) MoveDomain(domain *model.Domain, iranID string, reason st
 }
 
 // moveDomain points the record of a domain at another Iran server.
+//
+// The domain is read as a copy and written under the lock of the state: the
+// panel watches the domains while this moves a record over the network.
 func (o *Orchestrator) moveDomain(domain *model.Domain, iranID string, reason string, failback bool) bool {
-	iran := o.store.Servers.Get(iranID)
-	provider := o.store.Providers.Get(domain.ProviderID)
+	work := o.copyDomain(domain)
+	if work == nil {
+		return false
+	}
+	iran := o.copyServer(o.store.Servers.Get(iranID))
+	provider := o.store.Providers.Get(work.ProviderID)
 	if iran == nil || provider == nil {
-		o.Emit("error", "dns", fmt.Sprintf("domain %s: the DNS account or the target server was not found", domain.FQDN), true,
+		o.Emit("error", "dns", fmt.Sprintf("domain %s: the DNS account or the target server was not found", work.FQDN), true,
 			map[string]string{"domain": domain.ID})
 		return false
 	}
-	if domain.IranID == iranID && domain.CurrentIP == iran.IP {
+	if work.IranID == iranID && work.CurrentIP == iran.IP {
 		return true
 	}
 	// the record is written over the network: the lock of the state is not
@@ -144,41 +151,42 @@ func (o *Orchestrator) moveDomain(domain *model.Domain, iranID string, reason st
 	if o.dnsFactory != nil {
 		client, err := o.dnsFactory(provider)
 		if err == nil {
-			err = client.SetA(domain.FQDN, iran.IP, domain.TTL)
+			err = client.SetA(work.FQDN, iran.IP, work.TTL)
 		}
 		if err != nil {
 			dnsError = err
 		}
 	}
 	if dnsError != nil {
-		o.store.Lock()
-		changed := domain.Error != dnsError.Error()
+		changed := false
+		o.writeDomain(domain, func(current *model.Domain) {
+			changed = current.Error != dnsError.Error()
+			if changed {
+				current.Error = dnsError.Error()
+			}
+		})
 		if changed {
-			domain.Error = dnsError.Error()
-		}
-		o.store.Unlock()
-		if changed {
-			o.Emit("error", "dns", fmt.Sprintf("changing the record of %s to %s failed: %v", domain.FQDN, iran.IP, dnsError), true,
+			o.Emit("error", "dns", fmt.Sprintf("changing the record of %s to %s failed: %v", work.FQDN, iran.IP, dnsError), true,
 				map[string]string{"domain": domain.ID})
 		}
 		return false
 	}
-	old := o.store.Servers.Get(domain.IranID)
-	o.store.Lock()
-	domain.IranID = iranID
-	domain.CurrentIP = iran.IP
-	domain.LastSwitch = model.Now()
-	domain.Error = ""
-	domain.PendingIP = iran.IP
-	domain.PendingSince = model.Now()
-	domain.Status = "ok"
+	old := o.copyServer(o.store.Servers.Get(work.IranID))
+	o.writeDomain(domain, func(current *model.Domain) {
+		current.IranID = iranID
+		current.CurrentIP = iran.IP
+		current.LastSwitch = model.Now()
+		current.Error = ""
+		current.PendingIP = iran.IP
+		current.PendingSince = model.Now()
+		current.Status = "ok"
+	})
 	o.clearSuggested(domain.ID)
-	o.store.Unlock()
 	from := "—"
 	if old != nil {
 		from = fmt.Sprintf("%s (%s)", old.Name, old.IP)
 	}
-	routes := o.routesText(domain, iranID)
+	routes := o.routesText(work, iranID)
 	message := ""
 	switch {
 	case failback:
@@ -244,10 +252,10 @@ func (o *Orchestrator) releaseHandovers() {
 	if o.settings().ObserveOnly {
 		return
 	}
-	for srcID, dstID := range o.store.Handover {
+	for srcID, dstID := range o.store.Handovers() {
 		src, dst := o.store.Links.Get(srcID), o.store.Links.Get(dstID)
 		if src == nil || dst == nil {
-			delete(o.store.Handover, srcID)
+			o.store.ReleaseHandover(srcID)
 			continue
 		}
 		if !o.Stable(src) {
@@ -261,7 +269,7 @@ func (o *Orchestrator) releaseHandovers() {
 		}
 		o.SetBusy(src.ID, true)
 		o.SetBusy(dstID, true)
-		delete(o.store.Handover, srcID)
+		o.store.ReleaseHandover(srcID)
 		o.redeployIranSide(dst)
 		o.redeployIranSide(src)
 		o.SetBusy(src.ID, false)
@@ -450,7 +458,18 @@ func (o *Orchestrator) checkPropagation() {
 }
 
 // routesText is how the routes of a domain are said.
+//
+// The routes are read under the lock of the state: they are the ports of the
+// tunnels, and the panel writes them while it moves a record.
 func (o *Orchestrator) routesText(domain *model.Domain, iranID string) string {
+	routes := []string{}
+	o.read(func() { routes = o.routesTextLocked(domain, iranID) })
+	return strings.Join(routes, ", ")
+}
+
+// routesTextLocked is how the routes of a domain are said, with the lock of
+// the state held.
+func (o *Orchestrator) routesTextLocked(domain *model.Domain, iranID string) []string {
 	parts := []string{}
 	for _, spec := range o.store.DomainSpecs(domain) {
 		link := o.Route(iranID, spec)
@@ -478,7 +497,7 @@ func (o *Orchestrator) routesText(domain *model.Domain, iranID string) string {
 		}
 		parts = append(parts, fmt.Sprintf("%s→%s%s", spec, kharej, tail))
 	}
-	return strings.Join(parts, ", ")
+	return parts
 }
 
 // firstN are the first numbers of a list.

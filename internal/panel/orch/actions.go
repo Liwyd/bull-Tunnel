@@ -64,24 +64,35 @@ func (o *Orchestrator) Ping(server *model.Server) (float64, error) {
 }
 
 // ensureProbe gives a tunnel a probe port: the loopback port the health
-// check opens to prove that the whole path works.
-func (o *Orchestrator) ensureProbe(link *model.Link) error {
+// check opens to prove that the whole path works. It gives back the port,
+// so that the caller can work with it.
+//
+// The port is written to the tunnel that is there now, under the lock of
+// the state: the panel is written while it is read.
+func (o *Orchestrator) ensureProbe(link *model.Link) int {
 	if link.ProbePort != 0 {
-		return nil
+		return link.ProbePort
 	}
-	iran := o.store.Servers.Get(link.IranID)
+	iran := o.copyServer(o.store.Servers.Get(link.IranID))
 	busy := map[int]bool{}
 	if iran != nil && o.driver != nil {
 		if ports, err := o.driver.Listening(iran); err == nil {
 			busy = ports
 		}
 	}
-	port := o.store.FreePort(link.IranID, o.settings().ProbePortBase)
+	port := 0
+	o.read(func() {
+		port = o.store.FreePort(link.IranID, o.settings().ProbePortBase)
+	})
 	for busy[port] {
 		port++
 	}
-	link.ProbePort = port
-	return nil
+	o.write(link, func(current *model.Link) {
+		if current.ProbePort == 0 {
+			current.ProbePort = port
+		}
+	})
+	return port
 }
 
 // portsTaken says whether the ports a tunnel would listen on are already
@@ -130,8 +141,15 @@ func (o *Orchestrator) portsTaken(link *model.Link) string {
 }
 
 // try deploys a tunnel on one carrier and says whether it carries traffic.
+//
+// The tunnel is worked on as a copy: the panel writes the state while this
+// talks to the servers, and the copy can be read without the lock.
 func (o *Orchestrator) try(link *model.Link, transport string, ports []string) *model.TestResult {
-	iran, kharej := o.Pair(link)
+	work := o.copyLink(link)
+	if work == nil {
+		return &model.TestResult{Transport: transport, OK: false, Error: "the tunnel is not in the panel"}
+	}
+	iran, kharej := o.Pair(work)
 	if iran == nil || kharej == nil {
 		return &model.TestResult{Transport: transport, OK: false, Error: "the servers of the tunnel are not in the panel"}
 	}
@@ -151,16 +169,16 @@ func (o *Orchestrator) try(link *model.Link, transport string, ports []string) *
 			OK:        false,
 			Error:     "two of these mappings want the same port: " + strings.Join(names, ", "),
 		}
-		o.rememberTest(link, transport, result)
+		o.rememberTest(work, transport, result)
 		return result
 	}
-	o.ensureProbe(link)
+	work.ProbePort = o.ensureProbe(work)
 	var probe *engine.Probe
 	if o.driver != nil {
-		if err := o.driver.Deploy(link, iran, kharej, transport, ports); err != nil {
+		if err := o.driver.Deploy(work, iran, kharej, transport, ports); err != nil {
 			probe = &engine.Probe{OK: false, Error: err.Error()}
 		} else {
-			probe, err = o.driver.WaitUp(link, iran, o.settings().TestTimeout)
+			probe, err = o.driver.WaitUp(work, iran, o.settings().TestTimeout)
 			if err != nil {
 				probe = &engine.Probe{OK: false, Error: err.Error()}
 			}
@@ -173,15 +191,16 @@ func (o *Orchestrator) try(link *model.Link, transport string, ports []string) *
 		ConnectS:  probe.ConnectS,
 		Error:     probe.Error,
 	}
-	o.rememberTest(link, transport, result)
+	o.rememberTest(work, transport, result)
 	return result
 }
 
 // rememberTest writes what a test said in the state of the tunnel.
+//
+// The tests of the carriers are a map, and a map that is read and written
+// at the same time stops the whole program: the write is made under the
+// lock of the state, and it goes to the tunnel that is there now.
 func (o *Orchestrator) rememberTest(link *model.Link, transport string, result *model.TestResult) {
-	if link.Tests == nil {
-		link.Tests = map[string]map[string]any{}
-	}
 	entry := map[string]any{
 		"transport": result.Transport,
 		"ok":        result.OK,
@@ -198,95 +217,121 @@ func (o *Orchestrator) rememberTest(link *model.Link, transport string, result *
 	} else {
 		entry["connect_s"] = nil
 	}
-	link.Tests[transport] = entry
+	o.write(link, func(current *model.Link) {
+		if current.Tests == nil {
+			current.Tests = map[string]map[string]any{}
+		}
+		current.Tests[transport] = entry
+	})
 	o.push(map[string]any{"type": "test", "link_id": link.ID, "result": entry})
 }
 
-// markUp writes that a tunnel carries traffic.
+// markUp writes that a tunnel carries traffic. It is made under the lock of
+// the state, and it goes to the tunnel that is there now.
 func (o *Orchestrator) markUp(link *model.Link, transport string, latency *float64) {
 	now := model.Now()
-	link.Transport = transport
-	if link.Status != model.StatusUp {
-		link.UpSince = now
-	}
-	link.Status = model.StatusUp
-	link.LatencyMS = latency
-	link.FailCount = 0
-	link.LastOK = now
-	link.LastChange = now
-	link.Error = ""
-	link.Verified = true
+	o.write(link, func(current *model.Link) {
+		current.Transport = transport
+		if current.Status != model.StatusUp {
+			current.UpSince = now
+		}
+		current.Status = model.StatusUp
+		current.LatencyMS = latency
+		current.FailCount = 0
+		current.LastOK = now
+		current.LastChange = now
+		current.Error = ""
+		current.Verified = true
+		current.Built = true
+		current.Record(latency, 120)
+	})
 	o.setPrevOK(link.ID, true)
-	link.Built = true
-	link.Record(latency, 120)
 }
 
 // Discover tests every candidate carrier of a pair and deploys the fastest.
+//
+// The tunnel is worked on as a copy: the panel writes the state while the
+// discovery talks to the servers, and every change is written to the tunnel
+// that is there now, under the lock of the state.
 func (o *Orchestrator) Discover(link *model.Link, transports []string) bool {
 	if o.Busy(link.ID) {
 		return false
 	}
-	iran, kharej := o.Pair(link)
+	work := o.copyLink(link)
+	if work == nil {
+		return false
+	}
+	iran, kharej := o.Pair(work)
 	if iran == nil || kharej == nil {
 		return false
 	}
 	o.SetBusy(link.ID, true)
-	previous := link.Status
-	link.Status = model.StatusTesting
+	previous := work.Status
+	o.write(link, func(current *model.Link) { current.Status = model.StatusTesting })
 	o.Changed()
 	defer func() {
 		o.SetBusy(link.ID, false)
-		if link.Status == model.StatusTesting {
-			link.Status = previous
-		}
+		o.write(link, func(current *model.Link) {
+			if current.Status == model.StatusTesting {
+				current.Status = previous
+			}
+		})
 		o.Changed()
 	}()
 
 	if err := o.install(iran); err != nil {
-		link.Status, link.Error = model.StatusDown, "install: "+err.Error()
-		o.Emit("error", "install", fmt.Sprintf("installing the tunnel engine on %s failed: %v", o.LinkLabel(link), err), true,
+		o.write(link, func(current *model.Link) {
+			current.Status, current.Error = model.StatusDown, "install: "+err.Error()
+		})
+		o.Emit("error", "install", fmt.Sprintf("installing the tunnel engine on %s failed: %v", o.LinkLabel(work), err), true,
 			map[string]string{"link": link.ID})
 		return false
 	}
 	if err := o.install(kharej); err != nil {
-		link.Status, link.Error = model.StatusDown, "install: "+err.Error()
-		o.Emit("error", "install", fmt.Sprintf("installing the tunnel engine on %s failed: %v", o.LinkLabel(link), err), true,
+		o.write(link, func(current *model.Link) {
+			current.Status, current.Error = model.StatusDown, "install: "+err.Error()
+		})
+		o.Emit("error", "install", fmt.Sprintf("installing the tunnel engine on %s failed: %v", o.LinkLabel(work), err), true,
 			map[string]string{"link": link.ID})
 		return false
 	}
-	if taken := o.portsTaken(link); taken != "" {
-		if link.Built {
-			link.Status = model.StatusDown
-		} else {
-			link.Status = model.StatusPending
-		}
-		link.Error = taken
-		o.Emit("error", "discover", fmt.Sprintf("tunnel %s was not built: %s", o.LinkLabel(link), taken), true,
+	if taken := o.portsTaken(work); taken != "" {
+		o.write(link, func(current *model.Link) {
+			if current.Built {
+				current.Status = model.StatusDown
+			} else {
+				current.Status = model.StatusPending
+			}
+			current.Error = taken
+		})
+		o.Emit("error", "discover", fmt.Sprintf("tunnel %s was not built: %s", o.LinkLabel(work), taken), true,
 			map[string]string{"link": link.ID})
 		return false
 	}
 	candidates := transports
 	if len(candidates) == 0 {
-		candidates = link.Allowed
+		candidates = work.Allowed
 	}
 	if len(candidates) == 0 {
 		candidates = o.settings().CandidateTransports
 	}
-	candidates = o.Supported(link, candidates)
+	candidates = o.Supported(work, candidates)
 	if len(candidates) == 0 {
-		link.Status, link.Error = model.StatusDown, "the engine on this server speaks no known carrier"
-		o.Emit("error", "discover", fmt.Sprintf("the tunnel engine on %s speaks no known protocol", o.Name(link.IranID)), true,
+		o.write(link, func(current *model.Link) {
+			current.Status, current.Error = model.StatusDown, "the engine on this server speaks no known carrier"
+		})
+		o.Emit("error", "discover", fmt.Sprintf("the tunnel engine on %s speaks no known protocol", o.Name(work.IranID)), true,
 			map[string]string{"link": link.ID})
 		return false
 	}
-	o.Emit("info", "discover", fmt.Sprintf("testing protocols on %s: %s", o.LinkLabel(link), strings.Join(candidates, ", ")), false,
+	o.Emit("info", "discover", fmt.Sprintf("testing protocols on %s: %s", o.LinkLabel(work), strings.Join(candidates, ", ")), false,
 		map[string]string{"link": link.ID})
 
 	results := []*model.TestResult{}
 	for _, transport := range candidates {
 		// the test is made with the lock released: it talks to the
 		// servers, and the panel must keep answering while it waits
-		results = append(results, o.try(link, transport, []string{}))
+		results = append(results, o.try(work, transport, []string{}))
 	}
 	good := []*model.TestResult{}
 	for _, result := range results {
@@ -298,9 +343,9 @@ func (o *Orchestrator) Discover(link *model.Link, transports []string) bool {
 		return latencyOf(good[i]) < latencyOf(good[j])
 	})
 	var best *model.TestResult
-	if link.Pinned && link.Transport != "" {
+	if work.Pinned && work.Transport != "" {
 		for _, result := range good {
-			if result.Transport == link.Transport {
+			if result.Transport == work.Transport {
 				best = result
 				break
 			}
@@ -309,36 +354,38 @@ func (o *Orchestrator) Discover(link *model.Link, transports []string) bool {
 		best = good[0]
 	}
 	if best == nil {
-		link.Status, link.Error = model.StatusDown, "no transport worked"
-		if link.Transport == "" {
-			link.Transport = candidates[0]
-		}
-		link.FailCount = o.settings().FailThreshold
+		o.write(link, func(current *model.Link) {
+			current.Status, current.Error = model.StatusDown, "no transport worked"
+			if current.Transport == "" {
+				current.Transport = candidates[0]
+			}
+			current.FailCount = o.settings().FailThreshold
+		})
 		o.setRepairAfter(link.ID, model.Now()+RepairBackoff)
-		if link.Managed && o.driver != nil {
-			o.driver.Stop(link, iran, kharej)
+		if work.Managed && o.driver != nil {
+			o.driver.Stop(work, iran, kharej)
 		}
-		o.Emit("error", "discover", fmt.Sprintf("no protocol worked between %s", o.LinkLabel(link)), true,
+		o.Emit("error", "discover", fmt.Sprintf("no protocol worked between %s", o.LinkLabel(work)), true,
 			map[string]string{"link": link.ID})
 		return false
 	}
-	final := o.try(link, best.Transport, o.store.LinkPorts(link))
+	ports := []string{}
+	o.read(func() { ports = o.store.LinkPorts(work) })
+	final := o.try(work, best.Transport, ports)
 	if !final.OK {
-		o.store.Lock()
-		defer o.store.Unlock()
-		link.Status = model.StatusDown
-		link.Error = final.Error
-		if link.Error == "" {
-			link.Error = "failed after adding ports"
-		}
-		link.FailCount = o.settings().FailThreshold
-		o.Emit("error", "discover", fmt.Sprintf("%s did not come up with the final ports: %s", o.LinkLabel(link), link.Error), true,
+		o.write(link, func(current *model.Link) {
+			current.Status = model.StatusDown
+			current.Error = final.Error
+			if current.Error == "" {
+				current.Error = "failed after adding ports"
+			}
+			current.FailCount = o.settings().FailThreshold
+		})
+		o.Emit("error", "discover", fmt.Sprintf("%s did not come up with the final ports: %s", o.LinkLabel(work), final.Error), true,
 			map[string]string{"link": link.ID})
 		return false
 	}
-	o.store.Lock()
-	o.markUp(link, best.Transport, final.LatencyMS)
-	o.store.Unlock()
+	o.markUp(work, best.Transport, final.LatencyMS)
 	ranking := []string{}
 	for i, result := range good {
 		if i >= 4 {
@@ -347,7 +394,7 @@ func (o *Orchestrator) Discover(link *model.Link, transports []string) bool {
 		ranking = append(ranking, fmt.Sprintf("%s %.0fms", result.Transport, latencyOf(result)))
 	}
 	o.Emit("success", "discover", fmt.Sprintf("Tunnel %s is up on %s (%.0fms) — ranking: %s",
-		o.LinkLabel(link), best.Transport, latencyOf(final), strings.Join(ranking, ", ")), true,
+		o.LinkLabel(work), best.Transport, latencyOf(final), strings.Join(ranking, ", ")), true,
 		map[string]string{"link": link.ID})
 	return true
 }
@@ -365,14 +412,20 @@ func (o *Orchestrator) SetTransport(link *model.Link, transport string, pin bool
 	if o.Busy(link.ID) {
 		return false
 	}
-	iran, kharej := o.Pair(link)
+	work := o.copyLink(link)
+	if work == nil {
+		return false
+	}
+	iran, kharej := o.Pair(work)
 	if iran == nil || kharej == nil {
 		return false
 	}
 	o.SetBusy(link.ID, true)
-	old := link.Transport
-	link.Status = model.StatusTesting
-	link.Pinned = pin
+	old := work.Transport
+	o.write(link, func(current *model.Link) {
+		current.Status = model.StatusTesting
+		current.Pinned = pin
+	})
 	o.Changed()
 	defer func() {
 		o.SetBusy(link.ID, false)
@@ -380,42 +433,50 @@ func (o *Orchestrator) SetTransport(link *model.Link, transport string, pin bool
 	}()
 
 	if err := o.install(iran); err != nil {
-		link.Status, link.Error = model.StatusDown, err.Error()
-		o.Emit("error", "transport", fmt.Sprintf("changing the protocol of %s failed: %v", o.LinkLabel(link), err), true,
+		o.write(link, func(current *model.Link) {
+			current.Status, current.Error = model.StatusDown, err.Error()
+		})
+		o.Emit("error", "transport", fmt.Sprintf("changing the protocol of %s failed: %v", o.LinkLabel(work), err), true,
 			map[string]string{"link": link.ID})
 		return false
 	}
 	if err := o.install(kharej); err != nil {
-		link.Status, link.Error = model.StatusDown, err.Error()
-		o.Emit("error", "transport", fmt.Sprintf("changing the protocol of %s failed: %v", o.LinkLabel(link), err), true,
+		o.write(link, func(current *model.Link) {
+			current.Status, current.Error = model.StatusDown, err.Error()
+		})
+		o.Emit("error", "transport", fmt.Sprintf("changing the protocol of %s failed: %v", o.LinkLabel(work), err), true,
 			map[string]string{"link": link.ID})
 		return false
 	}
-	if taken := o.portsTaken(link); taken != "" {
-		if link.Built {
-			link.Status = model.StatusDown
-		} else {
-			link.Status = model.StatusPending
-		}
-		link.Error = taken
-		o.Emit("error", "transport", fmt.Sprintf("tunnel %s was not built: %s", o.LinkLabel(link), taken), true,
+	if taken := o.portsTaken(work); taken != "" {
+		o.write(link, func(current *model.Link) {
+			if current.Built {
+				current.Status = model.StatusDown
+			} else {
+				current.Status = model.StatusPending
+			}
+			current.Error = taken
+		})
+		o.Emit("error", "transport", fmt.Sprintf("tunnel %s was not built: %s", o.LinkLabel(work), taken), true,
 			map[string]string{"link": link.ID})
 		return false
 	}
-	result := o.try(link, transport, o.store.LinkPorts(link))
+	ports := []string{}
+	o.read(func() { ports = o.store.LinkPorts(work) })
+	result := o.try(work, transport, ports)
 	if result.OK {
-		o.store.Lock()
-		o.markUp(link, transport, result.LatencyMS)
-		o.store.Unlock()
+		o.markUp(work, transport, result.LatencyMS)
 		o.Emit("success", "transport", fmt.Sprintf("the protocol of %s changed from %s to %s (%.0fms)",
-			o.LinkLabel(link), orUnknown(old, "—"), transport, latencyOf(result)), true,
+			o.LinkLabel(work), orUnknown(old, "—"), transport, latencyOf(result)), true,
 			map[string]string{"link": link.ID})
 		return true
 	}
-	link.Transport = transport
-	link.Status, link.Error = model.StatusDown, result.Error
-	link.FailCount = o.settings().FailThreshold
-	o.Emit("error", "transport", fmt.Sprintf("changing the protocol of %s to %s failed: %s", o.LinkLabel(link), transport, result.Error), true,
+	o.write(link, func(current *model.Link) {
+		current.Transport = transport
+		current.Status, current.Error = model.StatusDown, result.Error
+		current.FailCount = o.settings().FailThreshold
+	})
+	o.Emit("error", "transport", fmt.Sprintf("changing the protocol of %s to %s failed: %s", o.LinkLabel(work), transport, result.Error), true,
 		map[string]string{"link": link.ID})
 	return false
 }
@@ -426,33 +487,39 @@ func (o *Orchestrator) Repair(link *model.Link) bool {
 	if o.Busy(link.ID) {
 		return false
 	}
-	iran, kharej := o.Pair(link)
+	work := o.copyLink(link)
+	if work == nil {
+		return false
+	}
+	iran, kharej := o.Pair(work)
 	if !o.Usable(iran) || !o.Usable(kharej) {
 		return false
 	}
 	o.SetBusy(link.ID, true)
-	link.Status = model.StatusTesting
+	o.write(link, func(current *model.Link) { current.Status = model.StatusTesting })
 	o.Changed()
 	defer func() {
 		o.SetBusy(link.ID, false)
-		if link.Status == model.StatusTesting {
-			link.Status = model.StatusDown
-		}
+		o.write(link, func(current *model.Link) {
+			if current.Status == model.StatusTesting {
+				current.Status = model.StatusDown
+			}
+		})
 		o.Changed()
 	}()
 
-	current := link.Transport
+	current := work.Transport
 	var order []string
-	if link.Pinned && current != "" {
+	if work.Pinned && current != "" {
 		order = []string{current}
 	} else {
 		ranked := []string{}
-		for _, transport := range link.RankedTransports(o.settings().CandidateTransports) {
+		for _, transport := range work.RankedTransports(o.settings().CandidateTransports) {
 			if transport != current {
 				ranked = append(ranked, transport)
 			}
 		}
-		ranked = o.Supported(link, ranked)
+		ranked = o.Supported(work, ranked)
 		probe := o.lastProbeOf(link.ID)
 		crashed := probe != nil && probe.Active != "active" && probe.Active != ""
 		// a service that died only needs a restart; a blocked transport is
@@ -468,19 +535,18 @@ func (o *Orchestrator) Repair(link *model.Link) bool {
 		}
 	}
 	o.Emit("warning", "repair", fmt.Sprintf("tunnel %s (%s) is down; trying to rebuild it with: %s",
-		o.LinkLabel(link), orUnknown(current, "—"), strings.Join(order, ", ")), true,
+		o.LinkLabel(work), orUnknown(current, "—"), strings.Join(order, ", ")), true,
 		map[string]string{"link": link.ID})
 
-	ports := o.store.LinkPorts(link)
+	ports := []string{}
+	o.read(func() { ports = o.store.LinkPorts(work) })
 	for _, transport := range order {
 		// the test is made with the lock released: it talks to the
 		// servers, and the panel must keep answering while it waits
-		result := o.try(link, transport, ports)
+		result := o.try(work, transport, ports)
 		if result.OK {
-			o.store.Lock()
-			o.markUp(link, transport, result.LatencyMS)
+			o.markUp(work, transport, result.LatencyMS)
 			o.clearRepairAfter(link.ID)
-			o.store.Unlock()
 			how := "with the same protocol"
 			if transport != current {
 				how = fmt.Sprintf("with the protocol %s (previous: %s)", transport, orUnknown(current, "—"))
@@ -583,10 +649,18 @@ func (o *Orchestrator) ScheduleRepairs() {
 	if !o.settings().AutoRepair || o.settings().ObserveOnly {
 		return
 	}
-	for _, link := range o.store.Links.List() {
-		if link.Status != model.StatusDown || o.Busy(link.ID) {
-			continue
+	// the tunnels are read under the lock and copied: a repair writes them
+	// while the cycle looks for the ones that are down
+	links := []*model.Link{}
+	o.read(func() {
+		for _, link := range o.store.Links.List() {
+			if link.Status != model.StatusDown || o.Busy(link.ID) {
+				continue
+			}
+			links = append(links, link.Clone())
 		}
+	})
+	for _, link := range links {
 		if o.repairAfterAt(link.ID) > model.Now() {
 			continue
 		}

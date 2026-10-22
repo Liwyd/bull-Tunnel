@@ -50,6 +50,10 @@ type Store struct {
 	// Meta is the panel's own bookkeeping.
 	Meta map[string]any
 
+	// handoverMu guards the map of the handovers: the panel writes it while
+	// the cycle reads it, and a map that is read and written at the same
+	// time stops the whole program.
+	handoverMu sync.RWMutex
 	// cacheMu guards the maps of the forwarded ports of the Iran servers:
 	// they are worked out again when something they depend on changes, so
 	// they are written even by a reader — they need a lock of their own,
@@ -203,7 +207,7 @@ func (s *Store) Raw() *rawState {
 		Providers: s.Providers.List(),
 		Settings:  s.Settings,
 		Events:    []*model.Event{},
-		Handover:  s.Handover,
+		Handover:  s.Handovers(),
 		Layout:    s.Layout,
 		Meta:      s.Meta,
 	}

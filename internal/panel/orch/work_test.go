@@ -138,13 +138,17 @@ func (d *fakeDriver) Run(s *model.Server, command string, timeout time.Duration)
 	return 0, "", "", nil
 }
 
-// fakeDNS is the DNS service of the tests.
+// fakeDNS is the DNS service of the tests. It has a lock of its own: the
+// panel asks it from more than one goroutine.
 type fakeDNS struct {
+	mu      sync.Mutex
 	records map[string]string
 	calls   []string
 }
 
 func (d *fakeDNS) GetA(fqdn string) ([]string, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if ip, there := d.records[fqdn]; there {
 		return []string{ip}, nil
 	}
@@ -152,6 +156,8 @@ func (d *fakeDNS) GetA(fqdn string) ([]string, error) {
 }
 
 func (d *fakeDNS) SetA(fqdn string, ip string, ttl int) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.records[fqdn] = ip
 	d.calls = append(d.calls, fqdn+"="+ip)
 	return nil
@@ -170,11 +176,13 @@ type aWorld struct {
 	driver *fakeDriver
 	dns    *fakeDNS
 	orch   *Orchestrator
-	notes  []string
-	iran   *model.Server
-	kharej *model.Server
-	link   *model.Link
-	domain *model.Domain
+	// notesMu guards the notes: the panel says things in the background.
+	notesMu sync.Mutex
+	notes   []string
+	iran    *model.Server
+	kharej  *model.Server
+	link    *model.Link
+	domain  *model.Domain
 }
 
 func newWorld(t *testing.T) *aWorld {
@@ -217,7 +225,11 @@ func newWorld(t *testing.T) *aWorld {
 		DNS: func(provider *model.DNSProvider) (dns.Client, error) {
 			return records, nil
 		},
-		Notify: func(text string) { world.notes = append(world.notes, text) },
+		Notify: func(text string) {
+			world.notesMu.Lock()
+			world.notes = append(world.notes, text)
+			world.notesMu.Unlock()
+		},
 	})
 	return world
 }
@@ -349,6 +361,71 @@ func TestTheObserveModeChangesNothing(t *testing.T) {
 	if !said {
 		t.Errorf("the operator was not told what would have happened: %v", w.notes)
 	}
+}
+
+// TestTheCycleAndTheRepairDoNotCollide: the repair runs in the background
+// and writes the tunnel while the cycle reads it and writes it too. The
+// state is behind a lock, and every one of them must take it.
+//
+// Run it with the race detector: go test -race ./internal/panel/orch/
+func TestTheCycleAndTheRepairDoNotCollide(t *testing.T) {
+	w := newWorld(t)
+	w.link.Status = model.StatusDown
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	// the cycle, over and over
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			w.orch.CheckAll()
+		}
+	}()
+	// the repair, over and over: it writes the tunnel
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			w.orch.Repair(w.link)
+			w.orch.Discover(w.link, nil)
+		}
+	}()
+	// the operator moves the domain while the cycle watches it
+	iran2 := &model.Server{ID: "si2", Name: "I2", Role: model.Iran, IP: "10.0.2.2", Status: model.Online, Enabled: true}
+	w.store.Servers.Put(iran2.ID, iran2)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		target := w.iran.ID
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			w.orch.MoveDomain(w.domain, target, "the operator asked for it", false)
+			if target == w.iran.ID {
+				target = iran2.ID
+			} else {
+				target = w.iran.ID
+			}
+		}
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+	close(stop)
+	wg.Wait()
 }
 
 // TestTheCycleGivesTheLockBackWhileItWaitsForAServer: the change the
