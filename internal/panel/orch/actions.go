@@ -15,27 +15,43 @@ import (
 
 // install makes sure the engine is on a server, and that the panel knows
 // which carriers it speaks.
+//
+// The server is worked on as a copy and written under the lock of the state:
+// the driver reads the server while the cycle watches it.
 func (o *Orchestrator) install(server *model.Server) error {
-	if server.EngineVersion != "" && len(server.EngineTransports) > 0 {
+	work := o.copyServer(server)
+	if work == nil {
+		return fmt.Errorf("the server is not in the panel")
+	}
+	if work.EngineVersion != "" && len(work.EngineTransports) > 0 {
 		return nil
 	}
 	if o.driver == nil {
 		return fmt.Errorf("the panel has no way to reach the servers")
 	}
-	if server.EngineVersion == "" {
-		version, err := o.driver.EnsureInstalled(server, o.settings().InstallEngine)
+	if work.EngineVersion == "" {
+		version, err := o.driver.EnsureInstalled(work, o.settings().InstallEngine)
 		if err != nil {
 			return err
 		}
-		server.EngineVersion = version
+		o.writeServer(server, func(current *model.Server) {
+			current.EngineVersion = version
+			// the driver fills the carriers the engine speaks on the copy
+			// it was given: they are what the panel builds a tunnel with.
+			if len(work.EngineTransports) > 0 {
+				current.EngineTransports = append([]string{}, work.EngineTransports...)
+			}
+		})
 		return nil
 	}
-	_, transports, err := o.driver.EngineInfo(server)
+	_, transports, err := o.driver.EngineInfo(work)
 	if err != nil {
 		return err
 	}
 	if len(transports) > 0 {
-		server.EngineTransports = transports
+		o.writeServer(server, func(current *model.Server) {
+			current.EngineTransports = append([]string{}, transports...)
+		})
 	}
 	return nil
 }
@@ -45,13 +61,17 @@ func (o *Orchestrator) Install(server *model.Server) {
 	if o.driver == nil {
 		return
 	}
-	version, err := o.driver.EnsureInstalled(server, o.settings().InstallEngine)
+	work := o.copyServer(server)
+	if work == nil {
+		return
+	}
+	version, err := o.driver.EnsureInstalled(work, o.settings().InstallEngine)
 	if err != nil {
-		o.Emit("error", "install", fmt.Sprintf("installing the tunnel engine on %s failed: %v", server.Name, err), true,
+		o.Emit("error", "install", fmt.Sprintf("installing the tunnel engine on %s failed: %v", work.Name, err), true,
 			map[string]string{"server": server.ID})
 		return
 	}
-	server.EngineVersion = version
+	o.writeServer(server, func(current *model.Server) { current.EngineVersion = version })
 	o.Changed()
 }
 

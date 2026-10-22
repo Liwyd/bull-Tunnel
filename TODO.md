@@ -984,7 +984,10 @@ taking the lock ✓. The race detector saw it ✓.
   (`internal/panel/store` ✓): the map of the handovers was written by the
   cycle ✓ and read by the panel ✓ — and it is a map ✓.
 * ✅ **The change the operator made is not lost** ✓: the repair writes to
-  the tunnel that is there now ✓, not to the one it was given ✓.
+  the tunnel that is there now ✓, not to the one it was given ✓ — and the
+  same goes for the servers ✓ (the engine and the carriers it speaks ✓) and
+  for the domains ✓ (the record that is moved ✓, the propagation that is
+  watched ✓).
 * ✅ The test: the cycle ✓, the repair ✓, the discovery ✓ and the operator
   moving a domain ✓, all at the same time ✓, over and over ✓, under the
   race detector ✓ (`internal/panel/orch/work_test.go` ✓). It fails without

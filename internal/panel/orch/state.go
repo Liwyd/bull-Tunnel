@@ -71,6 +71,22 @@ func (o *Orchestrator) write(link *model.Link, change func(*model.Link)) bool {
 	return true
 }
 
+// writeServer changes a server under the lock of the state. It says whether
+// the server is still in the panel.
+func (o *Orchestrator) writeServer(server *model.Server, change func(*model.Server)) bool {
+	if server == nil {
+		return false
+	}
+	o.store.Lock()
+	defer o.store.Unlock()
+	current := o.store.Servers.Get(server.ID)
+	if current == nil {
+		return false
+	}
+	change(current)
+	return true
+}
+
 // writeDomain changes a domain under the lock of the state. It says whether
 // the domain is still in the panel.
 func (o *Orchestrator) writeDomain(domain *model.Domain, change func(*model.Domain)) bool {

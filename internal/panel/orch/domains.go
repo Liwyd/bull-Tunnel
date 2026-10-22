@@ -402,19 +402,26 @@ func (o *Orchestrator) ReadRecord(domain *model.Domain) {
 // checkPropagation tells when a changed record has really reached users.
 func (o *Orchestrator) checkPropagation() {
 	for _, domain := range o.store.Domains.List() {
-		if domain.PendingIP == "" {
+		// the domain is read as a copy: the panel moves the records while
+		// the cycle watches the propagation
+		work := o.copyDomain(domain)
+		if work == nil {
 			continue
 		}
-		provider := o.store.Providers.Get(domain.ProviderID)
-		waited := model.Now() - domain.PendingSince
+		if work.PendingIP == "" {
+			continue
+		}
+		provider := o.store.Providers.Get(work.ProviderID)
+		waited := model.Now() - work.PendingSince
 		if provider == nil || provider.Proxied {
-			domain.PendingIP = "" // proxied records resolve to the CDN: nothing to watch
+			// proxied records resolve to the CDN: nothing to watch
+			o.writeDomain(domain, func(current *model.Domain) { current.PendingIP = "" })
 			continue
 		}
 		if o.resolver == nil {
 			continue
 		}
-		answers := o.resolver(domain.FQDN, o.settings().DohResolvers)
+		answers := o.resolver(work.FQDN, o.settings().DohResolvers)
 		seen := [][]string{}
 		for _, answer := range answers {
 			if answer != nil {
@@ -424,16 +431,16 @@ func (o *Orchestrator) checkPropagation() {
 		if len(seen) > 0 {
 			all := true
 			for _, answer := range seen {
-				if len(answer) != 1 || answer[0] != domain.PendingIP {
+				if len(answer) != 1 || answer[0] != work.PendingIP {
 					all = false
 					break
 				}
 			}
 			if all {
 				o.Emit("success", "propagated", fmt.Sprintf("after %s, server %s (%s) is behind domain %s. Routes: %s",
-					FormatDuration(waited), o.Name(domain.IranID), domain.PendingIP, domain.FQDN, o.routesText(domain, domain.IranID)), true,
+					FormatDuration(waited), o.Name(work.IranID), work.PendingIP, work.FQDN, o.routesText(work, work.IranID)), true,
 					map[string]string{"domain": domain.ID})
-				domain.PendingIP = ""
+				o.writeDomain(domain, func(current *model.Domain) { current.PendingIP = "" })
 				continue
 			}
 		}
@@ -450,9 +457,9 @@ func (o *Orchestrator) checkPropagation() {
 			}
 			sort.Strings(list)
 			o.Emit("warning", "propagated", fmt.Sprintf("after %s not every DNS server shows the new IP address of %s yet (seen: %s)",
-				FormatDuration(waited), domain.FQDN, orUnknown(strings.Join(list, ", "), "—")), true,
+				FormatDuration(waited), work.FQDN, orUnknown(strings.Join(list, ", "), "—")), true,
 				map[string]string{"domain": domain.ID})
-			domain.PendingIP = ""
+			o.writeDomain(domain, func(current *model.Domain) { current.PendingIP = "" })
 		}
 	}
 }
