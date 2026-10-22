@@ -5,6 +5,32 @@ All the versions of bull-Tunnel. The project follows
 change that may break a configuration, the one after it is a change that
 only adds something.
 
+## 1.3.0 — 2026-10-22
+
+The dashboard is served by Go, screen by screen: the shell, the network
+view, the graph, the other views and the forms are drawn from the Go side
+now, and the browser draws what it is given. The state got its lock in
+order first — every writer takes it, and every question the panel asks
+its state is asked under it — because the race detector was the one that
+said so.
+
+- The dashboard's shell, the network view and the graph are rendered by
+  the panel itself: `GET /api/view` carries the facts and the parts of
+  the page, and the page is drawn from them.
+- A form is the API body, drawn: `GET /api/form` returns the HTML of the
+  form of a server, a link, a provider, a domain, the settings or a
+  restore, and the browser only collects what the form shows and sends
+  it. The six form builders in JavaScript went with it.
+- The state takes the lock: the writers, the servers, the records and
+  the questions of the panel are all under it, and the TODO says what the
+  race detector found.
+- The CI keeps the release that runs up to date itself: every push to
+  main that passes the tests publishes the binaries as the release
+  `build-main`, marked latest — the one `releases/latest` answers with,
+  and the panel installs the engine from there — in the place of the one
+  before it. The tagged releases are the versions an operator pins.
+- The copyright line of the licence and the notice names the author.
+
 ## 1.2.0 — 2026-10-22
 
 The panel is Go, from the first line to the last: the binary, the service,

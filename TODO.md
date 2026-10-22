@@ -1201,6 +1201,7 @@ already work ✓.
 | 38 | The dashboard — the forms are Go | done |
 | 39 | The build of every push | done |
 | 40 | The release of every push follows main | done |
+| 41 | The release v1.3.0 | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design
 and the panel is Go.** What is left is the dashboard (phase 10 ✓) and the
