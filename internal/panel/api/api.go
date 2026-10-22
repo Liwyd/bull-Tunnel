@@ -25,6 +25,7 @@ import (
 	"github.com/Liwyd/bull-Tunnel/internal/panel/ssh"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/store"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/telegram"
+	"github.com/Liwyd/bull-Tunnel/internal/panel/web"
 )
 
 // LocalHeader is the header the management tool of the machine itself
@@ -284,16 +285,24 @@ func readBody(r *http.Request, into any) error {
 }
 
 // index is the page of the panel.
+//
+// The page is rendered by Go: the template is in the binary ✓, so the panel
+// shows its dashboard even when nothing is beside it ✓.
 func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	page := filepath.Join(s.static, "index.html")
-	content, err := os.ReadFile(page)
+	content, err := web.Shell(s.version)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not found")
-		return
+		// the page could not be rendered: the one that is on the disk is
+		// better than nothing.
+		page := filepath.Join(s.static, "index.html")
+		content, err = os.ReadFile(page)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")

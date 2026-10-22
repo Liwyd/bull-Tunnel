@@ -1033,10 +1033,17 @@ never breaks what is there ✓.
 
 **The steps, in order:**
 
-1. **The shell is Go.** The page is rendered by a Go template ✓
+**Commit 35 — the shell is Go** ✓ (`internal/panel/web` ✓): the template of
+the dashboard ✓ is in the binary ✓, the panel renders it ✓ (and falls back
+to the file on the disk if the rendering fails ✓), and the version of the
+panel is in the page ✓.
+
+1. **The shell is Go.** ✅ The page is rendered by a Go template ✓
    (`internal/panel/web` ✓): the sidebar ✓, the header ✓, the five views ✓
-   and the sign-in card ✓. The stylesheet stays the one that is there ✓
-   (the classes do not change ✓).
+   and the sign-in card ✓. The template is in the binary ✓, so the panel
+   shows its dashboard even when nothing is beside it ✓; the stylesheet
+   stays the one that is there ✓ (the classes do not change ✓). The test:
+   the page is rendered ✓ and has no mark of the template left in it ✓.
 2. **The network view is Go.** The cards of the servers ✓, of the domains ✓
    and the strip of the state ✓ are rendered by the template ✓ from the
    same snapshot the API answers ✓ — one truth, two shapes ✓.
@@ -1109,6 +1116,7 @@ already work ✓.
 | 32 | The Go rewrite — phase 9 (the switchover) | done |
 | 33 | The writers of the state take the lock too | done |
 | 34 | The Go rewrite — phase 10 (the dashboard) | **in progress** |
+| 35 | The dashboard — the shell is Go | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design
 and the panel is Go.** What is left is the dashboard (phase 10 ✓) and the

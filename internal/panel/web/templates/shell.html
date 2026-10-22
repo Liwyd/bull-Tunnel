@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>bull-Tunnel</title>
+<meta name="version" content="{{.Version}}">
+<link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="/static/theme.js"></script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- ------------------------------------------------------------- sign in -->
+<div id="auth" class="auth hidden">
+  <form class="auth-card" id="auth-form">
+    <div class="brand"><img src="/static/logo.svg" alt=""><span>Bull</span></div>
+    <p class="note" id="auth-sub">Sign in to the tunnel panel</p>
+    <label>Username<input name="username" autocomplete="username" required value="admin"></label>
+    <label>Password<input name="password" type="password" autocomplete="current-password" required minlength="6"></label>
+    <button class="btn primary wide" type="submit" id="auth-btn">Sign in</button>
+    <p class="error" id="auth-err"></p>
+  </form>
+</div>
+
+<!-- ------------------------------------------------------------ the panel -->
+<div id="app" class="shell hidden">
+
+  <aside class="side" id="side">
+    <div class="side-brand">
+      <div class="row">
+        <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M0 0H6.86L9.14 8.8276H22.86L25.14 0H32L29.71 15.4483L24 19.8621V28.6897L17.14 32V20.9655H14.86V32L8 28.6897V19.8621L2.29 15.4483L0 0Z" fill="var(--brand)" fill-rule="evenodd"/></svg>
+        <span class="word">Bull</span>
+      </div>
+      <div class="env"><b>CONSOLE</b><span>PRODUCTION / 01</span></div>
+    </div>
+
+    <nav class="side-nav" id="nav">
+      <a href="#/network" data-view="network">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2.5" width="6" height="5"/><rect x="2.5" y="16.5" width="6" height="5"/><rect x="15.5" y="16.5" width="6" height="5"/><path d="M12 7.5v4M5.5 16.5V13h13v3.5"/></svg>
+        <span>Network view</span>
+      </a>
+      <a href="#/tunnels" data-view="tunnels">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h8M15 7h6"/><circle cx="13" cy="7" r="2.2"/><path d="M3 17h3M10 17h11"/><circle cx="8" cy="17" r="2.2"/></svg>
+        <span>Tunnels &amp; protocols</span>
+      </a>
+      <a href="#/domains" data-view="domains">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.6 4 5.7 4 9s-1.4 6.4-4 9c-2.6-2.6-4-5.7-4-9s1.4-6.4 4-9z"/></svg>
+        <span>Domains</span>
+      </a>
+      <a href="#/infrastructure" data-view="infrastructure">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h2M3 12h2M3 18h2"/><path d="M8 6h13M8 12h13M8 18h13"/></svg>
+        <span>Infrastructure</span>
+      </a>
+      <a href="#/settings" data-view="settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h6M13 6h8"/><path d="M3 12h10M17 12h4"/><path d="M3 18h3M10 18h11"/><circle cx="11" cy="6" r="2.2"/><circle cx="15" cy="12" r="2.2"/><circle cx="8" cy="18" r="2.2"/></svg>
+        <span>Settings</span>
+      </a>
+    </nav>
+
+    <div class="side-block">
+      <span class="label">Network status</span>
+      <div class="side-stat"><i class="dot ok"></i>Servers online <b id="ss-on">0 / 0</b></div>
+      <div class="side-stat warn"><i class="dot degraded"></i>Unstable tunnels <b id="ss-deg">0</b></div>
+      <div class="side-stat ok"><i class="dot ok"></i>Healthy domains <b id="ss-dom">0</b></div>
+    </div>
+
+    <div class="side-foot">
+      <div class="side-user"><span>Signed in as</span><b id="ss-user">—</b></div>
+      <div class="side-user"><span>Version</span><b id="ss-ver">—</b></div>
+      <div class="theme-row">
+        <span>Appearance</span>
+        <button id="btn-theme" title="Light / dark">
+          <span id="theme-label">Dark</span>
+          <svg viewBox="0 0 24 24" aria-hidden="true" id="theme-icon"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/></svg>
+        </button>
+      </div>
+      <div class="btns"><button class="btn sm" id="btn-logout">Sign out</button></div>
+    </div>
+  </aside>
+
+  <header class="top">
+    <button class="btn icon" id="btn-menu" title="Menu" aria-label="Menu">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+    <nav class="crumb" aria-label="Breadcrumb"><b>Bull</b><span>/</span><span>console</span><span>/</span><span id="crumb-page">Network view</span></nav>
+    <div class="top-right">
+      <div class="top-flags" id="top-flags"></div>
+      <span class="live" id="live"><i></i><span id="live-text">Connecting…</span></span>
+      <span class="top-clock mono" id="clock">--:--:--</span>
+    </div>
+  </header>
+
+  <main class="main" id="main">
+
+    <!-- ============================================ network view (dashboard) -->
+    <section class="page" id="view-network">
+      <div class="page-head">
+        <div>
+          <h1 id="net-title">Network view</h1>
+          <div class="sub" id="net-sub">Every server, tunnel and domain in one place.</div>
+        </div>
+        <div class="actions" id="net-actions"></div>
+      </div>
+
+      <div class="strip" id="net-strip"></div>
+
+      <div class="bar">
+        <div class="search grow">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/></svg>
+          <input id="net-q" type="search" placeholder="Search a server, a tunnel or a domain…" autocomplete="off">
+        </div>
+        <select id="net-filter" aria-label="Filter by status">
+          <option value="all">All paths</option>
+          <option value="up">Healthy</option>
+          <option value="degraded">Unstable</option>
+          <option value="down">Down</option>
+          <option value="testing">Testing</option>
+        </select>
+        <button class="btn" id="net-search">Search tunnels</button>
+      </div>
+
+      <div class="flow" id="flow">
+        <div class="flow-head">
+          <h2>Network flow</h2>
+          <span class="badge" id="flow-badge"><i class="dot ok"></i><span>0 tunnels checked</span></span>
+          <div class="right">
+            <label class="check" style="font-size:12px"><input type="checkbox" id="show-standby" checked> <span>Standby tunnels</span></label>
+            <label class="check" style="font-size:12px"><input type="checkbox" id="show-pending"> <span>Not built yet</span></label>
+          </div>
+        </div>
+        <div class="flow-stage" id="stage">
+          <div class="flow-world" id="world">
+            <svg class="flow-wires" id="wires"></svg>
+            <div class="flow-cols" id="cols"></div>
+            <div id="nodes"></div>
+          </div>
+          <div class="empty-hint hidden" id="empty-hint"></div>
+          <div class="flow-tools" id="tools">
+            <button data-zoom="fit" title="Show everything"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+            <button data-zoom="out" title="Zoom out"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+            <span class="zv" id="zoom-val">100%</span>
+            <button data-zoom="in" title="Zoom in"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+            <button data-zoom="reset" title="Default layout"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5"/></svg></button>
+          </div>
+        </div>
+        <div class="panel-foot">
+          <span class="flow-status" id="flow-status">—</span>
+          <div class="flow-legend" style="margin-left:auto">
+            <span><i class="sw sel"></i>Selected path</span>
+            <span><i class="sw up"></i>Healthy</span>
+            <span><i class="sw degraded"></i>Unstable</span>
+            <span><i class="sw testing"></i>Testing</span>
+            <span><i class="sw dns"></i>DNS route</span>
+            <span><i class="sw forward"></i>Forwarded</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="two">
+        <div class="panel">
+          <div class="panel-head">
+            <span class="idx">01 / TUNNELS</span>
+            <h2>Tunnel list</h2>
+            <div class="right">
+              <label class="check" style="font-size:12px"><input type="checkbox" id="show-pending-2"> <span>Show the ones not built</span></label>
+            </div>
+          </div>
+          <div class="tbl-wrap"><table class="tbl" id="links-table"></table></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <span class="idx">02 / LOG</span>
+            <h2>Recent events</h2>
+            <div class="right">
+              <div class="seg" id="ev-filter">
+                <button data-f="all" class="on">All</button>
+                <button data-f="error">Errors</button>
+                <button data-f="warning">Warnings</button>
+                <button data-f="success">Success</button>
+              </div>
+            </div>
+          </div>
+          <ol class="events" id="events"></ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================ tunnels & protocols -->
+    <section class="page" id="view-tunnels" hidden>
+      <div class="page-head">
+        <div>
+          <h1>Tunnels &amp; protocols</h1>
+          <div class="sub">Every path between an Iran server and a foreign server, and the carrier it speaks.</div>
+        </div>
+        <div class="actions" id="tun-actions"></div>
+      </div>
+      <div class="strip" id="tun-strip"></div>
+      <div class="two">
+        <div class="panel">
+          <div class="panel-head">
+            <span class="idx">01 / PATHS</span>
+            <h2>All paths</h2>
+            <div class="right">
+              <select id="tun-sort" aria-label="Sort">
+                <option value="name">Sort by name</option>
+                <option value="latency">Sort by latency</option>
+                <option value="status">Sort by status</option>
+              </select>
+            </div>
+          </div>
+          <div class="tbl-wrap"><table class="tbl" id="tun-table"></table></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="idx">02 / CARRIERS</span><h2>Protocols</h2></div>
+          <div class="panel-body" id="tun-protocols"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================================================== domains -->
+    <section class="page" id="view-domains" hidden>
+      <div class="page-head">
+        <div>
+          <h1>Domains</h1>
+          <div class="sub">The DNS record, the ports it uses and the order in which the Iran servers take over.</div>
+        </div>
+        <div class="actions" id="dom-actions"></div>
+      </div>
+      <div class="strip" id="dom-strip"></div>
+      <div class="two">
+        <div class="cols" id="dom-detail"></div>
+        <div class="panel">
+          <div class="panel-head">
+            <span class="idx">04 / RECORDS</span>
+            <h2>Managed domains</h2>
+          </div>
+          <div class="panel-body" id="dom-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================ infrastructure -->
+    <section class="page" id="view-infrastructure" hidden>
+      <div class="page-head">
+        <div>
+          <h1>Infrastructure</h1>
+          <div class="sub">The foreign servers the traffic leaves from, and the Iran servers it arrives at.</div>
+        </div>
+        <div class="actions" id="inf-actions"></div>
+      </div>
+      <div class="strip" id="inf-strip"></div>
+      <div class="two">
+        <div class="panel">
+          <div class="panel-head"><span class="idx">01 / EXIT</span><h2>Foreign servers</h2></div>
+          <div class="panel-body" id="inf-kharej"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="idx">02 / INGRESS</span><h2>Iran servers</h2></div>
+          <div class="panel-body" id="inf-iran"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================================================== settings -->
+    <section class="page" id="view-settings" hidden>
+      <div class="page-head">
+        <div>
+          <h1>System settings</h1>
+          <div class="sub">How the panel watches, repairs and reports.</div>
+        </div>
+        <div class="actions" id="set-actions"></div>
+      </div>
+      <div class="two">
+        <div class="cols" id="set-body"></div>
+        <div class="index-group" id="set-index"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="foot">
+    <span class="label">BULL / PRECISION ROUTING</span>
+    <span class="right" id="foot-note">—</span>
+  </footer>
+</div>
+
+<aside class="drawer" id="drawer"><div class="drawer-inner" id="drawer-body"></div></aside>
+<div class="scrim" id="scrim"></div>
+<div class="modal" id="modal"><form class="modal-card" id="modal-form"></form></div>
+<div class="tip" id="tip"></div>
+<div class="toasts" id="toasts"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
