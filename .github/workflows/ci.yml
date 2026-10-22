@@ -115,6 +115,61 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # The build of every push: the same files as a release, published as a
+  # prerelease that takes the place of the one before it.
+  #
+  # A release is a tag — the panel and the engine a server is meant to run,
+  # made on purpose, with the notes of what changed. This is something
+  # else: the newest build of main, for whoever wants to try it, and it is
+  # useful because the panel itself installs the engine from the releases
+  # page (engine_source) — so a fix can be tried on a server without
+  # waiting for a version.
+  #
+  # It is a prerelease on purpose: the panel asks GitHub for
+  # "releases/latest" when it installs the engine, and GitHub leaves the
+  # prereleases out of that answer — so the servers that install the
+  # engine keep installing the last real release, and this build only
+  # reaches whoever picks it by hand.
+  latest:
+    name: the build of every push
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+      - name: build the binaries
+        run: bash build.sh dist
+      - name: the last build takes the place of the one before it
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # The tag goes with the release, so the files and the commit they
+        # were built from are always the same pair. A repository that has
+        # no build yet has nothing to delete.
+        run: gh release delete build-main --cleanup-tag --yes || true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-main
+          target_commitish: ${{ github.sha }}
+          name: the build of every push
+          prerelease: true
+          make_latest: false
+          body: |
+            The binaries of the last push to main — the panel and the
+            engine, built from ${{ github.sha }}.
+
+            This is not a release: the releases are the tags (v1.2.0 and
+            on), they are made on purpose, and they are the ones a server
+            installs. This is the newest build, for whoever wants to try
+            it.
+
+            The run that built it: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          files: dist/*
+
   release:
     name: github release
     needs: test

@@ -322,6 +322,18 @@ to exist before a fresh installation can install the engine.
 * ✅ Verified end to end: the panel fetches the engine from the published
   release, checks its checksum, takes the binary out of it — and the
   binary that comes out reports its version and its nine carriers.
+* ✅ **Every push builds its release as well.** A release is still a tag —
+  the version a server is meant to run, made on purpose with the notes of
+  what changed — but the CI now publishes the binaries of every push to
+  main as a **prerelease** called `build-main`, which takes the place of
+  the one before it (the tag is moved with it, so the files and the
+  commit they were built from are always the same pair). It is useful
+  because the panel itself installs the engine from the releases page, so
+  a fix can be tried on a server without waiting for a version. It is a
+  prerelease on purpose: GitHub leaves the prereleases out of
+  `releases/latest`, which is what the panel asks for when it installs
+  the engine — so the servers keep installing the last real release, and
+  the build of every push only reaches whoever picks it by hand.
 
 ### Commit 6 — tests, docs and the changelog  ✅ done
 
@@ -1187,6 +1199,7 @@ already work ✓.
 | 36 | The dashboard — the network view and the graph are Go | done |
 | 37 | The dashboard — the other views are Go | done |
 | 38 | The dashboard — the forms are Go | done |
+| 39 | The build of every push | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design
 and the panel is Go.** What is left is the dashboard (phase 10 ✓) and the
