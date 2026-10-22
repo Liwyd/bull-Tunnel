@@ -115,23 +115,22 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # The build of every push: the same files as a release, published as a
-  # prerelease that takes the place of the one before it.
+  # The release of every push: the same files as a tagged release,
+  # published on every push to main that passed the tests, in the place of
+  # the one before it.
   #
-  # A release is a tag — the panel and the engine a server is meant to run,
-  # made on purpose, with the notes of what changed. This is something
-  # else: the newest build of main, for whoever wants to try it, and it is
-  # useful because the panel itself installs the engine from the releases
-  # page (engine_source) — so a fix can be tried on a server without
-  # waiting for a version.
+  # The release is used in execution: the panel installs the tunnel engine
+  # from this releases page (engine_source, "releases/latest"), so the
+  # release that runs must not go stale between tags — the CI keeps it
+  # current itself. Two things make that safe: the job only runs after the
+  # tests have passed, and it is the release marked latest, so it is the
+  # one "releases/latest" answers with.
   #
-  # It is a prerelease on purpose: the panel asks GitHub for
-  # "releases/latest" when it installs the engine, and GitHub leaves the
-  # prereleases out of that answer — so the servers that install the
-  # engine keep installing the last real release, and this build only
-  # reaches whoever picks it by hand.
+  # The tagged releases (the v* tags) are the other half: made on purpose,
+  # with the notes of what changed, and the versions an operator pins when
+  # a server must not move.
   latest:
-    name: the build of every push
+    name: the release of every push
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -155,17 +154,19 @@ jobs:
         with:
           tag_name: build-main
           target_commitish: ${{ github.sha }}
-          name: the build of every push
-          prerelease: true
-          make_latest: false
+          name: the release of every push
+          prerelease: false
+          make_latest: true
           body: |
             The binaries of the last push to main — the panel and the
             engine, built from ${{ github.sha }}.
 
-            This is not a release: the releases are the tags (v1.2.0 and
-            on), they are made on purpose, and they are the ones a server
-            installs. This is the newest build, for whoever wants to try
-            it.
+            This release follows main: the CI replaces it on every push
+            that passes the tests, so whatever installs the newest build
+            always gets it — the panel asks GitHub for "releases/latest"
+            when it installs the engine, and this is that release. The
+            tagged releases (v1.3.0 and on) are the versions made on
+            purpose, with the notes of what changed.
 
             The run that built it: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           files: dist/*
