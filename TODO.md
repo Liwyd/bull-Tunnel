@@ -1226,6 +1226,7 @@ already work ✓.
 | 50 | The installation checks itself | done |
 | 51 | The TODO says where the project stands and what is planned | done |
 | 52 | One name — the fork's origin leaves the project's words; the attribution stays where the engine's licence puts it, and the notice points at a `TRADEMARK.md` that exists | done |
+| 53 | The README is written like a tool: nine sections in the order a new operator meets the program, no Roadmap of trophies, no migration story, and the secrets section says what is actually in the clear | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design,
 the panel is Go and the dashboard is Go (phase 10 ✓).** What is left is
@@ -1309,7 +1310,7 @@ tunnel with another carrier, and serves one dashboard over a live
 websocket. The engine is the data plane: versioned, shipped and updated
 by the panel from its own releases page.
 
-### Phase 11 — the repository is a product  (11.1 done in commit 52; 11.2, 11.3 and 11.4 still ahead)
+### Phase 11 — the repository is a product  (11.1 and 11.2 done; 11.3 blocked, 11.4 still ahead)
 
 **11.1 One name — the fork's origin disappears.** ✅ done (commit 52),
 with **one correction to the plan as written here**, found by reading the
@@ -1369,26 +1370,61 @@ The remaining options stand, if anyone ever wants the last line gone:
   but every user of the panel inherits AGPL's obligations. A real
   change in what the project is.
 
-**11.2 The README, written like a tool, not like a pitch.** The current
-README carries the rewrite story and the history; a user needs: what it
-is in three sentences; how to install (the one-line installer, Docker,
-the release files); the first run (setup, two servers, the first
-tunnel, the demo); how the pieces fit (panel, engine, SSH, the state
-file, the websocket); the dashboard in one short paragraph; where the
-secrets live and what is encrypted (Telegram token, DNS keys, SSH host
-keys); how to run it as a service (`BT_PORT`/`BT_HOST`, the data
-directory, `-check`); how to develop it (the five commands above); and
-the licence line that matches 11.1. Plain sentences, no superlatives,
-no adjectives that could open a marketing page. `docs/` gets the same
-knife.
+**11.2 The README, written like a tool, not like a pitch.** ✅ done
+(commit 53), 685 → 565 lines, and the pitch left with the history: no
+Roadmap (every row of it was ✅ Done, so it was a wall of trophies), no
+"Migrating from the previous version", no "Features" list of adjectives.
+The README is now nine sections in the order a new operator meets the
+program — what it is, install, the first run, how the pieces fit, the
+dashboard, where the secrets are, running it as a service, developing
+it, licences — with the one-line installer above the screenshot, before
+the contents list.
 
-**11.3 The releases page.** Today: `build-main` (rolling, marked
-latest), `v1.3.0`, `v1.2.0` and the pre-Go `v1.1.3`–`v1.1.0`. Keep the
-rolling release and every Go-era tag; delete `v1.1.0`–`v1.1.3` **from
-the releases page only** (the tags stay, so anything pinning them still
-works), and confirm the panel's `engine_release` setting still says
-`latest` so servers follow the rolling one. New tagged releases need
-nothing changed in CI (`generate_release_notes` already writes them).
+**Three places where the plan as written above was wrong, corrected by
+reading the code:**
+
+* The plan asked for the secrets section to say "Telegram token, DNS
+  keys, SSH host keys". The truth is worse and the README says it: the
+  state file (`<data>/state.json`, mode 0600) holds the SSH passwords and
+  the DNS API tokens **in the clear**, which is why the installer makes
+  the data directory 0700 and why a backup password is not optional in
+  practice. What is actually encrypted: the admin password (PBKDF2-SHA,
+  16-byte salt, 200,000 iterations) and the backup (AES-256-GCM, key
+  from scrypt).
+* The plan asked for "how to run it as a service (`BT_PORT`/`BT_HOST`,
+  the data directory, `-check`)". The panel takes flags too — `--host`,
+  `--port`, `--data`, `--demo`, `--check`, `--static-dir` — so the
+  section is a table of the environment *and* the flags, read from
+  `/etc/default/bull-tunnel`.
+* "The dashboard in one short paragraph" did not survive contact with
+  the five pages and the ⚡ connection test: it is a section, and the
+  screenshots it needs (`dashboard-dark`, `dashboard-light`, `server`)
+  went with it.
+
+`docs/` got the knife too, and it turned up a contradiction:
+`docs/architecture.md` said in one line that host keys are **not**
+verified (`known_hosts=None`) and fifteen lines below that they **are**
+pinned. Commit 5 pinned them; the first line was stale, and it is fixed.
+The one place that still says the data plane does not go over DNS now
+says so without pointing at a roadmap this commit deletes.
+
+A test in `internal/panel/readme_test.go` holds the shape: the nine
+headings in order, the installer at the top, the attribution block in
+the Licences section, the name of the origin nowhere else in the
+README — and the README's claims about the state file, the password and
+the backup checked against the code that makes them true, so a claim
+that stops being true is a failing test and not a lie in print.
+
+**11.3 The releases page.** ⛔ blocked — there is no `gh` CLI, no GitHub
+token and no credentials on this machine, so the releases page cannot be
+touched from here. The work, when a machine with credentials is in front
+of someone: today `build-main` (rolling, marked latest), `v1.3.0`,
+`v1.2.0` and the pre-Go `v1.1.3`–`v1.1.0`. Keep the rolling release and
+every Go-era tag; delete `v1.1.0`–`v1.1.3` **from the releases page
+only** (the tags stay, so anything pinning them still works), and
+confirm the panel's `engine_release` setting still says `latest` so
+servers follow the rolling one. New tagged releases need nothing changed
+in CI (`generate_release_notes` already writes them).
 
 **11.4 The dead weight and the one file of boilerplate.**
 `new-ui/` — 18MB of design mockups referenced by nothing: confirm no

@@ -54,9 +54,9 @@ tunnel.
 * **Timeouts everywhere.** Every remote command has a deadline. A server
   that accepts the connection but never answers is treated as offline
   instead of blocking the whole cycle.
-* **Host keys are not verified** (`known_hosts=None`). This is the weakest
-  point of the current design: the panel trusts a server on first use. See
-  the security section.
+* **Host keys are pinned.** The first connection to a server records its
+  key, and every later connection must present the same one. A key that
+  changed is refused and reported. See the security section.
 
 ## The transport stack
 
@@ -139,8 +139,8 @@ comes back the same way.
 
 That is the difference between "the tunnel is down" and "the panel can
 still see the server and tell it what to do". Turning the *data plane*
-over to DNS as well is a much bigger piece of work — it is the one thing
-in the roadmap that is not done.
+over to DNS as well is a much bigger piece of work, and it has not been
+taken on.
 
 ## The failover policy
 

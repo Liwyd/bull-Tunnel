@@ -171,8 +171,9 @@ func TestTheNameOfTheOriginOnlyLivesInTheAttribution(t *testing.T) {
 		if strings.HasPrefix(rel, "internal"+string(filepath.Separator)+"engine"+string(filepath.Separator)) {
 			return nil // the vendored tree keeps its own words
 		}
-		if rel == filepath.Join("internal", "panel", "licence_test.go") {
-			return nil // this test holds the strings it searches for
+		if rel == filepath.Join("internal", "panel", "licence_test.go") ||
+			rel == filepath.Join("internal", "panel", "readme_test.go") {
+			return nil // these tests hold the strings they search for
 		}
 		raw, err := os.ReadFile(path)
 		if err != nil {
