@@ -1029,7 +1029,7 @@ tool ✓.
 panel comes up ✓, the demo runs ✓, and the release carries the two
 binaries ✓. **It does.**
 
-### Phase 10 — the dashboard in Go  (in progress)
+### Phase 10 — the dashboard in Go  ✅ done
 
 The API carries the whole truth, so the dashboard can be rewritten without
 touching the server: the network graph is a canvas ✓, the pages are
@@ -1135,19 +1135,24 @@ secrets, which are shown as the mask of them ✓).
    account with a line that says why ✓, the tunnel form starts at the
    server he came from ✓, and a form the panel does not have is not
    there ✓.
-6. **The JavaScript goes.** What is left of `static/app.js` is the theme ✓
-   and the canvas ✓; everything else is Go ✓.
+6. **The JavaScript goes.** ✅ What is left of `static/app.js` is the
+   theme ✓ and the canvas ✓; everything else is Go ✓ — the drawer of a
+   tunnel, a server and a domain ✓, the connection test and its table ✓,
+   the feed of events and its filter ✓ and the quick settings ✓ are
+   drawn by the panel now, and the script only collects and sends ✓
+   (1132 lines, down from 2031).
 
 **Done when:** the panel serves the dashboard from Go ✓, the websocket
 carries the state as it does today ✓, the operator does the same things he
-did before ✓, and `static/app.js` is the theme and the canvas ✓.
+did before ✓, and `static/app.js` is the theme, the canvas, the socket
+and the thin layer that collects what he writes and sends it ✓.
 
 ### The order, and what may not be skipped
 
 ```
 0 licence  →  1 one module  →  2 state  →  3 ssh  →  4 engine driver
    →  5 dns/telegram/backups  →  6 orchestrator  →  7 api  →  8 command
-   →  9 switchover  →  10 the dashboard (later)
+   →  9 switchover  →  10 the dashboard ✓
 ```
 
 Phase 7 needs 2, 3, 4, 5 and 6 ✓. Phase 9 needs 8 ✓. Nothing may be
@@ -1194,7 +1199,7 @@ already work ✓.
 | 31 | The panel does not fall over its own state | done |
 | 32 | The Go rewrite — phase 9 (the switchover) | done |
 | 33 | The writers of the state take the lock too | done |
-| 34 | The Go rewrite — phase 10 (the dashboard) | **in progress** |
+| 34 | The Go rewrite — phase 10 (the dashboard) | done |
 | 35 | The dashboard — the shell is Go | done |
 | 36 | The dashboard — the network view and the graph are Go | done |
 | 37 | The dashboard — the other views are Go | done |
@@ -1211,13 +1216,19 @@ already work ✓.
 | 48 | The connection test takes the two sides | done |
 | 49 | The JavaScript that drew the drawer is gone | done |
 | 50 | The installation checks itself | done |
+| 51 | The TODO says where the project stands and what is planned | done |
 
-**All the findings of the audit are closed, the graph is the type-1 design
-and the panel is Go.** What is left is the dashboard (phase 10 ✓) and the
-work that never ends: watching the panel on a live server.
+**All the findings of the audit are closed, the graph is the type-1 design,
+the panel is Go and the dashboard is Go (phase 10 ✓).** What is left is
+the work that never ends — watching the panel on a live server — and the
+plan below: read **section 4** to continue from here.
 
 ### What is left to do, and is not a fault
 
+* **Dependabot reports one high-severity vulnerability** in a dependency
+  (`github.com/Liwyd/bull-Tunnel/security/dependabot/2`): find it,
+  upgrade the module and `vendor/` in a commit of its own, with the
+  whole suite green.
 * **Try it on the real servers.** Everything here was verified against the
   simulated network and against a tunnel on the loopback: the panel comes
   up, the demo adopts the tunnels that are already running, moves a record
@@ -1256,6 +1267,173 @@ work that never ends: watching the panel on a live server.
   runs the cycle ✓, the repair ✓, the discovery ✓ and the operator moving a
   domain ✓ at the same time ✓ is in the suite now ✓, and it is the one that
   finds them ✓.
+
+---
+
+## 4. The plan from here — read this to continue
+
+**Where the project stands.** Sections 0–3 are history: the audit is
+closed, the panel is Go from the first line, phases 0–10 ship in the
+status table above, `v1.3.0` is published, and the rolling release
+(`build-main`) is republished by CI after every green push and is the
+answer to `releases/latest` — so what a server installs never goes stale
+between tags. **Nothing under this heading is written yet:** phases 11
+and 12 are plans, and phase 13 is the list that never closes.
+
+**First, confirm the tree is green** — these are the commands the CI
+runs, and they are the whole verification this project asks for:
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go vet ./...
+go test -race ./... -skip 'TestStartDoesNotReturnUntilThePortsAreFree|TestWriteBatchDoesNotAllocatePerCall|TestAnExplicitServerNameIsNotRewritten'
+node --check static/app.js
+bash tests/install-check.sh     # release files → unpack → boot → everything an operator asks
+go run ./cmd/bull-tunnel-panel --demo --data /tmp/panel-demo --port 18080
+```
+
+**What the panel is** (for the README below): a control plane that owns
+tunnels between servers in Iran and abroad over SSH — it installs the
+engine, builds its configuration, watches the health of every tunnel,
+moves the DNS records of a domain when a path breaks, repairs a broken
+tunnel with another carrier, and serves one dashboard over a live
+websocket. The engine is the data plane: versioned, shipped and updated
+by the panel from its own releases page.
+
+### Phase 11 — the repository is a product  (plan — none of it is done)
+
+**11.1 One name — the fork's origin disappears.** The engine started as
+a fork of another open-source project, and the repository must not carry
+its name anymore. Grep `BackPack` and `AminMGMT` and you have the whole
+list; today it is:
+
+* `README.md` and `internal/engine/README.md` — the attribution blocks
+  at the end;
+* `NOTICE` — the paragraph that names the origin (the licence statements
+  *around* it are a different matter, 11.2);
+* `CHANGELOG.md` — one historical line;
+* `cmd/bull-tunnel-engine/main.go` — `const Attribution`, printed by the
+  version output (grep the engine's tests for the string too);
+* `internal/engine/app/app.go` — `RepoOwner`/`RepoName`: dead code
+  (`SourceURL` has no callers anywhere) — delete the unused updater
+  constants or repoint them at `Liwyd/bull-Tunnel`;
+* this file — the audit and the history sections name it; rewrite them
+  in the project's own words.
+
+**The licence is the one decision to make before any text is written.**
+The engine directory is under AGPL-3.0 (`internal/engine/LICENSE`), and
+AGPL section 7 requires that the notices of the original work stay with
+the code. Deleting them without permission makes the fork non-compliant.
+Pick one, consciously:
+
+* **(a) rebrand, keep the floor — recommended now.** The name leaves
+  everything a user reads (README, docs, UI strings, `-v` output,
+  changelog, this file); only `internal/engine/LICENSE` and
+  `internal/engine/NOTICE` keep the notice the licence requires, with
+  one honest line in the root NOTICE saying the engine directory is
+  AGPL-3.0 and the panel is MIT. This ships without asking anyone.
+* **(b) ask, then unify.** Write to the upstream author (the GitHub
+  account in the list above), in writing, to drop the attribution
+  requirement and/or relicense the fork under MIT. Permission granted →
+  delete the last notices, put the whole repository under one licence,
+  and reduce NOTICE to the copyright line. Then add the test this
+  change deserves, in the spirit of `version_test.go`: the README, the
+  NOTICE and the licence files must not disagree about which licence
+  covers what.
+* **(c) unify on AGPL-3.0 now.** One licence, no permission needed —
+  but every user of the panel inherits AGPL's obligations. A real
+  change in what the project is; choose it only if (a)'s split feels
+  wrong.
+
+**11.2 The README, written like a tool, not like a pitch.** The current
+README carries the rewrite story and the history; a user needs: what it
+is in three sentences; how to install (the one-line installer, Docker,
+the release files); the first run (setup, two servers, the first
+tunnel, the demo); how the pieces fit (panel, engine, SSH, the state
+file, the websocket); the dashboard in one short paragraph; where the
+secrets live and what is encrypted (Telegram token, DNS keys, SSH host
+keys); how to run it as a service (`BT_PORT`/`BT_HOST`, the data
+directory, `-check`); how to develop it (the five commands above); and
+the licence line that matches 11.1. Plain sentences, no superlatives,
+no adjectives that could open a marketing page. `docs/` gets the same
+knife.
+
+**11.3 The releases page.** Today: `build-main` (rolling, marked
+latest), `v1.3.0`, `v1.2.0` and the pre-Go `v1.1.3`–`v1.1.0`. Keep the
+rolling release and every Go-era tag; delete `v1.1.0`–`v1.1.3` **from
+the releases page only** (the tags stay, so anything pinning them still
+works), and confirm the panel's `engine_release` setting still says
+`latest` so servers follow the rolling one. New tagged releases need
+nothing changed in CI (`generate_release_notes` already writes them).
+
+**11.4 The dead weight and the one file of boilerplate.**
+`new-ui/` — 18MB of design mockups referenced by nothing: confirm no
+asset from it is used by `static/`, then delete it. Whatever else a
+checkout holds outside `git ls-files` stays local and ignored. The only
+boilerplate worth adding is a short `CONTRIBUTING.md` with the five
+commands above and the commit style of this file — no templates, no
+codes of conduct, unless a real contributor asks.
+
+### Phase 12 — the rest of the engine's potential  (plan — decided, not done)
+
+The rule for this phase: **only what the current base carries.** If it
+needs the model, the orchestrator or the config writer rebuilt, it is
+not worth it — these protocols are not important enough.
+
+**In — panel-only, each one a field, a config line and a form line:**
+
+* the per-tunnel knobs, in the order they earn their place: `mss`
+  (broken-MTU paths), `heartbeat` (NAT keep-alive), `dial_timeout` /
+  `retry_interval`, then `bandwidth_mbps` / `max_connections`, then the
+  `kcp_*` / `mux_*` tuning. Recipe per knob: a field on `model.Link` →
+  the JSON key in `api/collections.go`'s link body → one `d.Set` in
+  `engine/render.go`'s `serverSection`/`clientSection` → a line in
+  `web/forms.go`'s `linkForm` or the drawer's inline fields → assert
+  the emitted config line the way `engine/driver_test.go` does.
+  `dumpSection` already emits any key, so the renderer needs no schema
+  change — that is what makes each of these "panel-only".
+* `fallback_transports` / `fallback_dwell`: the engine rotates carriers
+  on its own, but the panel's status, pin, retest and repair all speak
+  about *one* transport per tunnel. Expose it only after the status
+  language has an answer for a rotating link — a decision first, a
+  checkbox second.
+
+**Out — decided against, and why:**
+
+* `xdi`, `pck`: raw sockets and root; the engine itself keeps them out
+  of its own carrier list (`cmd/bull-tunnel-engine/main.go`), and an
+  unattended repair must never rotate into a carrier the server cannot
+  run. If they are ever wanted: pin-only, behind capability detection,
+  never in the automatic pool.
+* `spoof`: the engine refuses it as a reverse transport; it exists only
+  for the L3 tunnel.
+* L3 `[l3]` and `[direct]` tunnels: the scan skips them
+  (`panel/engine/scan.go`), the model has no kind for them, and they
+  invert the topology the orchestrator assumes (Iran listens, kharej
+  dials). A rework, not a feature.
+* the `udp` transport alone (not TCP-probeable — it would break
+  discovery and repair), the managed `naive`/`xray` helpers and the
+  quota sidecar (different control paths), the engine's sniffer monitor
+  page (the panel has its own health).
+
+**Already done in this direction:** the UDP switch of the tunnel form
+(row 43) — `accept_udp` was wired in model, API and renderer and simply
+had no UI — and the collector's marks (row 46). The habit is worth
+keeping: grep a model field against the forms; "wired but invisible" is
+how `accept_udp` happened.
+
+### Phase 13 — the work that never ends
+
+The bullets under *What is left to do, and is not a fault* above **are**
+this phase — the real-server trial, the two timing-sensitive tests, the
+two numbers the API never sends, the L3/direct tunnels, and now
+Dependabot. Read that list as the standing backlog: work it in order,
+and add to it instead of starting a second one. Two more entries for
+it: the fixtures of `tests/contract/` may take their final name when
+the contract is complete (the note in phase 2), and any change to
+`.github/workflows/ci.yml` must be watched through one full run — CI
+now publishes three moving things (the image, `build-main`, and `v*`
+on a tag).
 
 
 
