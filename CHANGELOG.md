@@ -5,6 +5,22 @@ All the versions of bull-Tunnel. The project follows
 change that may break a configuration, the one after it is a change that
 only adds something.
 
+## Unreleased
+
+### A high-severity vulnerability in a dependency
+
+Dependabot reported `github.com/klauspost/compress` ≤ v1.18.6
+(GHSA-259r-337f-4rfw, CVE-2026-113727, high): a crafted S2 dictionary can
+overflow the repeat index and crash the process with an out-of-bounds
+write. The module is an indirect dependency of `utls` (which uses its zstd
+package), and this project never calls `s2.NewDict`; the vulnerable package
+was not even vendored. The upgrade is still taken, so the alert does not
+stay open and the next use of the module cannot inherit the fault.
+
+- `go.mod` and `go.sum` pin `github.com/klauspost/compress` at v1.18.7.
+- `vendor/` is rebuilt from it.
+- The whole Go suite passes, under the race detector as the CI runs it.
+
 ## 1.3.0 — 2026-10-22
 
 The dashboard is served by Go, screen by screen: the shell, the network

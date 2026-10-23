@@ -28,6 +28,7 @@ require (
 	golang.org/x/crypto v0.58.0
 	golang.org/x/net v0.61.0
 	golang.org/x/sys v0.49.0
+	golang.org/x/term v0.47.0
 	golang.org/x/time v0.16.0
 	golang.zx2c4.com/wireguard v0.0.0-20250521234502-f333402bd9cb
 )
@@ -36,7 +37,7 @@ require (
 	github.com/andybalholm/brotli v1.0.6 // indirect
 	github.com/ebitengine/purego v0.11.1 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
-	github.com/klauspost/compress v1.18.0 // indirect
+	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
@@ -46,7 +47,6 @@ require (
 	github.com/tklauser/go-sysconf v0.4.0 // indirect
 	github.com/tklauser/numcpus v0.12.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	golang.org/x/term v0.47.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 )

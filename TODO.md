@@ -1228,6 +1228,7 @@ already work ✓.
 | 52 | One name — the fork's origin leaves the project's words; the attribution stays where the engine's licence puts it, and the notice points at a `TRADEMARK.md` that exists | done |
 | 53 | The README is written like a tool: nine sections in the order a new operator meets the program, no Roadmap of trophies, no migration story, and the secrets section says what is actually in the clear | done |
 | 54 | The 18MB of design mockups are deleted and nothing points at them; the one file of boilerplate is `CONTRIBUTING.md` | done |
+| 55 | The compression library Dependabot flagged is upgraded and `vendor/` is rebuilt | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design,
 the panel is Go and the dashboard is Go (phase 10 ✓).** What is left is
@@ -1236,10 +1237,16 @@ plan below: read **section 4** to continue from here.
 
 ### What is left to do, and is not a fault
 
-* **Dependabot reports one high-severity vulnerability** in a dependency
-  (`github.com/Liwyd/bull-Tunnel/security/dependabot/2`): find it,
-  upgrade the module and `vendor/` in a commit of its own, with the
-  whole suite green.
+* **Dependabot reported one high-severity vulnerability** in a dependency
+  (`github.com/Liwyd/bull-Tunnel/security/dependabot/2`) — ✅ **done
+  (commit 55).** It was `github.com/klauspost/compress` ≤ v1.18.6
+  (GHSA-259r-337f-4rfw, CVE-2026-113727): a crafted S2 dictionary
+  overflows the repeat index and crashes the process with an out-of-bounds
+  write. The module came in through `utls`, which imports its
+  `zstd` package; this project never calls `s2.NewDict`, and the
+  vulnerable `s2` package was not even vendored. `go.mod`, `go.sum` and
+  `vendor/` are at v1.18.7 now, which is the patched release, and the
+  whole Go suite passes under the race detector as the CI runs it.
 * **Try it on the real servers.** Everything here was verified against the
   simulated network and against a tunnel on the loopback: the panel comes
   up, the demo adopts the tunnels that are already running, moves a record
