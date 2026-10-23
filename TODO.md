@@ -1209,6 +1209,7 @@ already work ✓.
 | 46 | What the collector sends is what the API wants | done |
 | 47 | The drawer is worked by Go | done |
 | 48 | The connection test takes the two sides | done |
+| 49 | The JavaScript that drew the drawer is gone | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design
 and the panel is Go.** What is left is the dashboard (phase 10 ✓) and the
