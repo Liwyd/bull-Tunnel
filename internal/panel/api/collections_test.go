@@ -68,6 +68,53 @@ func TestATunnelIsEditedWithoutForgettingTheRest(t *testing.T) {
 	}
 }
 
+// The MSS is the one setting of a tunnel that is written on both ends of the
+// path. The panel accepts the engine's own value (0) or a segment size a real
+// path can carry, and refuses the rest before it is stored — the engine does
+// not check it, and a number the kernel refuses would keep the tunnel down.
+func TestTheMaximumSegmentSizeIsValidatedAndStored(t *testing.T) {
+	panel, server := aServer(t)
+	cookie := aLogin(t, server)
+	panel.store.Links.Put("l1", &model.Link{ID: "l1", IranID: "i1", KharejID: "k1",
+		Status: "up", Transport: "ws", Ports: []string{}})
+
+	for _, c := range []struct {
+		body   string
+		status int
+		want   int
+	}{
+		{`{"mss": 1400}`, http.StatusOK, 1400},
+		{`{"mss": 0}`, http.StatusOK, 0},
+		{`{"mss": 535}`, http.StatusBadRequest, 0},
+		{`{"mss": 65496}`, http.StatusBadRequest, 0},
+		{`{"mss": -1}`, http.StatusBadRequest, 0},
+		{`{"mss": "1400"}`, http.StatusBadRequest, 0},
+	} {
+		status, _ := aGet(t, server, http.MethodPut, "/api/links/l1", c.body, cookie)
+		if status != c.status {
+			t.Errorf("the save of %s is %d, it must be %d", c.body, status, c.status)
+		}
+		if got := panel.store.Links.Get("l1").MSS; got != c.want {
+			t.Errorf("after %s the MSS is %d, it must be %d", c.body, got, c.want)
+		}
+	}
+
+	// the same rule holds when a tunnel is created
+	if status, _ := aGet(t, server, http.MethodPost, "/api/links",
+		`{"iran_id": "i1", "kharej_id": "k1", "mss": 100}`, cookie); status != http.StatusBadRequest {
+		t.Errorf("creating a tunnel with an MSS of 100 is %d, it must be 400", status)
+	}
+	status, answer := aGet(t, server, http.MethodPost, "/api/links",
+		`{"iran_id": "i1", "kharej_id": "k1", "mss": 1400}`, cookie)
+	if status != http.StatusOK {
+		t.Fatalf("creating a tunnel with an MSS of 1400 is %d, it must be 200", status)
+	}
+	link, _ := answer["link"].(map[string]any)
+	if mss, _ := link["mss"].(float64); mss != 1400 {
+		t.Errorf("the created tunnel answers mss %v, it must be 1400", link["mss"])
+	}
+}
+
 // The same for a domain: the ports of the drawer's picker, the group of
 // tunnels behind it, and the record itself — an edit of one of them keeps
 // the others, and never moves the record (the record moves with the switch

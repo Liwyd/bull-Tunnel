@@ -206,6 +206,7 @@ type Link struct {
 	Transport        string                    `json:"transport"`
 	Ports            []string                  `json:"ports"`
 	AcceptUDP        bool                      `json:"accept_udp"`
+	MSS              int                       `json:"mss"`
 	Label            string                    `json:"label"`
 	Priority         int                       `json:"priority"`
 	Managed          bool                      `json:"managed"`

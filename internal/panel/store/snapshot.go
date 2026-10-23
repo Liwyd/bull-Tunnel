@@ -81,7 +81,7 @@ func linkPublic(link *model.Link) map[string]any {
 	out := map[string]any{}
 	for _, key := range []string{
 		"iran_id", "kharej_id", "tunnel_port", "id", "probe_port", "token", "transport",
-		"ports", "accept_udp", "label", "priority", "managed", "iran_name", "kharej_name",
+		"ports", "accept_udp", "mss", "label", "priority", "managed", "iran_name", "kharej_name",
 		"iran_base", "kharej_base", "allowed", "pinned", "iran_unit", "kharej_unit",
 		"engine_transports", "built", "status", "latency_ms", "last_ok", "last_fail",
 		"last_change", "up_since", "fail_count", "flaps", "verified", "tests", "error", "history",
@@ -105,6 +105,8 @@ func linkPublic(link *model.Link) map[string]any {
 			out[key] = link.Ports
 		case "accept_udp":
 			out[key] = link.AcceptUDP
+		case "mss":
+			out[key] = link.MSS
 		case "label":
 			out[key] = link.Label
 		case "priority":

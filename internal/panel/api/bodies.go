@@ -37,6 +37,7 @@ func (s *Server) linkBody(link *model.Link) map[string]any {
 		"id": link.ID, "iran_id": link.IranID, "kharej_id": link.KharejID,
 		"tunnel_port": link.TunnelPort, "probe_port": link.ProbePort, "token": "",
 		"transport": link.Transport, "ports": link.Ports, "accept_udp": link.AcceptUDP,
+		"mss":   link.MSS,
 		"label": link.Label, "priority": link.Priority, "managed": link.Managed,
 		"pinned": link.Pinned, "allowed": link.Allowed, "status": link.Status,
 		"latency_ms": link.LatencyMS, "built": link.Built, "error": link.Error,

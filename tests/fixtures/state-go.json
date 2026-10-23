@@ -65,6 +65,7 @@
     "8443=2096"
    ],
    "accept_udp": false,
+   "mss": 0,
    "label": "",
    "priority": 100,
    "managed": true,

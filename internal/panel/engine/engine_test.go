@@ -70,6 +70,55 @@ func TestTheConfigurationIsValidTOML(t *testing.T) {
 	}
 }
 
+// TestTheMaximumSegmentSizeIsWrittenOnBothSides: the MSS is a setting of the
+// path, so the configuration of each end carries it. Zero writes nothing —
+// the engine's own value for a tunnel the panel built, and the value already
+// in the file of a tunnel it adopted.
+func TestTheMaximumSegmentSizeIsWrittenOnBothSides(t *testing.T) {
+	kharej, iran, link := mk()
+	link.MSS = 1400
+	server := sectionOf(t, RenderServer(link, "tcpmux", link.Ports, kharej), "server")
+	client := sectionOf(t, RenderClient(link, "tcpmux", iran), "client")
+	if value, _ := server.Get("mss"); value != int64(1400) {
+		t.Errorf("the MSS of the Iran side is %v, it must be 1400", value)
+	}
+	if value, _ := client.Get("mss"); value != int64(1400) {
+		t.Errorf("the MSS of the foreign side is %v, it must be 1400", value)
+	}
+
+	link.MSS = 0
+	server = sectionOf(t, RenderServer(link, "tcpmux", link.Ports, kharej), "server")
+	client = sectionOf(t, RenderClient(link, "tcpmux", iran), "client")
+	if _, there := server.Get("mss"); there {
+		t.Error("an MSS of 0 was written into the Iran configuration")
+	}
+	if _, there := client.Get("mss"); there {
+		t.Error("an MSS of 0 was written into the foreign configuration")
+	}
+
+	// a tunnel the panel adopted keeps the setting the file has, until the
+	// operator gives one of their own
+	link.IranBase = ordered(map[string]any{"mss": int64(1360)})
+	link.KharejBase = ordered(map[string]any{"mss": int64(1360)})
+	server = sectionOf(t, RenderServer(link, "tcpmux", link.Ports, kharej), "server")
+	client = sectionOf(t, RenderClient(link, "tcpmux", iran), "client")
+	if value, _ := server.Get("mss"); value != int64(1360) {
+		t.Errorf("the adopted MSS of the Iran side is %v, it must be kept", value)
+	}
+	if value, _ := client.Get("mss"); value != int64(1360) {
+		t.Errorf("the adopted MSS of the foreign side is %v, it must be kept", value)
+	}
+	link.MSS = 1280
+	server = sectionOf(t, RenderServer(link, "tcpmux", link.Ports, kharej), "server")
+	client = sectionOf(t, RenderClient(link, "tcpmux", iran), "client")
+	if value, _ := server.Get("mss"); value != int64(1280) {
+		t.Errorf("the MSS of the Iran side is %v, it must override the adopted 1360", value)
+	}
+	if value, _ := client.Get("mss"); value != int64(1280) {
+		t.Errorf("the MSS of the foreign side is %v, it must override the adopted 1360", value)
+	}
+}
+
 // TestAnAdoptedTunnelKeepsItsOwnSettings: a tunnel the panel found on a
 // server keeps the settings the panel does not manage.
 func TestAnAdoptedTunnelKeepsItsOwnSettings(t *testing.T) {

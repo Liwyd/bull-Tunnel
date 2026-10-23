@@ -54,6 +54,7 @@ bind_addr = "0.0.0.0:3080"     # the tunnel port: the port the far end dials
 transport = "tcpmux"           # the carrier, see below
 token = "6f1c…(32 hex chars)"  # shared secret: both ends must match
 accept_udp = false             # forward UDP as well as TCP
+mss = 1400                     # only when the path drops large packets
 log_level = "info"
 ports = [
   "127.0.0.1:61000=127.0.0.1:22",  # the health probe (loopback only)
@@ -67,6 +68,7 @@ ports = [
 remote_addr = "1.2.3.4:3080"    # where the tunnel port of the other side is
 transport = "tcpmux"
 token = "6f1c…(the same one)"
+mss = 1400                      # the same value as the server section
 connection_pool = 8
 log_level = "info"
 ```
@@ -86,12 +88,19 @@ log_level = "info"
 well. UDP cannot be probed with a TCP probe, so the panel marks such a
 tunnel as *not verified* and falls back to the socket table.
 
+`mss` clamps the TCP maximum segment size of the tunnel's connections. It is
+written on both ends, because it describes the path between them: set it when
+a tunnel connects and then stalls on the first large transfer, starting at
+1400 and going down to 1360 or 1280. `0`, or no line at all, leaves the
+engine's own value; the panel accepts 0 or a size between 536 and 65495.
+
 ### Keys the panel does not own
 
 When the panel rewrites a config it did not write itself, every key it does
 not manage is preserved (`mux_con`, `heartbeat`, …). The keys it does manage
-are `transport`, `token`, `ports`, `accept_udp`, `bind_addr`/`remote_addr`
-and the tunnel port. The engine ignores the keys it does not know.
+are `transport`, `token`, `ports`, `accept_udp`, `mss`,
+`bind_addr`/`remote_addr` and the tunnel port. The engine ignores the keys it
+does not know.
 
 ## Metrics file
 

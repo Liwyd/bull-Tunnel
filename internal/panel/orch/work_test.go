@@ -541,6 +541,43 @@ func TestTheTunnelIsRepaired(t *testing.T) {
 	}
 }
 
+// TestASettingIsAppliedOnBothSides: the MSS is one setting of a path, and
+// both configurations carry it. The panel deploys both sides, and a tunnel
+// that is already being worked on is left to that operation.
+func TestASettingIsAppliedOnBothSides(t *testing.T) {
+	w := newWorld(t)
+	w.link.MSS = 1400
+	w.store.Links.Put("l1", w.link)
+
+	if !w.orch.SettingsChanged(w.store.Links.Get("l1")) {
+		t.Fatal("the setting was not applied, it must be")
+	}
+	deployedBoth := false
+	for _, call := range w.driver.calls {
+		if call == "deploy:l1:tcpmux" {
+			deployedBoth = true
+		}
+	}
+	if !deployedBoth {
+		t.Errorf("the panel did not deploy both sides: %v", w.driver.calls)
+	}
+	if w.orch.Busy("l1") {
+		t.Error("the tunnel is still marked busy after the deployment")
+	}
+
+	// a tunnel in the middle of a build or a repair is not touched: the
+	// operation reads the setting when it writes the configuration
+	w.driver.calls = nil
+	w.orch.SetBusy("l1", true)
+	if w.orch.SettingsChanged(w.store.Links.Get("l1")) {
+		t.Error("a busy tunnel was deployed over, it must be left alone")
+	}
+	if len(w.driver.calls) != 0 {
+		t.Errorf("a busy tunnel was deployed: %v", w.driver.calls)
+	}
+	w.orch.SetBusy("l1", false)
+}
+
 // contains tells whether a text holds a piece of text.
 func contains(text string, piece string) bool {
 	return len(piece) == 0 || (len(text) >= len(piece) && indexOf(text, piece) >= 0)

@@ -1229,6 +1229,7 @@ already work ✓.
 | 53 | The README is written like a tool: nine sections in the order a new operator meets the program, no Roadmap of trophies, no migration story, and the secrets section says what is actually in the clear | done |
 | 54 | The 18MB of design mockups are deleted and nothing points at them; the one file of boilerplate is `CONTRIBUTING.md` | done |
 | 55 | The compression library Dependabot flagged is upgraded and `vendor/` is rebuilt | done |
+| 56 | A tunnel's maximum segment size (MSS) is a field, an API key, a config line on both ends and a line in the drawer | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design,
 the panel is Go and the dashboard is Go (phase 10 ✓).** What is left is
@@ -1295,8 +1296,9 @@ closed, the panel is Go from the first line, phases 0–10 ship in the
 status table above, `v1.3.0` is published, and the rolling release
 (`build-main`) is republished by CI after every green push and is the
 answer to `releases/latest` — so what a server installs never goes stale
-between tags. **Nothing under this heading is written yet:** phases 11
-and 12 are plans, and phase 13 is the list that never closes.
+between tags. Phase 11 is done except the releases-page cleanup, which is
+blocked on a machine with GitHub credentials; phase 12 has its first knob,
+the MSS (commit 56); phase 13 is the list that never closes.
 
 **First, confirm the tree is green** — these are the commands the CI
 runs, and they are the whole verification this project asks for:
@@ -1462,19 +1464,34 @@ what it did. Rewriting either would falsify a record.
 The boilerplate: one `CONTRIBUTING.md`, the five commands and the commit
 style. No templates, no code of conduct — no one has asked.
 
-### Phase 12 — the rest of the engine's potential  (plan — decided, not done)
+### Phase 12 — the rest of the engine's potential  (started — the MSS is done, the rest is planned)
 
 The rule for this phase: **only what the current base carries.** If it
 needs the model, the orchestrator or the config writer rebuilt, it is
 not worth it — these protocols are not important enough.
 
+**Done so far:**
+
+* ✅ **`mss`** (commit 56, broken-MTU paths). `model.Link.MSS` → the
+  `mss` key of the link body and of the API answer → `d.Set("mss", …)` in
+  both `serverSection` and `clientSection` when it is above zero → the
+  field and its hint in the drawer's settings box. The API takes 0 or
+  536–65495 and refuses the rest; a number the kernel refuses would leave
+  the tunnel down. 0 writes no line, so the engine keeps its own value and
+  an adopted tunnel keeps the one in its file. A change is applied to both
+  ends through `Orchestrator.SettingsChanged`; a tunnel that is busy is
+  left to its rebuild, which reads the saved value, and the event log says
+  so. Tests: the rendered TOML on both sides, the API round trip and its
+  validation, the drawer field, and the two-sided deployment. The state
+  fixtures, `docs/engine-schema.md` and the changelog carry the field.
+
 **In — panel-only, each one a field, a config line and a form line:**
 
-* the per-tunnel knobs, in the order they earn their place: `mss`
-  (broken-MTU paths), `heartbeat` (NAT keep-alive), `dial_timeout` /
-  `retry_interval`, then `bandwidth_mbps` / `max_connections`, then the
-  `kcp_*` / `mux_*` tuning. Recipe per knob: a field on `model.Link` →
-  the JSON key in `api/collections.go`'s link body → one `d.Set` in
+* the remaining per-tunnel knobs, in the order they earn their place:
+  `heartbeat` (NAT keep-alive), `dial_timeout` / `retry_interval`, then
+  `bandwidth_mbps` / `max_connections`, then the `kcp_*` / `mux_*`
+  tuning. Recipe per knob: a field on `model.Link` → the JSON key in
+  `api/collections.go`'s link body → one `d.Set` in
   `engine/render.go`'s `serverSection`/`clientSection` → a line in
   `web/forms.go`'s `linkForm` or the drawer's inline fields → assert
   the emitted config line the way `engine/driver_test.go` does.
@@ -1514,8 +1531,8 @@ how `accept_udp` happened.
 
 The bullets under *What is left to do, and is not a fault* above **are**
 this phase — the real-server trial, the two timing-sensitive tests, the
-two numbers the API never sends, the L3/direct tunnels, and now
-Dependabot. Read that list as the standing backlog: work it in order,
+two numbers the API never sends, and the L3/direct tunnels. Read that
+list as the standing backlog: work it in order,
 and add to it instead of starting a second one. Two more entries for
 it: the fixtures of `tests/contract/` may take their final name when
 the contract is complete (the note in phase 2), and any change to

@@ -83,6 +83,9 @@ func TestTheDrawerOfATunnelIsWorkedByGo(t *testing.T) {
 		`data-confirm="Remove the tunnel frankfurt ⇄ tehran from the panel? (the servers are left alone)"`,
 		`data-act="DELETE /api/links/l1?purge=1"`,
 		`data-field="accept_udp"`,
+		// the MSS of the path is one of the settings, with the engine's own
+		// value as the empty answer
+		`data-field="mss" data-num data-def="0" data-scale="1" type="number" min="0"`,
 	)
 	// the marks the script read by hand are gone with the builders
 	hasNone(t, body, `data-apply-transport`, `data-pick=`, `data-save-ports`,

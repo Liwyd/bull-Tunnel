@@ -233,6 +233,10 @@ func (s *Server) links(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "the request is not readable")
 			return
 		}
+		if !validMSS(body.MSS) {
+			writeError(w, http.StatusBadRequest, mssMessage)
+			return
+		}
 		link := body.model()
 		if link.IranID == "" || link.KharejID == "" {
 			writeError(w, http.StatusBadRequest, "the two servers of the tunnel are needed")
@@ -269,6 +273,13 @@ func (s *Server) linkByID(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "the request is not readable")
 			return
 		}
+		if value, there := body["mss"]; there {
+			number, ok := value.(float64)
+			if !ok || !validMSS(int(number)) {
+				writeError(w, http.StatusBadRequest, mssMessage)
+				return
+			}
+		}
 		// What the panel is given is written over the tunnel that is
 		// there, key by key — the way the Python panel's edit does. A
 		// tiny form in the drawer sends the one field it holds, and the
@@ -278,14 +289,21 @@ func (s *Server) linkByID(w http.ResponseWriter, r *http.Request) {
 		updated := link.Clone()
 		portsBefore := strings.Join(updated.Ports, ",")
 		udpBefore := updated.AcceptUDP
+		mssBefore := updated.MSS
 		setString(body, "label", &updated.Label)
 		setIntDefault(body, "priority", &updated.Priority, 100)
 		setStrings(body, "allowed", &updated.Allowed)
 		setList(body, "ports", &updated.Ports)
 		setBool(body, "accept_udp", &updated.AcceptUDP)
+		setInt(body, "mss", &updated.MSS)
 		setBool(body, "pinned", &updated.Pinned)
 		s.store.Links.Put(link.ID, updated)
-		if portsBefore != strings.Join(updated.Ports, ",") || udpBefore != updated.AcceptUDP {
+		switch {
+		case mssBefore != updated.MSS:
+			// the engine reads the MSS at start: both ends have to be
+			// written again, and the config of the far end carries it too
+			s.orch.SettingsChanged(updated)
+		case portsBefore != strings.Join(updated.Ports, ",") || udpBefore != updated.AcceptUDP:
 			s.orch.PortsChanged(updated)
 		}
 		s.orch.Changed()
@@ -355,6 +373,21 @@ func (s *Server) serverAction(w http.ResponseWriter, r *http.Request, server *mo
 	}
 }
 
+// The engine passes the MSS to the kernel as TCP_MAXSEG. Zero leaves the
+// kernel's own value; a real segment has to be at least the 536 bytes RFC 879
+// promises every IPv4 path can carry, and at most what two IPv4 headers leave
+// of a 64KB IP packet.
+const (
+	minMSS     = 536
+	maxMSS     = 65495
+	mssMessage = "the MSS must be 0 (the engine's own value) or between 536 and 65495"
+)
+
+// validMSS says whether a maximum segment size is one the engine can apply.
+func validMSS(mss int) bool {
+	return mss == 0 || (mss >= minMSS && mss <= maxMSS)
+}
+
 // linkBody is a tunnel as the panel sends and receives it.
 type linkBody struct {
 	ID         string   `json:"id"`
@@ -366,6 +399,7 @@ type linkBody struct {
 	Transport  string   `json:"transport"`
 	Ports      []string `json:"ports"`
 	AcceptUDP  bool     `json:"accept_udp"`
+	MSS        int      `json:"mss"`
 	Label      string   `json:"label"`
 	Priority   int      `json:"priority"`
 	Managed    bool     `json:"managed"`
@@ -385,6 +419,7 @@ func (b linkBody) model() *model.Link {
 		Transport:  b.Transport,
 		Ports:      b.Ports,
 		AcceptUDP:  b.AcceptUDP,
+		MSS:        b.MSS,
 		Label:      b.Label,
 		Priority:   b.Priority,
 		Managed:    b.Managed,

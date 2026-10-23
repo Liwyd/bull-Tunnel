@@ -645,6 +645,48 @@ func (o *Orchestrator) PortsChanged(link *model.Link) {
 		map[string]string{"link": link.ID})
 }
 
+// SettingsChanged applies a setting the engine reads when it starts. The
+// setting is part of both configurations — the MSS of the Iran side and the
+// MSS of the foreign side are the two ends of the same path — so both sides
+// are written again.
+//
+// A tunnel that is being built or repaired is left to that operation: it
+// reads the setting when it writes the configuration. The operator is told
+// that the save is waiting, rather than being told nothing.
+func (o *Orchestrator) SettingsChanged(link *model.Link) bool {
+	if link == nil {
+		return false
+	}
+	if o.Busy(link.ID) {
+		o.Emit("warning", "settings", fmt.Sprintf("the settings of %s were saved but not applied: the tunnel is being worked on; they are applied at its next rebuild", o.LinkLabel(link)), true,
+			map[string]string{"link": link.ID})
+		return false
+	}
+	work := o.copyLink(o.store.Links.Get(link.ID))
+	if work == nil || work.Status == model.StatusPending || work.Transport == "" || o.driver == nil {
+		return false
+	}
+	iran, kharej := o.Pair(work)
+	if iran == nil || kharej == nil {
+		return false
+	}
+	o.SetBusy(work.ID, true)
+	defer func() {
+		o.SetBusy(work.ID, false)
+		o.Changed()
+	}()
+	ports := []string{}
+	o.read(func() { ports = o.store.LinkPorts(work) })
+	if err := o.driver.Deploy(work, iran, kharej, work.Transport, ports); err != nil {
+		o.Emit("error", "deploy", fmt.Sprintf("applying the settings of %s failed: %v", o.LinkLabel(work), err), true,
+			map[string]string{"link": work.ID})
+		return false
+	}
+	o.Emit("info", "settings", fmt.Sprintf("the settings of %s are applied on both servers", o.LinkLabel(work)), true,
+		map[string]string{"link": work.ID})
+	return true
+}
+
 // RemoveLinks takes the tunnels off the servers.
 //
 // The servers may be given, because the panel can have forgotten them by

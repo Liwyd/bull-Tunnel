@@ -266,6 +266,7 @@ func (f *Facts) settingsBox(l *model.Link) string {
 	return fmt.Sprintf(`<div class="box"><h4>Settings</h4>
     <form>
     <div class="grid2">%s%s</div>
+    %s
     <label>The protocols the automatic repair of this tunnel tries</label>
     <div class="tchecks">%s</div>
     <div class="btns"><button class="btn sm" data-act="PUT /api/links/%s" data-done="Saved">Save</button>
@@ -273,6 +274,8 @@ func (f *Facts) settingsBox(l *model.Link) string {
     </form></div>`,
 		text("Display name", "label", l.Label, "", ""),
 		num("Priority among the tunnels of this pair", "priority", l.Priority, 100, 0, 1),
+		num("Maximum TCP segment size (MSS)", "mss", l.MSS, 0, 0, 1)+
+			hint("For a path that connects and then stalls on large transfers: try 1400, then 1360 or 1280. 0 leaves the engine's own value. The setting is written on both ends."),
 		strings.Join(boxes, ""), escape(l.ID), deleteButton)
 }
 

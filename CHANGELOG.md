@@ -7,6 +7,24 @@ only adds something.
 
 ## Unreleased
 
+### The maximum segment size of a tunnel
+
+Some paths connect and then stall on the first large transfer because they
+cannot carry full-sized packets. The engine has an `mss` clamp for that
+case, and the panel offers it now per tunnel, in the drawer's settings:
+
+- `model.Link` carries `mss`, the API sends and validates it, and the
+  renderer writes it into both the `[server]` and the `[client]` section.
+- `0` writes no line and leaves what the tunnel already has — the kernel's
+  own value for a tunnel the panel built, the value in its file for one it
+  adopted. The API accepts `0` or a size between 536 and 65495.
+- Changing it rewrites and restarts both ends, because the engine reads it
+  at start. A tunnel that is busy being built or repaired is left to that
+  operation, and the event log says the saved value waits for its next
+  rebuild.
+- The state file gains the field; the fixtures and `docs/engine-schema.md`
+  carry it.
+
 ### A high-severity vulnerability in a dependency
 
 Dependabot reported `github.com/klauspost/compress` ≤ v1.18.6

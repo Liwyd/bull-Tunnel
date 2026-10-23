@@ -148,6 +148,11 @@ func serverSection(link *model.Link, transport string, ports []string, kharej *m
 	d.Set("transport", transport)
 	d.Set("token", link.Token)
 	d.Set("accept_udp", link.AcceptUDP)
+	// Zero leaves what the engine already has: the kernel's own value for a
+	// tunnel the panel built, and the setting of a tunnel it adopted.
+	if link.MSS > 0 {
+		d.Set("mss", link.MSS)
+	}
 	if !d.Has("log_level") {
 		d.Set("log_level", "info")
 	}
@@ -180,6 +185,9 @@ func clientSection(link *model.Link, transport string, iran *model.Server) *mode
 	d.Set("remote_addr", fmt.Sprintf("%s:%d", host, link.TunnelPort))
 	d.Set("transport", transport)
 	d.Set("token", link.Token)
+	if link.MSS > 0 {
+		d.Set("mss", link.MSS)
+	}
 	if !d.Has("connection_pool") {
 		d.Set("connection_pool", 8)
 	}
