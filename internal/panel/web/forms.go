@@ -570,7 +570,7 @@ func (f *Facts) restoreForm(copies []backup.File) FormAnswer {
 	body.WriteString(`<h2>Restore a backup</h2>`)
 	body.WriteString(`<p class="note">Every server, tunnel, domain, DNS account and panel setting is replaced by the content of the backup. Nothing is changed <b>on the servers themselves or in the DNS records</b>; after the restore the panel checks everything again. The current state is backed up separately first.</p>`)
 	body.WriteString(one("Backup file (from Telegram or downloaded)",
-		`<input type="file" data-file accept=".tmbk,.gz,.json">`))
+		`<input type="file" data-file="data" accept=".tmbk,.gz,.json">`))
 	if len(copies) > 0 {
 		body.WriteString(`<label>Or one of the copies on this server</label><div class="opt-list">`)
 		for _, copy := range copies {

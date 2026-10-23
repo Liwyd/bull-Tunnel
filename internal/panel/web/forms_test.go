@@ -56,7 +56,7 @@ func TestTheRestoreFormListsTheCopies(t *testing.T) {
 			answer.Reload, answer.Done)
 	}
 	for _, want := range []string{`data-field="bk_name" value="panel-2026-10-20.tmbk"`,
-		`data-field="bk_name" value="nightly.tmbk.gz"`, "2.0 MB", "🔒", `data-file`,
+		`data-field="bk_name" value="nightly.tmbk.gz"`, "2.0 MB", "🔒", `data-file="data"`,
 		`data-field="password"`, `data-field="observe"`, `data-field="restore_login"`} {
 		if !strings.Contains(answer.HTML, want) {
 			t.Errorf("the form of the restore does not have %q in it", answer.HTML)

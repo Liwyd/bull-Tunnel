@@ -1076,7 +1076,7 @@ function put(body, key, value) {
 async function collectBody(f) {
   const body = {};
   for (const el of f.querySelectorAll("[data-field],[data-file]")) {
-    if (el.dataset.file) {  // a file he picked, as the API takes it
+    if ("file" in el.dataset) {  // a file he picked, as the API takes it
       if (el.files.length) put(body, el.dataset.file, await toBase64(el.files[0]));
       continue;
     }
@@ -1085,13 +1085,15 @@ async function collectBody(f) {
     // A mark comes without a value ("data-num"), and an attribute without a
     // value reads back as an empty string — so a mark read as truthy is not
     // there at all: the number would go out as the text on the page (minutes,
-    // not seconds) and a group of choices as the last switch of it. The mark
-    // of these two is looked for, not read.
+    // not seconds), a group of choices as the last switch of it, a field of
+    // several lines as one string the API refuses, and the file input (which
+    // has no key of its own) would be sent under a key that does not exist.
+    // The mark of these four is looked for, not read.
     if ("checks" in el.dataset) { if (el.checked) (body[key] = body[key] || []).push(el.value); continue; }
     let value;
     if (el.type === "checkbox") value = el.checked;
     else if ("num" in el.dataset) value = (el.value === "" ? +(el.dataset.def || 0) : +el.value) * (+(el.dataset.scale || 1));
-    else if (el.dataset.lines) value = lines(el.value);
+    else if ("lines" in el.dataset) value = lines(el.value);
     else value = el.value.trim() || el.dataset.else || "";
     put(body, key, value);
   }
