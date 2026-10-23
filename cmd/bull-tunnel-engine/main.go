@@ -1,14 +1,14 @@
 // Command bull-tunnel-engine is the tunnel engine of bull-Tunnel.
 //
-// The engine is BackPack's. Everything under internal/engine/ — config/, cmd/,
-// client/, server/, tunnel/, utils/ and the rest — is the BackPack engine
-// (github.com/AminMGMT/BackPack), vendored unchanged; only the import paths
-// were rewritten, so the copy can be re-synced with a plain rsync and never
-// drifts.
+// The engine is the vendored tunnel engine under internal/engine/ — an
+// AGPL-3.0 work whose origin and the credit the licence requires are written
+// in internal/engine/NOTICE. Everything under internal/engine/ — config/,
+// cmd/, client/, server/, tunnel/, utils/ and the rest — came from that
+// engine unchanged; only the import paths were rewritten, so the copy can be
+// re-synced with a plain rsync and never drifts.
 //
-// This file is the only bull-Tunnel addition at the top level. It gives the
-// engine the three extra entry points the control panel needs, and nothing
-// else:
+// This file is the only addition at the top level. It gives the engine the
+// three extra entry points the control panel needs, and nothing else:
 //
 //	bull-tunnel-engine -c /etc/bull-tunnel/<name>.toml    run one tunnel
 //	bull-tunnel-engine -c <name>.toml -check           only read and check the file
@@ -16,8 +16,8 @@
 //	bull-tunnel-engine probe -c <client>.toml          measure the path, one line per carrier
 //	bull-tunnel-engine agent -c <agent>.toml            the command channel
 //
-// The tunnel itself is BackPack's, unmodified: the same control channel, the
-// same carriers, the same pool, the same metrics file.
+// The tunnel itself is the engine's own, unmodified: the same control
+// channel, the same carriers, the same pool, the same metrics file.
 package main
 
 import (
@@ -37,9 +37,9 @@ import (
 	"github.com/Liwyd/bull-Tunnel/internal/engine/config"
 )
 
-// version is stamped at link time by build.sh. It falls back to
-// BackPack's own version, so a build without the stamp still says something
-// true.
+// version is stamped at link time by build.sh. It falls back to the
+// engine's own version constant, so a build without the stamp still says
+// something true.
 var version = ""
 
 // carriers are the reverse carriers this build speaks: the ones that carry
@@ -71,11 +71,6 @@ func Version() string {
 	return app.Version
 }
 
-// Attribution is the notice the licence of the engine asks to be visible
-// wherever the engine is used: it is the engine of BackPack, and the credit
-// for that belongs to its author.
-const Attribution = "Based on BackPack by Amin Mohammadi (AminMGMT) https://github.com/AminMGMT/BackPack"
-
 func main() {
 	// The two subcommands with flags of their own are handled before the
 	// flag package, which would stop at the subcommand and report the rest as
@@ -99,14 +94,16 @@ func main() {
 	switch {
 	case *showVer:
 		// Two lines, and the panel reads both: the version, then the
-		// carriers this build speaks.
+		// carriers this build speaks. Nothing else — the panel takes
+		// the transports from the second line and would not read a
+		// third one.
 		//
-		// The attribution follows them: the engine is licensed under the
-		// AGPL-3.0, whose Section 7 asks for the notice to stay visible to
-		// the users of the network service.
+		// The attribution the engine's licence requires is not printed
+		// here: the licence puts it in the NOTICE and in the README,
+		// and it must stay there (internal/panel/licence_test.go
+		// checks that it does).
 		fmt.Printf("bull-tunnel-engine %s\n", Version())
 		fmt.Printf("transports: %s\n", strings.Join(carriers, ","))
-		fmt.Println(Attribution)
 		return
 
 	case *configPath == "":
@@ -131,7 +128,7 @@ func runEngine(configPath string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	// BackPack's own engine loop: it loads the file, applies the defaults,
+	// The engine's own loop: it loads the file, applies the defaults,
 	// validates it, starts the transport and reloads it when the file
 	// changes. Nothing of it is re-implemented here.
 	cmd.Run(configPath, ctx)

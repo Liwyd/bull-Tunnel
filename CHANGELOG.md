@@ -30,6 +30,14 @@ said so.
   and the panel installs the engine from there — in the place of the one
   before it. The tagged releases are the versions an operator pins.
 - The copyright line of the licence and the notice names the author.
+- The origin of the inherited engine leaves the project's own words: the
+  README, the changelog, the docs, the comments, the installer and the
+  engine's version output no longer carry it. The attribution the
+  engine's AGPL-3.0 Section 7 requires stays where the licence puts it —
+  the engine's `NOTICE`, the engine's `README.md` and the README of the
+  distribution — and a test in `internal/panel/licence_test.go` holds it
+  there. The engine's `NOTICE` pointed at a `TRADEMARK.md` that did not
+  exist; it does now.
 
 ## 1.2.0 — 2026-10-22
 
@@ -411,8 +419,8 @@ with sharp ones.
 
 ### bull-Tunnel, and a management tool
 
-The project is **bull-Tunnel** now, and it has a **management command**
-the way BackPack has a menu: `bull-tunnel`, installed on the path by the
+The project is **bull-Tunnel** now, and it has a **management command**:
+`bull-tunnel`, installed on the path by the
 installer, opens a menu with everything an operator does day to day — the
 servers, the tunnels, the domains, the DNS accounts, the tunnel engine on
 the servers, the backups, the service, the log and the admin password.
@@ -445,11 +453,12 @@ while the service is stopped, and the data directory is never touched.
 ### The engine is bull-Tunnel's own
 
 The tunnel engine was a re-implementation written for this project. It is
-now the engine of [BackPack](https://github.com/AminMGMT/BackPack),
+now an established AGPL-3.0 tunnel engine,
 vendored under `engine/` with its module path kept as
-`github.com/backpack/backpack`, so the copy is byte-identical to upstream
-and can be re-synced with a plain `rsync`. See `engine/README.md` for what
-was taken, what was left behind and what was added.
+`github.com/backpack/backpack`, so the copy is byte-identical to the
+origin and can be re-synced with a plain `rsync`. See `engine/README.md` for what
+was taken, what was left behind and what was added. The origin and the
+attribution the licence requires are in the NOTICE.
 
 **The engine is this project's engine**: the panel builds it, ships it,
 versions it and installs it, and the tunnel it brings up is a bull-Tunnel
@@ -458,7 +467,7 @@ NOTICE, where the licence asks for it, and nowhere else in the product.
 
 ### The licences are split
 
-The control panel stays MIT. The engine is AGPL-3.0 — it is BackPack's
+The control panel stays MIT. The engine is AGPL-3.0 — inherited
 code — and it carries its own `LICENSE` and `NOTICE` under `engine/`, with
 the attribution the AGPL's Section 7 asks for, unaltered. The two are
 separate programs: the panel drives the engine over SSH and never links a
@@ -471,14 +480,15 @@ and the panel reads that from the server, so it never writes a
 configuration the engine would refuse — and never waits a full test
 timeout to find out.
 
-Two things are added on top of BackPack, and nothing else:
+Two things are added on top of the inherited engine, and nothing else:
 
 - **`bull-tunnel-engine probe`** measures the path between two servers, one
   line per carrier. It opens a carrier the way the tunnel's own client
   opens it and closes it again **without claiming the control channel**: a
   claim would make the server take the tunnel away from the client that
   is carrying the traffic. Measuring the path never disturbs a tunnel.
-- **`bull-tunnel-engine agent`** is the command channel, which BackPack does
+- **`bull-tunnel-engine agent`** is the command channel, which the inherited
+  engine does
   not have. Its signature is now the panel's, byte for byte, and the TXT
   record it writes is escaped the way Cloudflare wants it. Every command
   used to be refused with "not signed with the right token", because the

@@ -200,8 +200,8 @@ sudo bash deploy/install.sh
 
 ### The management tool
 
-The installer puts **`bull-tunnel`** on the path, the way BackPack's
-installer puts its menu there. It runs on the machine the panel runs on
+The installer puts **`bull-tunnel`** on the path. It runs on the machine the
+panel runs on
 and needs no password: the panel wrote a key for it, in a file only the
 owner of the machine can read, and the panel accepts that key only from
 this machine.
@@ -434,8 +434,9 @@ its metrics file.
 The tunnel engine is **bull-Tunnel's own engine**. It is one static binary
 (no Python, no pip, no dependency at all on the tunnel servers), built for
 amd64, arm64, 386 and armv7, and the panel builds it, ships it, versions it
-and installs it on the servers that carry the tunnels. It started as the
-engine of BackPack and it is that engine, unchanged; what this project added
+and installs it on the servers that carry the tunnels. It is an AGPL-3.0
+engine, inherited from an open-source project and vendored unchanged under
+`internal/engine/`; what this project added
 to it is written down in [internal/engine/README.md](internal/engine/README.md).
 
 The engine and the panel are one Go module — `github.com/Liwyd/bull-Tunnel` —
@@ -669,7 +670,7 @@ MIT licensed.
 
 The **tunnel engine** in the `internal/engine/` directory is licensed under the
 GNU Affero General Public License v3.0 (`internal/engine/LICENSE`,
-`internal/engine/NOTICE`). It started as the engine of BackPack, and the
+`internal/engine/NOTICE`). It is an inherited engine, and the
 credit for that belongs where the licence asks for it:
 
 ```
@@ -678,6 +679,7 @@ https://github.com/AminMGMT/BackPack
 ```
 
 The two are separate programs — the panel drives the engine over SSH and
-never links a package of it — so each keeps its own licence. The "BackPack"
-name and logo are marks of their owner; this project has its own name and
-its own logo.
+never links a package of it — so each keeps its own licence. The name and
+logo of the engine's originator are marks of their owner and are not
+licensed with this code (`internal/engine/TRADEMARK.md`); this project has
+its own name and its own logo.

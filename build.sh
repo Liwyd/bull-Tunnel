@@ -6,9 +6,10 @@
 #   bull-tunnel_linux_<arch>.tar.gz          the panel: the control plane
 #   SHA256SUMS                               the checksums of all of them
 #
-# The engine is the BackPack engine (github.com/AminMGMT/BackPack), vendored
-# under internal/engine/ and changed only in the way the import paths had to
-# change. The panel is written in Go as well (internal/panel/), and it is the
+# The engine is the AGPL-3.0 tunnel engine, vendored under internal/engine/
+# and changed only in the way the import paths had to change. Its origin and
+# the attribution the licence requires are in internal/engine/NOTICE. The
+# panel is written in Go as well (internal/panel/), and it is the
 # one that runs.
 #
 # The build is hermetic: the dependencies are vendored under vendor/, so no

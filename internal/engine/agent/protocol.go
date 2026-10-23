@@ -10,11 +10,12 @@
 // and every name it is given is checked against the files of the tunnel
 // directory: there is no shell anywhere in this package.
 //
-// This is a bull-Tunnel addition to the BackPack engine: BackPack has no
-// command channel. What it does share with BackPack is the rule that the two
-// ends of a protocol must agree on it byte for byte — the signature below is
-// the Python panel's, down to the last separator, and the test vector in
-// agent_test.go is the one both sides are checked against.
+// This is a bull-Tunnel addition to the vendored engine: the engine as it
+// was inherited has no command channel. What the addition does share with
+// the engine's own code is the rule that the two ends of a protocol must
+// agree on it byte for byte — the signature below is the Python panel's,
+// down to the last separator, and the test vector in agent_test.go is the
+// one both sides are checked against.
 package agent
 
 import (

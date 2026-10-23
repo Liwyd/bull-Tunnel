@@ -49,8 +49,8 @@ jobs:
           # The upstream test is timing sensitive: the QUIC transport closes
           # its socket in the background, so the port can still be held a
           # moment after Start returns. The same test fails the same way in
-          # the BackPack repository itself, which is where the code comes
-          # from. It is run a few times, and a run that passes is enough.
+          # the repository the engine's code comes from. It is run a few
+          # times, and a run that passes is enough.
           for i in 1 2 3 4 5; do
             if go test -count=1 -run 'TestStartDoesNotReturnUntilThePortsAreFree' ./internal/engine/server/; then
               exit 0

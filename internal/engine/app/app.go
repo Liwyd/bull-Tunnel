@@ -9,16 +9,15 @@ import (
 )
 
 const (
-	// Version of the backpack engine.
+	// Version of the engine as it was inherited.
 	Version = "v1.9.0"
 
-	// RepoOwner/RepoName identify the GitHub repository used by the installer
-	// and the release-based updater.
-	RepoOwner = "AminMGMT"
-	RepoName  = "BackPack"
-
-	// SourceURL is where the source lives, printed with the version.
-	SourceURL = "https://github.com/" + RepoOwner + "/" + RepoName
+	// The updater constants that named the origin repository (RepoOwner,
+	// RepoName, SourceURL) are not here: they had no caller in this tree —
+	// the updater they served was not vendored — and they named a
+	// repository that is not this project's. A re-sync with the upstream
+	// copy brings them back; they are deleted again then. See the "Left
+	// behind" list in README.md in this directory.
 
 	// InstallDir is where the release bundle lives on the VPS.
 	InstallDir = "/root/BackPack"

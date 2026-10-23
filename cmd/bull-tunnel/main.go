@@ -6,7 +6,7 @@
 // the machine can read, and the panel accepts that key only from this
 // machine.
 //
-// Run it without an argument and it opens a menu, the way BackPack's does:
+// Run it without an argument and it opens a menu:
 //
 //	bull-tunnel                 the menu
 //	bull-tunnel status          the state of the panel in one screen

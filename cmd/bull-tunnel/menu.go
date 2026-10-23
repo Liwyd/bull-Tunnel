@@ -13,7 +13,7 @@ type menuItem struct {
 	Do    func(*Panel, []string) (int, error)
 }
 
-// menuItems are what the menu offers, the way BackPack's does.
+// menuItems are what the menu offers.
 var menuItems = []menuItem{
 	{"Status", "the state of the panel in one screen", cmdStatus},
 	{"Servers", "the servers the panel manages", cmdServers},

@@ -86,10 +86,10 @@ func (d *Driver) PutFile(s *model.Server, path string, data []byte, mode os.File
 // build speaks. The panel reads both, and never tests a carrier the engine
 // does not have.
 //
-// An engine that prints something else — an older BackPack build, which
-// printed its source address on the second line — is not believed: the
-// carriers are taken from the line that names them, and only the names the
-// panel knows are kept.
+// An engine that prints something else — an older build of the engine the
+// code was vendored from, which printed its source address on the second
+// line — is not believed: the carriers are taken from the line that names
+// them, and only the names the panel knows are kept.
 func (d *Driver) InstalledVersion(s *model.Server) (string, string, []string, error) {
 	_, out, _, err := d.Run(s, fmt.Sprintf("uname -m; test -x %s && %s -v 2>/dev/null | head -n2 || echo MISSING", d.binPath, d.binPath), 20*time.Second)
 	if err != nil {

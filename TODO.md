@@ -15,9 +15,9 @@ no step is taken "from memory".
 2. **Every change needs a test.** A bug fix without a regression test is not
    finished. The test must fail before the fix and pass after it.
 3. **The engine is this project's engine.** The tunnel engine is the
-   BackPack engine (`github.com/AminMGMT/BackPack`, vendored under
-   `internal/engine/`), and it stays the same code: anything in
-   `internal/engine/` that is *not* BackPack must be either removed or
+   AGPL-3.0 engine vendored under
+   `internal/engine/`, and it stays the same code: anything in
+   `internal/engine/` that is *not* part of the vendored engine must be either removed or
    reduced to the smallest possible
    addition with a clear reason written next to it. The panel side is what
    may be redesigned. The credit for the design and the code it started
@@ -41,9 +41,10 @@ no step is taken "from memory".
 10. **Update this file in the same commit as the change.** A commit that does
     not update this file is incomplete.
 11. **The licences are not negotiable.** The `internal/engine/` tree is
-    AGPL-3.0 (it is BackPack's code) and the panel is MIT. The attribution
+    AGPL-3.0 (inherited code) and the panel is MIT. The attribution
     the AGPL's
-    Section 7 asks for stays in the NOTICE and in the README, unaltered,
+    Section 7 asks for stays in the NOTICE, in the engine's README and in
+    the README of the distribution, unaltered,
     and **the Go panel never imports a package of the engine**, so that the
     two stay separate works. See "The plan: the whole panel in Go" below.
 
@@ -55,16 +56,16 @@ The audit of the whole system (Python panel, Go engine, front-end, deploy
 scripts) produced 53 findings. They are grouped here by the commit that fixes
 them.
 
-### A. The engine is not BackPack (critical)
+### A. The engine is not the real engine (critical)
 
 | # | Finding |
 |---|---|
 | 1 | `bulltunnel/engine/` is a hand-written re-implementation of the tunnel engine. It supports only `tcp, tcpmux, ws, wsmux, wss, wssmux, stealth` while the panel offers `kcp` and `quic` too (`bulltunnel/models.py:28`). Every discovery therefore burns two full test timeouts on protocols the engine refuses (`engine/internal/config/config.go:200`). |
 | 2 | The command channel can never work: the panel signs `id\|action\|\|ts` for an empty argument list, the Go agent signs `id\|action\|{}\|ts` (`bulltunnel/cmdchannel.py:51` vs `engine/internal/agent/protocol.go:45`). Every command is refused. |
 | 3 | The Go agent writes the TXT record without escaping the quotes of the JSON command (`engine/internal/agent/publisher.go:83`); Cloudflare rejects it. |
-| 4 | The hand-written engine's session/carrier layer is a simplified copy of BackPack's (no KCP, no QUIC, no smux, no Noise record layer, no control channel, no pool). It is not the engine the project is supposed to ship. |
+| 4 | The hand-written engine's session/carrier layer is a simplified copy of the engine's (no KCP, no QUIC, no smux, no Noise record layer, no control channel, no pool). It is not the engine the project is supposed to ship. |
 
-**Fix (commit 2):** replace `engine/` with the real BackPack engine.
+**Fix (commit 2):** replace `engine/` with the real, vendored AGPL-3.0 engine.
 
 ### B. Critical panel bugs
 
@@ -142,12 +143,12 @@ them.
 ### Commit 1 — this file
 `TODO.md`: the audit, the standing rules and the commit plan.
 
-### Commit 2 — the engine is BackPack  ✅ done
+### Commit 2 — the engine is the vendored one  ✅ done
 
 * ✅ The hand-written engine is gone (`internal/proto`, `internal/carrier`,
   `internal/tunnel`, `internal/config`, `internal/probe`, `internal/metrics`,
   `internal/agent`).
-* ✅ BackPack's engine is vendored into `engine/`: `cmd/`, `config/`,
+* ✅ The AGPL-3.0 engine is vendored into `engine/`: `cmd/`, `config/`,
   `internal/client`, `internal/server`, `internal/tunnel/*`,
   `internal/utils/*`, `internal/metrics`, `internal/controlwire`,
   `internal/enginectl`, `internal/optimize`, `internal/quota`,
@@ -295,8 +296,8 @@ Findings 36 to 48.
   the directories are `/opt/bull-tunnel`, `/var/lib/bull-tunnel` and
   `/etc/bull-tunnel`, and the release assets are
   `bull-tunnel-engine_linux_<arch>.tar.gz`.
-* ✅ **`bull-tunnel`**: the management command, the way BackPack has a
-  menu. It runs on the machine the panel runs on and needs no password:
+* ✅ **`bull-tunnel`**: the management command, a numbered menu.
+  It runs on the machine the panel runs on and needs no password:
   the panel writes a key for it, in a file only the owner of the machine
   can read, and the panel accepts that key only from this machine.
 * ✅ The installer puts the command on the path, opens it at the end of
@@ -395,7 +396,7 @@ package of the engine.
 
 ### Why "contract, not linking" — the licence
 
-The engine is AGPL-3.0 (it is BackPack's code, vendored) and the panel is
+The engine is AGPL-3.0 (inherited code, vendored) and the panel is
 MIT. Those can live in the same repository, and stay that way, **as long as
 the panel does not link the engine**:
 
@@ -414,7 +415,7 @@ Two things follow, and they are not optional:
 * the engine's tree carries **its own `LICENSE` (AGPL-3.0) and `NOTICE`**,
   and the root carries the panel's MIT licence; the README says which is
   which;
-* the AGPL's Section 7 (as BackPack's NOTICE puts it) requires this line,
+* the AGPL's Section 7 (as the engine's NOTICE puts it) requires this line,
   unaltered, in the NOTICE **and** in the README:
 
   ```
@@ -422,7 +423,7 @@ Two things follow, and they are not optional:
   https://github.com/AminMGMT/BackPack
   ```
 
-  and the "BackPack" name and logo are trademarks: the project already has
+  and the name and logo behind that line are trademarks: the project has
   its own name and its own logo, which is what the clause asks for.
 
 ### The rules of the rewrite
@@ -456,8 +457,15 @@ Two things follow, and they are not optional:
   engine is **bull-Tunnel's own** ✓, the credit is in the NOTICE ✓.
 * ✅ `internal/engine/README.md`: what the tree is, where it came from, that it is
   AGPL-3.0 ✓, and that it is this project's engine ✓.
-* ✅ The engine's `-v` prints the attribution line ✓ (the AGPL asks for the
-  notice to be visible to the users of the network service ✓).
+* ✅ The engine's own `LICENSE` (AGPL-3.0) and `NOTICE` are in its
+  directory ✓, the root `LICENSE` is the panel's MIT licence and says in one
+  line that `internal/engine/` is AGPL-3.0 ✓, the README carries the
+  attribution line the licence requires ✓ and says which part is which ✓,
+  and the engine is introduced as this project's engine ✓.
+* ✅ The attribution is where the engine's licence puts it: the engine's
+  `NOTICE`, the engine's `README.md` and the README of the distribution ✓.
+  (It used to be printed by the engine's `-v` as well; that print is gone
+  in commit 52 — the licence names the notices, not a command's output.)
 
 **Done when:** `grep -r "Based on BackPack by Amin Mohammadi (AminMGMT)" `
 finds the line in `NOTICE` and in `README.md` ✓, `internal/engine/LICENSE` is the
@@ -471,7 +479,7 @@ introduces the engine as somebody else's ✓.
   came to the root with them, so the build still needs no network ✓.
 * ✅ The engine's tree moved from `engine/` to `internal/engine/`, and every
   import path was rewritten with it (a mechanical `sed` over the tree ✓, the
-  vendor directory excepted ✓). BackPack's own `internal/` is one level
+  vendor directory excepted ✓). The upstream engine's own `internal/` is one level
   deeper now — its packages are `internal/engine/<name>` — because Go keeps
   the packages of an `internal` directory to the tree they belong to, and
   the engine's binary lives outside that tree.
@@ -736,8 +744,8 @@ The CI ran the upstream test that asks that the UDP server's port be free
 the moment `Start` returns — three times, in a row. The test is timing
 sensitive: the QUIC transport closes its socket in the background, so the
 port can still be held a moment after `Start` returns, and the test fails
-once in a while. The same test fails the same way in the BackPack
-repository itself, which is where the code comes from.
+once in a while. The same test fails the same way in the repository the
+code comes from, which is where it was written.
 
 * ✅ The CI runs it up to five times ✓, and a run that passes is enough ✓.
   The reason is written next to it ✓, so nobody has to find out again why
@@ -1167,7 +1175,7 @@ already work ✓.
 | Commit | What | State |
 |---|---|---|
 | 1 | `TODO.md` | done |
-| 2 | The engine is BackPack | done |
+| 2 | The engine is the vendored one | done |
 | 3 | The critical panel bugs | done |
 | 4 | The medium panel bugs | done |
 | 5 | The front-end | done |
@@ -1217,6 +1225,7 @@ already work ✓.
 | 49 | The JavaScript that drew the drawer is gone | done |
 | 50 | The installation checks itself | done |
 | 51 | The TODO says where the project stands and what is planned | done |
+| 52 | One name — the fork's origin leaves the project's words; the attribution stays where the engine's licence puts it, and the notice points at a `TRADEMARK.md` that exists | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design,
 the panel is Go and the dashboard is Go (phase 10 ✓).** What is left is
@@ -1250,7 +1259,7 @@ plan below: read **section 4** to continue from here.
   for them.
 * **Two upstream tests are timing sensitive** and fail from time to time
   under the race detector — the same tests fail the same way in the
-  BackPack repository itself, which is where the code comes from. The CI
+  repository the code comes from. The CI
   skips them there and runs them on their own, without the detector.
 * **The test job of the CI failed on the runner for a while** — and the
   fault was in a test of this repository, not in the panel: the test of the
@@ -1300,50 +1309,65 @@ tunnel with another carrier, and serves one dashboard over a live
 websocket. The engine is the data plane: versioned, shipped and updated
 by the panel from its own releases page.
 
-### Phase 11 — the repository is a product  (plan — none of it is done)
+### Phase 11 — the repository is a product  (11.1 done in commit 52; 11.2, 11.3 and 11.4 still ahead)
 
-**11.1 One name — the fork's origin disappears.** The engine started as
-a fork of another open-source project, and the repository must not carry
-its name anymore. Grep `BackPack` and `AminMGMT` and you have the whole
-list; today it is:
+**11.1 One name — the fork's origin disappears.** ✅ done (commit 52),
+with **one correction to the plan as written here**, found by reading the
+engine's own `NOTICE` before touching anything:
 
-* `README.md` and `internal/engine/README.md` — the attribution blocks
-  at the end;
-* `NOTICE` — the paragraph that names the origin (the licence statements
-  *around* it are a different matter, 11.2);
-* `CHANGELOG.md` — one historical line;
-* `cmd/bull-tunnel-engine/main.go` — `const Attribution`, printed by the
-  version output (grep the engine's tests for the string too);
-* `internal/engine/app/app.go` — `RepoOwner`/`RepoName`: dead code
-  (`SourceURL` has no callers anywhere) — delete the unused updater
-  constants or repoint them at `Liwyd/bull-Tunnel`;
-* this file — the audit and the history sections name it; rewrite them
-  in the project's own words.
+> The engine's `NOTICE` carries Section 7 additional terms, and clause
+> (1) ATTRIBUTION requires the line
+> `Based on BackPack by Amin Mohammadi (AminMGMT) / https://github.com/AminMGMT/BackPack`
+> to be kept **visible and unaltered in: "this NOTICE file, and the README
+> of your distribution."** Option (a) as drafted above said the name
+> leaves the README too — taking that literally would breach the very
+> term the plan said to keep unaltered. So option (a) was executed as:
+> the name leaves everything a user reads *except* the three places the
+> licence names — `internal/engine/NOTICE`, `internal/engine/README.md`
+> and the Licences section of the root `README.md`, where the
+> attribution line stays byte-for-byte. The root `NOTICE` was rewritten
+> in the project's own words and points at those three files.
 
-**The licence is the one decision to make before any text is written.**
-The engine directory is under AGPL-3.0 (`internal/engine/LICENSE`), and
-AGPL section 7 requires that the notices of the original work stay with
-the code. Deleting them without permission makes the fork non-compliant.
-Pick one, consciously:
+What was done in commit 52:
 
-* **(a) rebrand, keep the floor — recommended now.** The name leaves
-  everything a user reads (README, docs, UI strings, `-v` output,
-  changelog, this file); only `internal/engine/LICENSE` and
-  `internal/engine/NOTICE` keep the notice the licence requires, with
-  one honest line in the root NOTICE saying the engine directory is
-  AGPL-3.0 and the panel is MIT. This ships without asking anyone.
-* **(b) ask, then unify.** Write to the upstream author (the GitHub
-  account in the list above), in writing, to drop the attribution
+* `cmd/bull-tunnel-engine/main.go` — `const Attribution` is gone, and
+  with it the third line of the `-v` output (the panel reads two lines,
+  `head -n2`, so nothing breaks; the licence names notices, not a
+  command's output). Header comments reworded in the project's own
+  words.
+* `internal/engine/app/app.go` — the dead updater constants
+  `RepoOwner`/`RepoName`/`SourceURL` deleted (`SourceURL` had no
+  callers); a comment records why and that a re-sync brings them back.
+* `internal/engine/TRADEMARK.md` — **created.** The engine's `NOTICE`
+  clause (2) referenced it ("See TRADEMARK.md for the detail") and the
+  file did not exist: a dangling notice reference, now fixed.
+* `NOTICE` (root) — rewritten: the attribution paragraph moves out, one
+  honest line says which licence covers what and points at the engine's
+  own `NOTICE`/`README`/`TRADEMARK.md`.
+* `README.md`, `CHANGELOG.md`, `docs/engine-schema.md`, `build.sh`,
+  `.github/workflows/ci.yml`, `deploy/install.sh`,
+  `cmd/bull-tunnel/main.go`, `cmd/bull-tunnel/menu.go`,
+  `internal/panel/engine/driver.go`,
+  `internal/engine/agent/protocol.go` — prose and comments reworded in
+  the project's own words; the attribution blocks in the READMEs stay.
+* this file — the audit and history sections rewritten in the project's
+  own words.
+* a test: `internal/panel/licence_test.go` asserts the attribution line
+  is present and unaltered where the engine's `NOTICE` requires it, that
+  the engine tree is still AGPL-3.0 and the panel still MIT, and that
+  the name no longer appears anywhere else in the tracked tree.
+
+The remaining options stand, if anyone ever wants the last line gone:
+
+* **(b) ask, then unify.** Write to the upstream author (GitHub account
+  named in the attribution line), in writing, to drop the attribution
   requirement and/or relicense the fork under MIT. Permission granted →
   delete the last notices, put the whole repository under one licence,
-  and reduce NOTICE to the copyright line. Then add the test this
-  change deserves, in the spirit of `version_test.go`: the README, the
-  NOTICE and the licence files must not disagree about which licence
-  covers what.
+  reduce `NOTICE` to the copyright line, and delete the test's
+  attribution clause.
 * **(c) unify on AGPL-3.0 now.** One licence, no permission needed —
   but every user of the panel inherits AGPL's obligations. A real
-  change in what the project is; choose it only if (a)'s split feels
-  wrong.
+  change in what the project is.
 
 **11.2 The README, written like a tool, not like a pitch.** The current
 README carries the rewrite story and the history; a user needs: what it

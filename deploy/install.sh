@@ -120,7 +120,7 @@ if [ -d "$STAGE/static" ]; then mv "$STAGE/static" "$DEST/static"; fi
 rmdir "$STAGE" 2>/dev/null || true
 
 say "the management command"
-# The command is put where every shell finds it, the way BackPack's is: the
+# The command is put where every shell finds it: the
 # operator runs "bull-tunnel" and the menu opens.
 ln -sf "$DEST/bin/bull-tunnel" /usr/local/bin/bull-tunnel
 echo "bull-tunnel -> $DEST/bin/bull-tunnel"
@@ -172,7 +172,7 @@ fi
 echo "  the management tool:  bull-tunnel"
 echo "  logs: journalctl -u bull-tunnel -f"
 
-# Open the menu straight away, the way BackPack's installer does: people
+# Open the menu straight away: people
 # miss the "now run bull-tunnel" step. Only on a terminal, and only when the
 # panel answers.
 if [ -t 0 ] && [ -t 1 ] && [ "${BT_NO_MENU:-0}" != 1 ]; then
