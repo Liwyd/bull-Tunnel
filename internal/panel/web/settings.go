@@ -5,49 +5,34 @@ import (
 	"strings"
 )
 
-/* The page of the settings. The form goes through the API already: every
-   field is marked with the name it is saved under, and the script collects
-   the fields and saves them — so this is the shape of the form, and the
-   panel decides what is in it. */
+/* The page of the settings. The fields are the fields of the settings form
+   in the modal: the same keys, the same marks — so the script collects what
+   he wrote with one collector and saves it through the API already. This is
+   the shape of the form, and the panel decides what is in it. */
 
 // settings is the page of the settings: five sections, and the index of
 // them on the left.
 func (f *Facts) settings(parts Parts) {
 	s := f.State.Settings
-	tg := map[string]any{}
-	if s.Telegram != nil {
-		tg = s.Telegram
-	}
-	tgOn := false
-	if value, ok := tg["enabled"].(bool); ok {
-		tgOn = value
-	}
+	tgOn := s.TG().Enabled
 
 	section := func(number, title, kicker, body string) string {
 		return fmt.Sprintf(`<div class="section" id="set-%s">
     <header><span class="n">%s</span><h3>%s</h3><span class="k">%s</span></header>
     <div class="modal-body">%s</div></div>`, number, number, title, kicker, body)
 	}
-	checkBox := func(field, label string, on bool) string {
-		return fmt.Sprintf(`<label class="check"><input type="checkbox" data-set="%s"%s> <span>%s</span></label>`,
-			field, boolAttr(on), label)
-	}
-	number := func(field, label string, value, min int) string {
-		return fmt.Sprintf(`<label>%s<input data-set="%s" type="number" min="%d" value="%d"></label>`, label, field, min, value)
-	}
-	minutes := func(field, label string, seconds, min int) string {
-		return fmt.Sprintf(`<label>%s<input data-set="%s" type="number" min="%d" value="%d"></label>`, label, field, min, seconds/60)
-	}
 	openSettings := `<div class="btns"><button class="btn sm" data-open-settings>` + iconEdit + ` Open the full settings</button></div>`
 
-	// the carriers: the ones that are tested first, then the rest
+	// the carriers: the ones that are tested first, then the rest. The
+	// group is marked the way the settings form marks it, so the collector
+	// reads both the same way.
 	checked := map[string]bool{}
 	for _, transport := range s.CandidateTransports {
 		checked[transport] = true
 	}
 	carriers := []string{}
 	for _, transport := range f.carriers() {
-		carriers = append(carriers, fmt.Sprintf(`<label><input type="checkbox" data-set-tr value="%s"%s>%s</label>`,
+		carriers = append(carriers, fmt.Sprintf(`<label><input type="checkbox" data-field="candidate_transports" data-checks value="%s"%s>%s</label>`,
 			escape(transport), boolAttr(checked[transport]), escape(transport)))
 	}
 
@@ -71,51 +56,53 @@ func (f *Facts) settings(parts Parts) {
 	}
 
 	body := section("01", "Operating mode", "OBSERVE / MUTATE",
-		checkBox("observe_only", `<b>Observe mode</b>: only check and report; no DNS record, config or service is changed automatically`, s.ObserveOnly)+
+		checkConfirm("observe_only", s.ObserveOnly,
+			`<b>Observe mode</b>: only check and report; no DNS record, config or service is changed automatically`,
+			"Turn observe mode off? From now on the panel changes the DNS record itself when something fails.",
+			"Turn observe mode off? From now on the panel changes the DNS record itself when something fails and rebuilds the broken tunnels with another protocol.",
+			"auto_repair")+
 			`<p class="hint">In this mode, everywhere the panel would have done something, it only says in the events and on Telegram what it would have done. What you do by hand in the panel is still carried out.</p>`+
 			openSettings)
 
 	body += section("02", "Monitor and recover", "MONITOR / RECOVER",
 		`<div class="grid2">`+
-			number("check_interval", "Check interval (seconds)", s.CheckInterval, 10)+
-			number("fail_threshold", "Errors in a row that count as “down”", s.FailThreshold, 1)+
+			num("Check interval (seconds)", "check_interval", s.CheckInterval, s.CheckInterval, 10, 1)+
+			num("Errors in a row that count as “down”", "fail_threshold", s.FailThreshold, s.FailThreshold, 1, 1)+
 			`</div><div class="grid2">`+
-			minutes("failback_after", "Fail back after (minutes)", s.FailbackAfter, 1)+
-			number("test_timeout", "Timeout of each protocol in the test (seconds)", s.TestTimeout, 5)+
+			num("Fail back after (minutes)", "failback_after", s.FailbackAfter, s.FailbackAfter, 1, 60)+
+			num("Timeout of each protocol in the test (seconds)", "test_timeout", s.TestTimeout, s.TestTimeout, 5, 1)+
 			`</div><div class="grid2">`+
-			number("flap_count", "“Unstable” = how many drops", s.FlapCount, 2)+
-			minutes("flap_window", "In how many minutes", s.FlapWindow, 1)+
+			num("“Unstable” = how many drops", "flap_count", s.FlapCount, s.FlapCount, 2, 1)+
+			num("In how many minutes", "flap_window", s.FlapWindow, s.FlapWindow, 1, 60)+
 			`</div>`+
-			checkBox("auto_repair", "Rebuild the broken tunnels automatically with other protocols", s.AutoRepair)+
+			check("auto_repair", s.AutoRepair, "Rebuild the broken tunnels automatically with other protocols")+
 			`<span class="label">Protocols that are tested</span>`+
 			`<div class="tchecks">`+strings.Join(carriers, "")+`</div>`)
 
 	body += section("03", "Discovery and engine", "DISCOVERY / ENGINE",
-		checkBox("auto_adopt", "Find and add the existing tunnels on the servers automatically", s.AutoAdopt)+
-			checkBox("auto_mesh", "Suggest a tunnel for every Iran/foreign pair that has none", s.AutoMesh)+
+		check("auto_adopt", s.AutoAdopt, "Find and add the existing tunnels on the servers automatically")+
+			check("auto_mesh", s.AutoMesh, "Suggest a tunnel for every Iran/foreign pair that has none")+
 			`<div class="grid2">`+
-			minutes("scan_interval", "How often to look for tunnels (minutes)", s.ScanInterval, 1)+
-			`<label>Tunnel engine version<input data-set="engine_release" class="mono" value="`+escape(s.EngineRelease)+
-			`" placeholder="latest"></label>`+
+			num("How often to look for tunnels (minutes)", "scan_interval", s.ScanInterval, s.ScanInterval, 1, 60)+
+			text("Tunnel engine version", "engine_release", s.EngineRelease, "latest", ` class="mono" data-else="latest"`)+
 			`</div>`+
-			`<label>Tunnel engine source URL<input data-set="engine_source" class="mono" value="`+escape(s.EngineSource)+
-			`" placeholder="https://github.com/Liwyd/bull-Tunnel/releases"></label>`+
+			mono("Tunnel engine source URL", "engine_source", s.EngineSource, "https://github.com/Liwyd/bull-Tunnel/releases", "")+
 			`<div class="grid2">`+
-			number("tunnel_port_base", "First tunnel port", s.TunnelPortBase, 0)+
-			number("probe_port_base", "First probe port (local)", s.ProbePortBase, 0)+
+			num("First tunnel port", "tunnel_port_base", s.TunnelPortBase, s.TunnelPortBase, 0, 1)+
+			num("First probe port (local)", "probe_port_base", s.ProbePortBase, s.ProbePortBase, 0, 1)+
 			`</div>`+
-			checkBox("install_engine", "Install the tunnel engine automatically on the servers that do not have it", s.InstallEngine))
+			check("install_engine", s.InstallEngine, "Install the tunnel engine automatically on the servers that do not have it"))
 
 	body += section("04", "DNS accounts", "PROVIDERS",
 		`<div class="opt-list">`+accountsBody+`</div>`+
 			`<div class="btns"><button class="btn sm" data-add="provider">`+iconAdd+` Add a DNS account</button></div>`)
 
 	body += section("05", "Reporting and backups", "TELEGRAM / BACKUP",
-		checkBox("tg_enabled", "Send every event to Telegram", tgOn)+
-			checkBox("backup_enabled", "Send a full backup to Telegram every night", s.BackupEnabled)+
+		check("telegram.enabled", tgOn, "Send every event to Telegram")+
+			check("backup_enabled", s.BackupEnabled, "Send a full backup to Telegram every night")+
 			`<div class="grid2">`+
-			`<label>Backup time<input data-set="backup_time" class="mono" value="`+escape(s.BackupTime)+`" placeholder="03:00"></label>`+
-			`<label>Backup time zone<input data-set="backup_tz" class="mono" value="`+escape(s.BackupTZ)+`" placeholder="Asia/Tehran"></label>`+
+			mono("Backup time", "backup_time", s.BackupTime, "03:00", "")+
+			mono("Backup time zone", "backup_tz", s.BackupTZ, "Asia/Tehran", ` data-else="Asia/Tehran"`)+
 			`</div>`+openSettings)
 
 	parts["set-body"] = body

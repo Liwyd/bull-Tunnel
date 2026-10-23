@@ -43,7 +43,7 @@ let selectedDomain = "";   // the domain open on the domains page
 let selNode = null;        // the node picked in the flow graph
 let selLink = null;        // the tunnel picked in the flow graph
 let signedInAs = "admin";  // the name of the account, from the session
-let settingsSave = null;   // the settings being saved, so two saves do not race
+let settingsTimer = null;   // the pending save of the settings page, so a burst of changes sends one request
 let lastSubmit = Promise.resolve();  // the last form submit, for what follows it
 
 /* ------------------------------------------------------------------ api */
@@ -762,47 +762,22 @@ function linkTip(l) {
 /* ============================================================== domains */
 /* ========================================================= infrastructure */
 /* ============================================================== settings */
-/* save the quick settings of the settings page */
-async function saveQuickSettings() {
-  const s = S.settings;
-  const get = (k) => $(`[data-set="${k}"]`);
-  const observe = !!get("observe_only").checked;
-  if (s.observe_only && !observe && !confirm("Turn observe mode off? From now on the panel changes the DNS record itself when something fails"
-    + (get("auto_repair").checked ? " and rebuilds the broken tunnels with another protocol" : "") + ".")) {
-    get("observe_only").checked = true;  // leave the panel watching
-    return;
-  }
-  const body = {
-    observe_only: observe,
-    check_interval: +get("check_interval").value,
-    fail_threshold: +get("fail_threshold").value,
-    failback_after: Math.round(+get("failback_after").value * 60),
-    test_timeout: +get("test_timeout").value,
-    flap_count: +get("flap_count").value,
-    flap_window: Math.round(+get("flap_window").value * 60),
-    auto_repair: !!get("auto_repair").checked,
-    auto_adopt: !!get("auto_adopt").checked,
-    auto_mesh: !!get("auto_mesh").checked,
-    scan_interval: Math.round(+get("scan_interval").value * 60),
-    engine_release: get("engine_release").value.trim() || "latest",
-    engine_source: get("engine_source").value.trim(),
-    install_engine: !!get("install_engine").checked,
-    tunnel_port_base: +get("tunnel_port_base").value,
-    probe_port_base: +get("probe_port_base").value,
-    candidate_transports: $$("[data-set-tr]").filter((x) => x.checked).map((x) => x.value),
-    backup_enabled: !!get("backup_enabled").checked,
-    backup_time: get("backup_time").value.trim(),
-    backup_tz: get("backup_tz").value.trim() || "Asia/Tehran",
-    telegram: { ...s.telegram, enabled: !!get("tg_enabled").checked },
-  };
-  if (!body.candidate_transports.length) return toast("Pick at least one protocol", "error");
-  // The saves go one after another. Two at the same time would write over
-  // each other, and the one that arrived last would be the one that
-  // counted — which is not necessarily the one the operator changed last.
-  const save = (settingsSave || Promise.resolve()).then(() => api("PUT", "/api/settings", body));
-  settingsSave = save.catch(() => {});
+/* The settings of the page are saved the way the settings form in the
+   modal is: every field carries the key the API names it by, and one
+   collector reads them — this body holds the keys of this page, and the
+   API writes the ones it is given (the rest it keeps). One request goes
+   out per burst of changes, so the fields he ticks together are saved
+   together. */
+async function saveSetBody() {
+  const f = $("#set-body");
+  const body = await collectBody(f);
+  // The Telegram settings are saved as one block, and the API replaces the
+  // block it is given: the page holds only the switch, so the rest of what
+  // the panel knows about the bot travels with it.
+  body.telegram = { ...(S.settings.telegram || {}), ...body.telegram };
+  if (!body.candidate_transports || !body.candidate_transports.length) return toast("Pick at least one protocol", "error");
   try {
-    await save;
+    await api("PUT", "/api/settings", body);
     toast("Settings saved", "success");
   } catch (e) {
     toast(e.message, "error");
@@ -1093,10 +1068,12 @@ function put(body, key, value) {
   at = at[parts[parts.length - 1]] = value;
 }
 
-// formBody is what he wrote, as the API wants it: every field says which
+// collectBody is what he wrote, as the API wants it: every field says which
 // key it holds, whether it is a number, several lines or a group of
-// choices — and the form says where it goes.
-async function formBody(f) {
+// choices. Any container of these fields collects the same way — the modal
+// forms and the settings of the page hold fields of the same shape, so one
+// collector reads them all.
+async function collectBody(f) {
   const body = {};
   for (const el of f.querySelectorAll("[data-field],[data-file]")) {
     if (el.dataset.file) {  // a file he picked, as the API takes it
@@ -1105,15 +1082,25 @@ async function formBody(f) {
     }
     const key = el.dataset.field;
     if (el.type === "radio") { if (el.checked) put(body, key, el.value); continue; }
-    if (el.dataset.checks) { if (el.checked) (body[key] = body[key] || []).push(el.value); continue; }
+    // A mark comes without a value ("data-num"), and an attribute without a
+    // value reads back as an empty string — so a mark read as truthy is not
+    // there at all: the number would go out as the text on the page (minutes,
+    // not seconds) and a group of choices as the last switch of it. The mark
+    // of these two is looked for, not read.
+    if ("checks" in el.dataset) { if (el.checked) (body[key] = body[key] || []).push(el.value); continue; }
     let value;
     if (el.type === "checkbox") value = el.checked;
-    else if (el.dataset.num) value = (el.value === "" ? +(el.dataset.def || 0) : +el.value) * (+(el.dataset.scale || 1));
+    else if ("num" in el.dataset) value = (el.value === "" ? +(el.dataset.def || 0) : +el.value) * (+(el.dataset.scale || 1));
     else if (el.dataset.lines) value = lines(el.value);
     else value = el.value.trim() || el.dataset.else || "";
     put(body, key, value);
   }
   return body;
+}
+
+// formBody is the fields of a modal form, read the same way as any other.
+async function formBody(f) {
+  return collectBody(f);
 }
 
 // toBase64 reads a file the way the API takes it: as text of base64.
@@ -1462,9 +1449,19 @@ setInterval(() => {
   }
 }, 1000);
 
-/* the quick settings of the settings page */
+/* The quick settings of the settings page: the fields carry their keys and
+   are collected like any other form. A burst of changes goes out as one
+   save — ticking a few protocols must not send a request per click. */
 $("#set-body").addEventListener("change", (e) => {
-  if (e.target.matches("[data-set],[data-set-tr]")) saveQuickSettings();
+  if (!e.target.matches("[data-field]")) return;
+  const f = $("#set-body");
+  if (!formConfirm(f)) {
+    // the question he said no to: the switches go back where they were
+    for (const el of f.querySelectorAll("[data-confirm]")) el.checked = el.defaultChecked;
+    return;
+  }
+  clearTimeout(settingsTimer);
+  settingsTimer = setTimeout(saveSetBody, 400);
 });
 
 paintThemeButton();

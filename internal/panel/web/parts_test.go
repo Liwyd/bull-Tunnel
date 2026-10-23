@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -66,8 +67,9 @@ func TestThePagesAreWorkedByGo(t *testing.T) {
 	// the settings: the form the script reads back field by field, and the
 	// index of the sections
 	settings := parts["set-body"]
-	for _, field := range []string{`data-set="check_interval"`, `data-set="scan_interval"`,
-		`data-set="fail_threshold"`, `data-set="tg_enabled"`, `data-set-tr value="ws" checked`} {
+	for _, field := range []string{`data-field="check_interval"`, `data-field="scan_interval"`,
+		`data-field="fail_threshold"`, `data-field="telegram.enabled"`,
+		`data-field="candidate_transports" data-checks value="ws" checked`} {
 		if !strings.Contains(settings, field) {
 			t.Errorf("the settings do not have %q in %s", field, settings)
 		}
@@ -85,6 +87,68 @@ func TestThePagesAreWorkedByGo(t *testing.T) {
 	// the network is full: there is nothing to teach
 	if parts["empty-hint"] != "" {
 		t.Errorf("the getting-started hint is shown on a full panel: %s", parts["empty-hint"])
+	}
+}
+
+// inputTag is the whole <input> tag that carries a field, as it stands in
+// the markup.
+func inputTag(html, key string) string {
+	at := strings.Index(html, `data-field="`+key+`"`)
+	if at < 0 {
+		return ""
+	}
+	start := strings.LastIndex(html[:at], "<input")
+	if start < 0 {
+		return ""
+	}
+	end := strings.Index(html[at:], ">")
+	return html[start : at+end+1]
+}
+
+// The settings of the page are the settings of the API: every key the
+// settings form holds, the page holds, and the field itself is the same
+// markup — the script collects what he wrote with one collector, so a page
+// field and a form field must be indistinguishable to it.
+func TestTheSettingsOfThePageHoldTheFieldsOfTheForm(t *testing.T) {
+	state := world(t)
+	page := New(state, 1000, 990, nil, nil, Opts{}).Parts["set-body"]
+	form := ReadFacts(state, 1000, 990, nil, nil).settingsForm().HTML
+
+	// the keys the settings form sends to the API: the page has them all
+	keys := []string{
+		"observe_only", "check_interval", "fail_threshold", "failback_after", "test_timeout",
+		"flap_count", "flap_window", "auto_repair", "candidate_transports", "auto_adopt",
+		"auto_mesh", "scan_interval", "engine_release", "engine_source", "tunnel_port_base",
+		"probe_port_base", "install_engine", "telegram.enabled", "backup_enabled",
+		"backup_time", "backup_tz",
+	}
+	known := map[string]bool{}
+	for _, key := range keys {
+		known[key] = true
+		got, want := inputTag(page, key), inputTag(form, key)
+		if got == "" {
+			t.Errorf("the settings of the page do not hold the field %q: %s", key, page)
+			continue
+		}
+		if got != want {
+			t.Errorf("the field %q of the settings of the page is\n%s\nand the form's is\n%s", key, got, want)
+		}
+	}
+
+	// and the page holds no field the API does not name
+	lands := regexp.MustCompile(`data-field="([^"]+)"`).FindAllStringSubmatch(page, -1)
+	for _, one := range lands {
+		if !known[one[1]] {
+			t.Errorf("the settings of the page hold the field %q, which the settings form does not: %s", one[1], page)
+		}
+	}
+	if len(lands) == 0 {
+		t.Errorf("the settings of the page hold no field at all: %s", page)
+	}
+
+	// the old marks the script read by hand are gone
+	if strings.Contains(page, "data-set") {
+		t.Errorf("the settings of the page still carry data-set: %s", page)
 	}
 }
 
