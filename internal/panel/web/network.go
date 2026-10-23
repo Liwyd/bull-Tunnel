@@ -19,9 +19,9 @@ import (
    moves the camera and drags a card when the operator moves it — and it
    draws what it is given. */
 
-// The columns of the canvas. The type-1 design (new-ui/type1/graphs.svg)
-// puts the exit servers on the left, the ingress servers in the middle and
-// the domains on the right.
+// The columns of the canvas. The type-1 design puts the exit servers on
+// the left, the ingress servers in the middle and the domains on the
+// right.
 var columnX = map[string]float64{"kharej": 0, "iran": 400, "domain": 800}
 
 // The kicker and the title above every column.

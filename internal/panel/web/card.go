@@ -10,10 +10,10 @@ import (
 	"github.com/Liwyd/bull-Tunnel/internal/panel/store"
 )
 
-/* The cards of the canvas, in the shape of the type-1 design
-   (new-ui/type1/graphs.svg): the name with its dot, the address, and a
-   quiet line of meta. The panel around them is type 2; the graph is the one
-   place where the older, softer card is kept.
+/* The cards of the canvas, in the shape of the type-1 design:
+   the name with its dot, the address, and a quiet line of meta.
+   The panel around them is type 2; the graph is the one place where the
+   older, softer card is kept.
 
    The card is a string of HTML, escaped here and never by the browser: the
    panel decides what a card says. */

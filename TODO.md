@@ -1227,6 +1227,7 @@ already work ✓.
 | 51 | The TODO says where the project stands and what is planned | done |
 | 52 | One name — the fork's origin leaves the project's words; the attribution stays where the engine's licence puts it, and the notice points at a `TRADEMARK.md` that exists | done |
 | 53 | The README is written like a tool: nine sections in the order a new operator meets the program, no Roadmap of trophies, no migration story, and the secrets section says what is actually in the clear | done |
+| 54 | The 18MB of design mockups are deleted and nothing points at them; the one file of boilerplate is `CONTRIBUTING.md` | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design,
 the panel is Go and the dashboard is Go (phase 10 ✓).** What is left is
@@ -1310,7 +1311,7 @@ tunnel with another carrier, and serves one dashboard over a live
 websocket. The engine is the data plane: versioned, shipped and updated
 by the panel from its own releases page.
 
-### Phase 11 — the repository is a product  (11.1 and 11.2 done; 11.3 blocked, 11.4 still ahead)
+### Phase 11 — the repository is a product  (11.1, 11.2 and 11.4 done; 11.3 blocked — no GitHub credentials on this machine)
 
 **11.1 One name — the fork's origin disappears.** ✅ done (commit 52),
 with **one correction to the plan as written here**, found by reading the
@@ -1426,13 +1427,33 @@ confirm the panel's `engine_release` setting still says `latest` so
 servers follow the rolling one. New tagged releases need nothing changed
 in CI (`generate_release_notes` already writes them).
 
-**11.4 The dead weight and the one file of boilerplate.**
-`new-ui/` — 18MB of design mockups referenced by nothing: confirm no
-asset from it is used by `static/`, then delete it. Whatever else a
-checkout holds outside `git ls-files` stays local and ignored. The only
-boilerplate worth adding is a short `CONTRIBUTING.md` with the five
-commands above and the commit style of this file — no templates, no
-codes of conduct, unless a real contributor asks.
+**11.4 The dead weight and the one file of boilerplate.** ✅ done
+(commit 54). The `new-ui/` directory — 12 SVGs, 18MB — is deleted, and
+`du -sh` on the working tree (excluding `.git` and `vendor`) went from
+24MB to 6.5MB. The plan said "referenced by nothing"; that was checked
+first, and it was **wrong in one respect, worth writing down**: five
+files did cite it. `static/style.css` (the palette header and the graph
+cards), `static/app.js` (the wire labels), `internal/panel/web/network.go`
+(the column order) and `internal/panel/web/card.go` (the card shape) all
+pointed at `new-ui/type1/graphs.svg` or `new-ui/type2/seven.svg`.
+
+None of them loaded an asset — every one was a provenance comment, and
+in four of the five the design was already written out in full in the
+comment beside the pointer. So the deletion loses no design knowledge:
+the palette is in the `style.css` header and in the changelog, the
+type-1/type-2 decision is in the changelog and in this file, and the
+comments were rewritten to say what the design *is* rather than where
+the mockup *was*.
+
+What was left pointing at a file that no longer exists:
+`internal/panel/licence_test.go` skipped `new-ui/` while walking the tree
+for the origin's name — that skip is removed, since the directory it
+guarded is gone. The two historical references stay: `CHANGELOG.md`
+records what version 1.3.0 shipped against, and commit 9 above records
+what it did. Rewriting either would falsify a record.
+
+The boilerplate: one `CONTRIBUTING.md`, the five commands and the commit
+style. No templates, no code of conduct — no one has asked.
 
 ### Phase 12 — the rest of the engine's potential  (plan — decided, not done)
 

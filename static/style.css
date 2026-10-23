@@ -1,8 +1,9 @@
 /* ==========================================================================
    bull-Tunnel — design system "type 2" (Precision Routing)
 
-   The palette, the type scale and the routing notation are taken from the
-   design guide in new-ui/type2/seven.svg:
+   The palette, the type scale and the routing notation are the design
+   system "type 2" (Precision Routing), fixed in the mockups this panel
+   was drawn from and written out here so the file stands on its own:
 
      DARK   bg #171A1B  surface #1E2223  active #272C2D  line #3B4243
             text #F1F0E9  muted #A1ABAB  brand #E23B32  ok #9DBDA7
@@ -419,7 +420,7 @@ legend { color: var(--muted); font-size: 12px; padding: 0 6px; }
 .flow-cols .ct .n { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; color: var(--muted); }
 .flow-cols .ct .t { display: block; }
 
-/* The cards of the graph follow the type-1 design (new-ui/type1/graphs.svg):
+/* The cards of the graph follow the type-1 design:
    a soft, rounded card with the name, the address and a quiet line of meta.
    The shell of the panel is type 2; the graph is the one place where the
    older, softer shape is kept. */

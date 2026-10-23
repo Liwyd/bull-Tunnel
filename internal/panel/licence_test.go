@@ -136,7 +136,6 @@ func TestTheNameOfTheOriginOnlyLivesInTheAttribution(t *testing.T) {
 	skipped := map[string]bool{
 		"vendor": true, // other people's modules
 		".git":   true,
-		"new-ui": true, // design mockups, deleted in 11.4
 	}
 	binary := map[string]bool{
 		".png": true, ".jpg": true, ".jpeg": true, ".gif": true,

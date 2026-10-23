@@ -510,8 +510,8 @@ function drawWiresNow() {
     return bezAt(c.p, 0.5);
   };
   /* The label of a wire: a pill when the wire is the one that is picked,
-     plain text on the canvas for the others — the type-1 design
-     (new-ui/type1/graphs.svg). */
+     plain text on the canvas for the others — the type-1 design, kept as
+     the panel's own CSS and drawn here. */
   const wireLabel = (txt, x, y, cls, attrs, pill) => {
     const w = txt.length * 6.6;
     if (!pill) {

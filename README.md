@@ -539,6 +539,10 @@ are found by the first scan and adopted.
 The three tests the race run skips are timing-sensitive tests of the engine's
 upstream code; the CI re-runs each of them up to five times.
 
+The rules a change is judged by — backwards compatibility with a live panel,
+a test that fails before the fix, one concern per commit — and the commit
+style are in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 What changed in every version is in [CHANGELOG.md](CHANGELOG.md). The design
 decisions, the transport behaviour under filtering and the scale limits are in
 [docs/architecture.md](docs/architecture.md).
