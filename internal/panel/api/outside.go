@@ -16,6 +16,7 @@ import (
 	"github.com/Liwyd/bull-Tunnel/internal/panel/model"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/orch"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/probe"
+	"github.com/Liwyd/bull-Tunnel/internal/panel/store"
 )
 
 // The endpoints that talk to the outside: the measurement of the path, the
@@ -27,23 +28,23 @@ func (s *Server) probe(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		IranID     string   `json:"iran_id"`
 		KharejID   string   `json:"kharej_id"`
+		Server     string   `json:"server"`
+		Peer       string   `json:"peer"`
 		Transports []string `json:"transports"`
 	}
 	if err := readBody(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "the request is not readable")
 		return
 	}
-	iran := s.store.Servers.Get(body.IranID)
-	kharej := s.store.Servers.Get(body.KharejID)
-	if iran == nil || kharej == nil {
-		writeError(w, http.StatusNotFound, "not found")
-		return
-	}
-	if iran.Role != model.Iran || kharej.Role != model.Kharej {
-		writeError(w, http.StatusBadRequest, "iran_id must be an Iran server and kharei_id a foreign one")
+	iran, kharej, err := s.probeSides(body.Server, body.Peer, body.IranID, body.KharejID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	out := probe.Measure(s.store, s.driver, iran, kharej, body.Transports)
+	// the drawer of both servers shows the last measurement until a new
+	// one is taken; it is kept in memory only, never in the state file
+	s.store.SetProbe(probeResult(out, iran, kharej))
 	best, _ := out["best"].(string)
 	reason, _ := out["error"].(string)
 	if best == "" {
@@ -55,6 +56,61 @@ func (s *Server) probe(w http.ResponseWriter, r *http.Request) {
 	s.orch.Emit("info", "probe", fmt.Sprintf("Connection test %s ⇄ %s: best protocol %s",
 		iran.Name, kharej.Name, best), false, map[string]string{"server": iran.ID})
 	writeJSON(w, http.StatusOK, out)
+}
+
+// probeSides works out which end of the measurement is which. The drawer
+// sends the two servers by name ("server" and "peer"): whoever they belong
+// to, the Iran end and the foreign end are told apart by their role. The
+// old pair of keys still works.
+func (s *Server) probeSides(one, two, iranID, kharejID string) (*model.Server, *model.Server, error) {
+	if one == "" && two == "" {
+		iran := s.store.Servers.Get(iranID)
+		kharej := s.store.Servers.Get(kharejID)
+		if iran == nil || kharej == nil {
+			return nil, nil, fmt.Errorf("not found")
+		}
+		if iran.Role != model.Iran || kharej.Role != model.Kharej {
+			return nil, nil, fmt.Errorf("iran_id must be an Iran server and kharej_id a foreign one")
+		}
+		return iran, kharej, nil
+	}
+	first, second := s.store.Servers.Get(one), s.store.Servers.Get(two)
+	if first == nil || second == nil {
+		return nil, nil, fmt.Errorf("not found")
+	}
+	if first.Role == second.Role {
+		return nil, nil, fmt.Errorf("the two servers must be on different sides: one Iran server and one foreign one")
+	}
+	if first.Role == model.Iran {
+		return first, second, nil
+	}
+	return second, first, nil
+}
+
+// probeResult keeps what the measurement said, in the shape the drawer
+// reads it back in.
+func probeResult(out map[string]any, iran, kharej *model.Server) store.Probe {
+	result := store.Probe{One: iran.ID, Two: kharej.ID, TS: now()}
+	result.OK, _ = out["ok"].(bool)
+	result.Best, _ = out["best"].(string)
+	result.Error, _ = out["error"].(string)
+	result.LinkID, _ = out["link_id"].(string)
+	list, _ := out["results"].([]any)
+	for _, item := range list {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		row := store.ProbeRow{}
+		row.Transport, _ = entry["transport"].(string)
+		row.OK, _ = entry["ok"].(bool)
+		row.ConnectMS, _ = entry["connect_ms"].(float64)
+		row.SessionMS, _ = entry["setup_ms"].(float64)
+		row.RTTMS, _ = entry["rtt_ms"].(float64)
+		row.Error, _ = entry["error"].(string)
+		result.Rows = append(result.Rows, row)
+	}
+	return result
 }
 
 // theAgentUnit is the unit of the command channel.
