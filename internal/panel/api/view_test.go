@@ -75,6 +75,63 @@ func TestTheNetworkViewIsAnAnswerOfThePanel(t *testing.T) {
 	}
 }
 
+// The drawer is an answer of the panel: ?open= names what the operator has
+// open ("link:<id>", "server:<id>" or "domain:<id>"), and the parts come
+// with the drawer of it. Nothing open, and the answer holds no drawer; an
+// open that names nothing the panel knows holds an empty one — which is
+// the script's signal to close the drawer.
+func TestTheDrawerIsAnAnswerOfThePanel(t *testing.T) {
+	panel, server := aServer(t)
+	panel.store.Lock()
+	panel.store.Servers.Put("k1", &model.Server{ID: "k1", Name: "frankfurt", Role: model.Kharej,
+		IP: "203.0.113.7", Priority: 1, Enabled: true, Status: "online"})
+	panel.store.Servers.Put("i1", &model.Server{ID: "i1", Name: "tehran", Role: model.Iran,
+		IP: "198.51.100.4", Priority: 1, Enabled: true, Status: "online"})
+	panel.store.Links.Put("l1", &model.Link{ID: "l1", KharejID: "k1", IranID: "i1", Transport: "ws",
+		Ports: []string{"8443"}, Status: "up", Built: true})
+	panel.store.Unlock()
+	cookie := aLogin(t, server)
+
+	parts := func(view map[string]any) map[string]any {
+		list, _ := view["parts"].(map[string]any)
+		return list
+	}
+
+	// a page that asks for no drawer is not given one
+	_, plain := aGet(t, server, http.MethodGet, "/api/view", "", cookie)
+	if body, there := parts(plain)["drawer-body"]; there {
+		t.Errorf("the view holds a drawer nobody asked for: %v", body)
+	}
+
+	// the tunnel he has open comes with its drawer
+	status, view := aGet(t, server, http.MethodGet, "/api/view?open=link:l1", "", cookie)
+	if status != http.StatusOK {
+		t.Fatalf("the view is %d, it must be 200", status)
+	}
+	body, _ := parts(view)["drawer-body"].(string)
+	for _, want := range []string{`<h2>frankfurt ⇄ tehran</h2>`, `<h4>Connection protocol</h4>`,
+		`data-act="POST /api/links/l1/retest"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the drawer of the tunnel does not hold %q: %s", want, body)
+		}
+	}
+
+	// the server he has open comes with its drawer
+	_, view = aGet(t, server, http.MethodGet, "/api/view?open=server:k1", "", cookie)
+	if body, _ = parts(view)["drawer-body"].(string); !strings.Contains(body, "<h4>Connection test") {
+		t.Errorf("the drawer of the server does not hold the connection test: %s", body)
+	}
+
+	// an open that names nothing the panel knows holds an empty drawer
+	_, view = aGet(t, server, http.MethodGet, "/api/view?open=link:nope", "", cookie)
+	there, hasKey := parts(view)["drawer-body"]
+	if !hasKey {
+		t.Error("the view does not say the drawer is empty")
+	} else if there != "" {
+		t.Errorf("the drawer of a tunnel that does not exist holds %v", there)
+	}
+}
+
 // The feed of events is an answer of the panel: the rows come with the
 // parts of the pages, and the level the operator asks for — ?ev= — is the
 // level of the rows that stay in the feed.

@@ -1207,6 +1207,7 @@ already work ✓.
 | 44 | The feed of events is Go | done |
 | 45 | The quick settings are collected like every other form | done |
 | 46 | What the collector sends is what the API wants | done |
+| 47 | The drawer is worked by Go | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design
 and the panel is Go.** What is left is the dashboard (phase 10 ✓) and the

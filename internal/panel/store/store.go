@@ -62,6 +62,12 @@ type Store struct {
 	portMaps  map[string]*portMap
 	ownerMaps map[string]*portMap
 
+	// probeMu guards the last measurements of the path between two
+	// servers: the API writes one while the drawer reads one, and they
+	// are never written to the state file.
+	probeMu sync.RWMutex
+	probes  []Probe
+
 	// LoadError says what went wrong with the state file, if anything.
 	// The panel shows it: a state file that cannot be read must not take
 	// the panel down.

@@ -22,8 +22,9 @@ type Parts map[string]string
 
 // Opts is what the operator has on the page: the search of the table, the
 // filter of the status, the order of the list, the domain he has open,
-// whether the tunnels that are not built yet are shown, and the level of
-// the events he wants in the feed.
+// whether the tunnels that are not built yet are shown, the level of
+// the events he wants in the feed, and what he has open in the drawer
+// ("link:<id>", "server:<id>" or "domain:<id>").
 type Opts struct {
 	Query    string `json:"q"`
 	Filter   string `json:"filter"`
@@ -31,6 +32,7 @@ type Opts struct {
 	Selected string `json:"selected"`
 	Pending  bool   `json:"pending"`
 	Ev       string `json:"ev"`
+	Open     string `json:"open"`
 }
 
 // The icons of the buttons, as the stylesheet draws them.
@@ -102,7 +104,8 @@ func cell(key, value, class string) string {
 
 // Parts is everything the pages hold, worked out from one reading of the
 // state: the sidebar, the strips, the buttons, the five views, the feed of
-// events and the hint that opens the panel the first time.
+// events, the drawer of what he has open and the hint that opens the panel
+// the first time.
 func (f *Facts) Parts(o Opts) Parts {
 	parts := Parts{}
 	f.sidebar(parts)
@@ -114,6 +117,7 @@ func (f *Facts) Parts(o Opts) Parts {
 	f.domains(parts, o)
 	f.infrastructure(parts)
 	f.settings(parts)
+	f.drawer(parts, o)
 	f.onboarding(parts)
 	return parts
 }

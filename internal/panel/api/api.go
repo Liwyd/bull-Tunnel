@@ -334,6 +334,7 @@ func (s *Server) view(w http.ResponseWriter, r *http.Request) {
 		Selected: query.Get("selected"),
 		Pending:  query.Get("pending") == "1" || query.Get("pending") == "true",
 		Ev:       query.Get("ev"),
+		Open:     query.Get("open"),
 	}
 	writeJSON(w, http.StatusOK, web.New(s.store, now(), s.orch.LastCheck(), s.busy(), s.flapping(), opts))
 }

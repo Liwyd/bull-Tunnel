@@ -264,20 +264,30 @@ func (s *Server) linkByID(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{"link": s.linkBody(link)})
 	case http.MethodPut:
-		var body linkBody
+		var body map[string]any
 		if err := readBody(r, &body); err != nil {
 			writeError(w, http.StatusBadRequest, "the request is not readable")
 			return
 		}
-		updated := body.model()
-		updated.ID = link.ID
-		updated.IranID = link.IranID
-		updated.KharejID = link.KharejID
-		updated.TunnelPort = link.TunnelPort
-		updated.ProbePort = link.ProbePort
-		updated.Token = link.Token
+		// What the panel is given is written over the tunnel that is
+		// there, key by key — the way the Python panel's edit does. A
+		// tiny form in the drawer sends the one field it holds, and the
+		// state, the tests and the history of the tunnel stay as they
+		// are. Only the ports and the UDP switch are the business of
+		// the Iran server, so only they are applied to it.
+		updated := link.Clone()
+		portsBefore := strings.Join(updated.Ports, ",")
+		udpBefore := updated.AcceptUDP
+		setString(body, "label", &updated.Label)
+		setIntDefault(body, "priority", &updated.Priority, 100)
+		setStrings(body, "allowed", &updated.Allowed)
+		setList(body, "ports", &updated.Ports)
+		setBool(body, "accept_udp", &updated.AcceptUDP)
+		setBool(body, "pinned", &updated.Pinned)
 		s.store.Links.Put(link.ID, updated)
-		s.orch.PortsChanged(updated)
+		if portsBefore != strings.Join(updated.Ports, ",") || udpBefore != updated.AcceptUDP {
+			s.orch.PortsChanged(updated)
+		}
 		s.orch.Changed()
 		writeJSON(w, http.StatusOK, map[string]any{"link": s.linkBody(updated)})
 	case http.MethodDelete:
@@ -450,16 +460,26 @@ func (s *Server) domainByID(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{"domain": s.domainBody(domain)})
 	case http.MethodPut:
-		var body domainBody
+		var body map[string]any
 		if err := readBody(r, &body); err != nil {
 			writeError(w, http.StatusBadRequest, "the request is not readable")
 			return
 		}
-		updated := body.model()
-		updated.ID = domain.ID
-		s.store.Domains.Put(domain.ID, updated)
+		// The same as the tunnels: what the panel is given is written
+		// over the domain that is there, key by key, the way the Python
+		// panel's edit does. The servers the record points at are not
+		// changed by an edit — the record moves with the switch action.
+		updated := *domain
+		setString(body, "fqdn", &updated.FQDN)
+		setString(body, "provider_id", &updated.ProviderID)
+		setString(body, "kharej_id", &updated.KharejID)
+		setIntDefault(body, "ttl", &updated.TTL, 120)
+		setBool(body, "auto_failover", &updated.AutoFailover)
+		setList(body, "ports", &updated.Ports)
+		setList(body, "group", &updated.Group)
+		s.store.Domains.Put(domain.ID, &updated)
 		s.orch.Changed()
-		writeJSON(w, http.StatusOK, map[string]any{"domain": s.domainBody(updated)})
+		writeJSON(w, http.StatusOK, map[string]any{"domain": s.domainBody(&updated)})
 	case http.MethodDelete:
 		s.store.Domains.Remove(domain.ID)
 		s.orch.Changed()
@@ -745,6 +765,45 @@ func setStrings(body map[string]any, key string, target *[]string) {
 		}
 	}
 	*target = out
+}
+
+// setList writes a list of the body into a field of an entity: the API
+// takes a list, and a form that holds several lines sends the lines — a
+// ports field is "443, 8443=2096" on the page and a list in the state.
+func setList(body map[string]any, key string, target *[]string) {
+	switch value := body[key].(type) {
+	case []any:
+		out := []string{}
+		for _, item := range value {
+			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+				out = append(out, strings.TrimSpace(text))
+			}
+		}
+		*target = out
+	case string:
+		out := []string{}
+		for _, line := range strings.FieldsFunc(value, func(r rune) bool { return r == '\n' || r == ',' }) {
+			if text := strings.TrimSpace(line); text != "" {
+				out = append(out, text)
+			}
+		}
+		*target = out
+	}
+}
+
+// setIntDefault writes a number of the body into a field, with the value a
+// zero falls back on: a priority of 0 would make this tunnel the first of
+// its pair, so an empty field has always meant "the default, please".
+func setIntDefault(body map[string]any, key string, target *int, fallback int) {
+	value, there := body[key].(float64)
+	if !there {
+		return
+	}
+	if int(value) == 0 {
+		*target = fallback
+		return
+	}
+	*target = int(value)
 }
 
 // pathID is the id at the end of a path.
