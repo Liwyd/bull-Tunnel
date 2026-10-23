@@ -72,6 +72,16 @@ jobs:
             test -f "/tmp/dist/bull-tunnel-engine_linux_${a}.tar.gz"
             test -f "/tmp/dist/bull-tunnel_linux_${a}.tar.gz"
           done
+      - name: the script of the panel parses
+        run: node --check static/app.js
+      - name: the installation
+        # The files built a step above are unpacked and run the way an
+        # installation runs them — from a fresh data directory, with the
+        # web interface beside the panel — and asked everything an
+        # operator asks on the first day: the door, the sign-in, the
+        # dashboard, the drawer, the forms, the settings and a
+        # connection test. It needs no root and no server.
+        run: bash tests/install-check.sh --dist /tmp/dist
 
   image:
     name: docker image
