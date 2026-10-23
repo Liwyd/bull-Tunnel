@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Liwyd/bull-Tunnel/internal/panel/auth"
+	"github.com/Liwyd/bull-Tunnel/internal/panel/model"
 )
 
 // The dashboard is worked out by the panel: the network view — the cards,
@@ -44,7 +45,7 @@ func TestTheNetworkViewIsAnAnswerOfThePanel(t *testing.T) {
 		t.Fatalf("the view has no parts in it")
 	}
 	for _, key := range []string{"ss-on", "net-strip", "links-table", "tun-table", "tun-protocols",
-		"dom-list", "dom-detail", "inf-kharej", "inf-iran", "set-body", "set-index", "empty-hint"} {
+		"dom-list", "dom-detail", "inf-kharej", "inf-iran", "set-body", "set-index", "empty-hint", "ev-list"} {
 		if _, there := parts[key]; !there {
 			t.Errorf("the pages do not have %q in them", key)
 		}
@@ -71,6 +72,42 @@ func TestTheNetworkViewIsAnAnswerOfThePanel(t *testing.T) {
 		}
 	} else {
 		t.Error("the search of the table did not change the page")
+	}
+}
+
+// The feed of events is an answer of the panel: the rows come with the
+// parts of the pages, and the level the operator asks for — ?ev= — is the
+// level of the rows that stay in the feed.
+func TestTheFeedOfEventsIsAnAnswerOfThePanel(t *testing.T) {
+	panel, server := aServer(t)
+	panel.store.Lock()
+	panel.store.AddEvent(&model.Event{Level: "info", Message: "the panel started", TS: 990})
+	panel.store.AddEvent(&model.Event{Level: "error", Message: "the server did not answer", TS: 995})
+	panel.store.Unlock()
+	cookie := aLogin(t, server)
+
+	status, view := aGet(t, server, http.MethodGet, "/api/view", "", cookie)
+	if status != http.StatusOK {
+		t.Fatalf("the view is %d, it must be 200", status)
+	}
+	parts, _ := view["parts"].(map[string]any)
+	feed, _ := parts["ev-list"].(string)
+	if feed == "" {
+		t.Fatalf("the view has no feed of events in it")
+	}
+	if !strings.Contains(feed, "the server did not answer") || !strings.Contains(feed, "the panel started") {
+		t.Errorf("the feed does not hold the log of the panel: %s", feed)
+	}
+
+	// only the level he asked for stays in the feed
+	_, filtered := aGet(t, server, http.MethodGet, "/api/view?ev=error", "", cookie)
+	rows, _ := filtered["parts"].(map[string]any)
+	only, _ := rows["ev-list"].(string)
+	if !strings.Contains(only, "the server did not answer") {
+		t.Errorf("the feed for ?ev=error does not hold the error: %s", only)
+	}
+	if strings.Contains(only, "the panel started") {
+		t.Errorf("the feed for ?ev=error holds other levels: %s", only)
 	}
 }
 

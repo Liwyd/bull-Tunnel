@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -158,5 +159,111 @@ func TestAFreshPanelSaysWhatToDoFirst(t *testing.T) {
 	}
 	if !strings.Contains(parts["dom-list"], "No domain yet.") {
 		t.Errorf("the domains of a fresh panel say %s", parts["dom-list"])
+	}
+}
+
+// The feed of the log is worked out by Go: every row carries the level of
+// the event, the message the panel wrote — escaped, as HTML is — and the
+// newest event is at the top, where the flash of a new event lights it up.
+func TestTheEventsFeedIsWorkedByGo(t *testing.T) {
+	state := world(t)
+	state.AddEvent(&model.Event{Level: "info", Message: "the panel started", TS: 900})
+	state.AddEvent(&model.Event{Level: "warning", Message: "the tunnel dropped", TS: 950})
+	state.AddEvent(&model.Event{Level: "error", Message: `the server said "<b>" & went away`, TS: 990})
+	state.AddEvent(&model.Event{Level: "info", Message: "an event without a time", TS: 0})
+
+	feed := New(state, 1000, 990, nil, nil, Opts{}).Parts["ev-list"]
+	for _, want := range []string{`class="error"`, `class="warning"`, `class="info"`,
+		"the tunnel dropped", "the panel started",
+		`the server said &#34;&lt;b&gt;&#34; &amp; went away`,
+		`<span class="lv"></span>`, `<span class="msg">`, `<time>`, `</time>`} {
+		if !strings.Contains(feed, want) {
+			t.Errorf("the feed does not have %q in %s", want, feed)
+		}
+	}
+
+	// the newest event first, the oldest last
+	positions := []int{
+		strings.Index(feed, "an event without a time"),
+		strings.Index(feed, `the server said &#34;`),
+		strings.Index(feed, "the tunnel dropped"),
+		strings.Index(feed, "the panel started"),
+	}
+	for i, at := range positions {
+		if at < 0 {
+			t.Fatalf("the feed does not hold the row %d: %s", i, feed)
+		}
+		if i > 0 && positions[i-1] > at {
+			t.Errorf("the events are not newest first: %s", feed)
+			break
+		}
+	}
+
+	// the newest row is the one that flashes when the feed changes
+	if !strings.Contains(feed, `class="info new"`) {
+		t.Errorf("the newest row of the feed is not marked to flash: %s", feed)
+	}
+
+	// an event without a time of its own is not dated 1970
+	if !strings.Contains(feed, `<time>—</time>`) {
+		t.Errorf("the feed does not say an event has no time: %s", feed)
+	}
+}
+
+// The level of the feed is what the operator picked: only the rows of that
+// level stay, and a level the feed does not offer — or all of them — is
+// every event.
+func TestTheFeedKeepsOnlyTheLevelTheOperatorAskedFor(t *testing.T) {
+	state := world(t)
+	state.AddEvent(&model.Event{Level: "info", Message: "the panel started", TS: 900})
+	state.AddEvent(&model.Event{Level: "warning", Message: "the tunnel dropped", TS: 950})
+	state.AddEvent(&model.Event{Level: "error", Message: "the server did not answer", TS: 990})
+
+	only := New(state, 1000, 990, nil, nil, Opts{Ev: "error"}).Parts["ev-list"]
+	if !strings.Contains(only, "the server did not answer") {
+		t.Errorf("the feed for errors does not hold the error: %s", only)
+	}
+	if strings.Contains(only, "the tunnel dropped") || strings.Contains(only, "the panel started") {
+		t.Errorf("the feed for errors holds other levels: %s", only)
+	}
+
+	every := []string{"the panel started", "the tunnel dropped", "the server did not answer"}
+	for _, level := range []string{"", "all", "info"} {
+		all := New(state, 1000, 990, nil, nil, Opts{Ev: level}).Parts["ev-list"]
+		for _, want := range every {
+			if !strings.Contains(all, want) {
+				t.Errorf("the feed for ev=%q does not hold %q: %s", level, want, all)
+			}
+		}
+	}
+}
+
+// The feed of a panel that has not logged anything yet says so, in the
+// same row the script used to draw.
+func TestAnEmptyFeedSaysThereIsNoEventYet(t *testing.T) {
+	feed := New(world(t), 1000, 990, nil, nil, Opts{}).Parts["ev-list"]
+	want := `<li class="muted"><span></span><span>No event yet</span></li>`
+	if feed != want {
+		t.Errorf("an empty feed holds %q, it must hold %q", feed, want)
+	}
+}
+
+// The log of the panel is longer than the page shows: the feed holds the
+// last 200 events, the newest first.
+func TestTheFeedKeepsTheTwoHundredNewestEvents(t *testing.T) {
+	state := world(t)
+	for i := 0; i < 250; i++ {
+		state.AddEvent(&model.Event{Level: "info", Message: fmt.Sprintf("event %d", i), TS: float64(900 + i)})
+	}
+
+	feed := New(state, 1000, 990, nil, nil, Opts{}).Parts["ev-list"]
+	if rows := strings.Count(feed, "<li "); rows != 200 {
+		t.Fatalf("the feed has %d rows, it must hold 200", rows)
+	}
+	if !strings.Contains(feed, "event 249") || !strings.Contains(feed, "event 50") {
+		t.Errorf("the feed does not hold the newest events: %s", feed)
+	}
+	if strings.Contains(feed, "event 49") {
+		t.Errorf("the feed holds an event that fell out of the 200: %s", feed)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 /* The pages of the dashboard. Five pages, one reading of the state: what a
@@ -20,14 +21,16 @@ import (
 type Parts map[string]string
 
 // Opts is what the operator has on the page: the search of the table, the
-// filter of the status, the order of the list, the domain he has open, and
-// whether the tunnels that are not built yet are shown.
+// filter of the status, the order of the list, the domain he has open,
+// whether the tunnels that are not built yet are shown, and the level of
+// the events he wants in the feed.
 type Opts struct {
 	Query    string `json:"q"`
 	Filter   string `json:"filter"`
 	Sort     string `json:"sort"`
 	Selected string `json:"selected"`
 	Pending  bool   `json:"pending"`
+	Ev       string `json:"ev"`
 }
 
 // The icons of the buttons, as the stylesheet draws them.
@@ -77,6 +80,20 @@ func (f *Facts) ago(ts float64) string {
 	}
 }
 
+// eventTime is the time of a row of the feed, as the panel says it: the
+// hour, and the day beside it when the event is not from today.
+func (f *Facts) eventTime(ts float64) string {
+	if ts <= 0 {
+		return "—" // an event without a time of its own
+	}
+	then := time.Unix(int64(ts), 0)
+	today := time.Unix(int64(f.Now), 0)
+	if then.Format("2006-01-02") == today.Format("2006-01-02") {
+		return then.Format("15:04:05")
+	}
+	return then.Format("02/01/2006 15:04:05")
+}
+
 // cell is one number of the strip under a page title.
 func cell(key, value, class string) string {
 	return fmt.Sprintf(`<div><span class="k">%s</span><span class="v %s">%s</span></div>`,
@@ -84,14 +101,15 @@ func cell(key, value, class string) string {
 }
 
 // Parts is everything the pages hold, worked out from one reading of the
-// state: the sidebar, the strips, the buttons, the five views and the hint
-// that opens the panel the first time.
+// state: the sidebar, the strips, the buttons, the five views, the feed of
+// events and the hint that opens the panel the first time.
 func (f *Facts) Parts(o Opts) Parts {
 	parts := Parts{}
 	f.sidebar(parts)
 	f.actions(parts)
 	f.strips(parts)
 	f.networkTable(parts, o)
+	f.feed(parts, o)
 	f.tunnels(parts, o)
 	f.domains(parts, o)
 	f.infrastructure(parts)
@@ -229,4 +247,43 @@ func (f *Facts) onboarding(parts Parts) {
 		`<div class="btns"><button class="btn primary sm" data-add="server" data-role="kharej">` + iconAdd + ` Foreign server</button>` +
 		`<button class="btn sm" data-add="server" data-role="iran">` + iconAdd + ` Iran server</button>` +
 		`<button class="btn sm" data-add="domain">` + iconAdd + ` Domain</button></div></div>`
+}
+
+/* The feed of events is the log under the network page: the rows are
+   worked out here from the same reading of the state as the rest of the
+   page, and the script only swaps them into the list — the rows it used to
+   draw itself, in the other shape.
+
+   The row of a new event flashes: the newest row of the feed carries the
+   class, so the list lights up when the feed changes — which is when an
+   event has arrived. */
+
+// feed is the log: the events of the level he asked for, the newest first,
+// at most 200 of them — the same rows the script drew before the panel
+// drew them.
+func (f *Facts) feed(parts Parts, o Opts) {
+	// "", "all" and a level the feed does not offer show every event.
+	wanted := ""
+	switch o.Ev {
+	case "error", "warning", "success":
+		wanted = o.Ev
+	}
+	rows := []string{}
+	for i := len(f.Events) - 1; i >= 0 && len(rows) < 200; i-- {
+		event := f.Events[i]
+		if wanted != "" && wanted != event.Level {
+			continue
+		}
+		class := escape(event.Level)
+		if len(rows) == 0 {
+			class += " new" // the newest row is the one that flashes
+		}
+		rows = append(rows, fmt.Sprintf(`<li class="%s"><span class="lv"></span><span class="msg">%s</span><time>%s</time></li>`,
+			class, escape(event.Message), f.eventTime(event.TS)))
+	}
+	if len(rows) == 0 {
+		parts["ev-list"] = `<li class="muted"><span></span><span>No event yet</span></li>`
+		return
+	}
+	parts["ev-list"] = strings.Join(rows, "")
 }

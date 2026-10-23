@@ -19,6 +19,9 @@ func TestTheShellIsRenderedByGo(t *testing.T) {
 		`id="side"`,
 		`id="view-network"`,
 		`id="auth-form"`,
+		// the feed of events is a part of the page (ev-list): the rows go
+		// into the element that carries the name of the part
+		`id="ev-list"`,
 		`content="1.2.0"`,
 	} {
 		if !strings.Contains(text, want) {

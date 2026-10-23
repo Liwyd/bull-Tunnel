@@ -30,6 +30,7 @@ type Facts struct {
 	Domains    []*model.Domain
 	Providers  []*model.DNSProvider
 	Transports []string
+	Events     []*model.Event // the log of the panel, the oldest first
 
 	// What the pages say about the state, worked out once.
 	Kharej   []*model.Server // the exit servers, the preferred first
@@ -60,6 +61,7 @@ func ReadFacts(state *store.Store, now, lastCheck float64, busy, flapping []stri
 		Domains:    state.Domains.List(),
 		Providers:  state.Providers.List(),
 		Transports: []string{},
+		Events:     state.Events,
 		ByID:       map[string]*model.Server{},
 		Name:       map[string]string{"": "—"},
 		Status:     map[string]string{},

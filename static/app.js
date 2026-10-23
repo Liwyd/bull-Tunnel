@@ -32,8 +32,6 @@ const VIEWS = {
 
 let S = null;              // last state from the server
 let skew = 0;              // server clock - local clock (s)
-let events = [];
-let evFilter = "all";
 let drawer = null;         // {type, id}
 let selTransport = null;
 let groupDraft = null;     // {manual, ids} while editing a domain's group
@@ -123,11 +121,6 @@ function dur(s) {
   if (m < 60) return `${m}m ${String(s % 60).padStart(2, "0")}s`;
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 }
-function clock(ts) {
-  const d = new Date(ts * 1000);
-  const t = d.toLocaleTimeString("en-GB");
-  return d.toDateString() === new Date().toDateString() ? t : `${d.toLocaleDateString("en-GB")} ${t}`;
-}
 function spark(history, w = 110, h = 22) {
   const pts = (history || []).slice(-40);
   if (pts.length < 2) return "";
@@ -186,11 +179,7 @@ function startApp(sess) {
   $("#app").classList.remove("hidden");
   if (sess) signedInAs = sess.username || signedInAs;
   $("#ss-user").textContent = signedInAs;
-  api("GET", "/api/state").then((st) => {
-    events = st.events || [];
-    setState(st);
-    renderEvents();
-  }).catch(() => {});
+  api("GET", "/api/state").then(setState).catch(() => {});
   connectWS();
   route();
 }
@@ -209,7 +198,9 @@ function connectWS() {
   ws.onmessage = (m) => {
     const msg = JSON.parse(m.data);
     if (msg.type === "state") setState(msg.state);
-    else if (msg.type === "event") { events.push(msg.event); events = events.slice(-300); renderEvents(msg.event.id); }
+    // the feed of events is worked out by the panel now: a new event means
+    // the page asks for it again, and the rows come with the answer
+    else if (msg.type === "event") loadViewThenRender();
     else if (msg.type === "test" && drawer && drawer.type === "link" && drawer.id === msg.link_id) {
       const l = linkById(msg.link_id);
       if (l) { l.tests[msg.result.transport] = msg.result; renderDrawer(); }
@@ -231,6 +222,8 @@ async function loadView() {
   const mine = ++viewSeq;
   const params = new URLSearchParams({ q: netQuery, filter: netFilter, sort: $("#tun-sort").value, selected: selectedDomain });
   if ($("#show-pending-2").checked) params.set("pending", "1");
+  const ev = $("#ev-filter .on");   // the level of the feed the operator picked
+  if (ev) params.set("ev", ev.dataset.f);
   try {
     const answer = await api("GET", `/api/view?${params}`);
     if (mine === viewSeq) { VIEW = answer.network; PARTS = answer.parts; }
@@ -282,6 +275,12 @@ $("#net-q").oninput = (e) => { netQuery = e.target.value; loadViewThenRender(); 
 $("#net-filter").onchange = (e) => { netFilter = e.target.value; loadViewThenRender(); };
 $("#net-search").onclick = () => { netQuery = $("#net-q").value; netFilter = $("#net-filter").value; loadViewThenRender(); };
 $("#tun-sort").onchange = loadViewThenRender;
+// the level of the feed is picked the same way: the button says which one
+// it is (the one that is on), and the rows are the panel's
+$$("#ev-filter button").forEach((b) => (b.onclick = () => {
+  $$("#ev-filter button").forEach((x) => x.classList.toggle("on", x === b));
+  loadViewThenRender();
+}));
 
 /* ---------------------------------------------------------------- router */
 function route() {
@@ -755,17 +754,8 @@ function linkTip(l) {
 /* --------------------------------------------------------- tunnels table */
 
 /* --------------------------------------------------------------- events */
-function renderEvents(newId) {
-  const list = events.filter((e) => evFilter === "all" || e.level === evFilter).slice(-200).reverse();
-  $("#events").innerHTML = list.map((e) => `<li class="${e.level} ${e.id === newId ? "new" : ""}">
-    <span class="lv"></span><span class="msg">${esc(e.message)}</span><time>${clock(e.ts)}</time></li>`).join("")
-    || `<li class="muted"><span></span><span>No event yet</span></li>`;
-}
-$$("#ev-filter button").forEach((b) => (b.onclick = () => {
-  evFilter = b.dataset.f;
-  $$("#ev-filter button").forEach((x) => x.classList.toggle("on", x === b));
-  renderEvents();
-}));
+/* the feed of the log comes with the parts: GET /api/view holds ev-list,
+   and the buttons only say which level the operator picked */
 
 /* ================================================== tunnels & protocols */
 

@@ -1204,6 +1204,7 @@ already work ✓.
 | 41 | The release v1.3.0 | done |
 | 42 | The copyright line names the author | done |
 | 43 | The tunnel form can forward UDP | done |
+| 44 | The feed of events is Go | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design
 and the panel is Go.** What is left is the dashboard (phase 10 ✓) and the
