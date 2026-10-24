@@ -115,6 +115,51 @@ func TestTheMaximumSegmentSizeIsValidatedAndStored(t *testing.T) {
 	}
 }
 
+// The heartbeat is validated the same way: the engine clamps anything above
+// ten seconds to ten, so a bigger number would be a setting the engine does
+// not honour — the panel refuses it instead of storing a lie.
+func TestTheHeartbeatIsValidatedAndStored(t *testing.T) {
+	panel, server := aServer(t)
+	cookie := aLogin(t, server)
+	panel.store.Links.Put("l1", &model.Link{ID: "l1", IranID: "i1", KharejID: "k1",
+		Status: "up", Transport: "ws", Ports: []string{}})
+
+	for _, c := range []struct {
+		body   string
+		status int
+		want   int
+	}{
+		{`{"heartbeat": 5}`, http.StatusOK, 5},
+		{`{"heartbeat": 0}`, http.StatusOK, 0},
+		{`{"heartbeat": 11}`, http.StatusBadRequest, 0},
+		{`{"heartbeat": -1}`, http.StatusBadRequest, 0},
+		{`{"heartbeat": "5"}`, http.StatusBadRequest, 0},
+	} {
+		status, _ := aGet(t, server, http.MethodPut, "/api/links/l1", c.body, cookie)
+		if status != c.status {
+			t.Errorf("the save of %s is %d, it must be %d", c.body, status, c.status)
+		}
+		if got := panel.store.Links.Get("l1").Heartbeat; got != c.want {
+			t.Errorf("after %s the heartbeat is %d, it must be %d", c.body, got, c.want)
+		}
+	}
+
+	// the same rule holds when a tunnel is created
+	if status, _ := aGet(t, server, http.MethodPost, "/api/links",
+		`{"iran_id": "i1", "kharej_id": "k1", "heartbeat": 11}`, cookie); status != http.StatusBadRequest {
+		t.Errorf("creating a tunnel with a heartbeat of 11 is %d, it must be 400", status)
+	}
+	status, answer := aGet(t, server, http.MethodPost, "/api/links",
+		`{"iran_id": "i1", "kharej_id": "k1", "heartbeat": 3}`, cookie)
+	if status != http.StatusOK {
+		t.Fatalf("creating a tunnel with a heartbeat of 3 is %d, it must be 200", status)
+	}
+	link, _ := answer["link"].(map[string]any)
+	if heartbeat, _ := link["heartbeat"].(float64); heartbeat != 3 {
+		t.Errorf("the created tunnel answers heartbeat %v, it must be 3", link["heartbeat"])
+	}
+}
+
 // The same for a domain: the ports of the drawer's picker, the group of
 // tunnels behind it, and the record itself — an edit of one of them keeps
 // the others, and never moves the record (the record moves with the switch

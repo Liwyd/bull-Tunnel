@@ -66,6 +66,7 @@
    ],
    "accept_udp": false,
    "mss": 0,
+   "heartbeat": 0,
    "label": "",
    "priority": 100,
    "managed": true,

@@ -7,6 +7,27 @@ only adds something.
 
 ## Unreleased
 
+### A heartbeat per tunnel
+
+The control channel of a tunnel can beat on demand now: `heartbeat` is
+how often the Iran server sends a liveness byte down it, so a client
+notices a server that has gone away without closing the socket — and the
+beat holds the path open while nothing is being carried.
+
+- `model.Link` carries `heartbeat`; the API sends and validates it. The
+  range is `0` or 1–10 seconds: the engine clamps anything above ten
+  seconds to ten (that is the longest its control channel goes without a
+  beat), so a bigger number would be a setting the engine does not
+  honour.
+- The renderer writes it into the `[server]` section only — the Iran side
+  is the one that beats, and the client's config has no such key. `0`
+  writes no line and leaves the engine's own rhythm.
+- The drawer's settings carry the field and its hint; a change is applied
+  the way the MSS is (both configurations written again, and a busy
+  tunnel waits for its rebuild).
+- The state file, the fixtures, `docs/engine-schema.md` and this
+  changelog carry the field.
+
 ### The page of a domain says what it covers and when it comes back
 
 The two numbers the dashboard never carried are on the domain page now:

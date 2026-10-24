@@ -86,6 +86,9 @@ func TestTheDrawerOfATunnelIsWorkedByGo(t *testing.T) {
 		// the MSS of the path is one of the settings, with the engine's own
 		// value as the empty answer
 		`data-field="mss" data-num data-def="0" data-scale="1" type="number" min="0"`,
+		// and the heartbeat of the control channel, the engine's own
+		// rhythm as the empty answer
+		`data-field="heartbeat" data-num data-def="0" data-scale="1" type="number" min="0"`,
 	)
 	// the marks the script read by hand are gone with the builders
 	hasNone(t, body, `data-apply-transport`, `data-pick=`, `data-save-ports`,

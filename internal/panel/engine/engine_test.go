@@ -119,6 +119,43 @@ func TestTheMaximumSegmentSizeIsWrittenOnBothSides(t *testing.T) {
 	}
 }
 
+// TestTheHeartbeatIsWrittenOnTheIranSideOnly: the heartbeat is the server's
+// — it sends the liveness byte down the control channel — so the Iran
+// configuration carries it and the foreign one never does. Zero writes
+// nothing: the engine's own rhythm for a tunnel the panel built, and the
+// value already in the file of a tunnel it adopted.
+func TestTheHeartbeatIsWrittenOnTheIranSideOnly(t *testing.T) {
+	kharej, iran, link := mk()
+	link.Heartbeat = 5
+	server := sectionOf(t, RenderServer(link, "tcpmux", link.Ports, kharej), "server")
+	client := sectionOf(t, RenderClient(link, "tcpmux", iran), "client")
+	if value, _ := server.Get("heartbeat"); value != int64(5) {
+		t.Errorf("the heartbeat of the Iran side is %v, it must be 5", value)
+	}
+	if _, there := client.Get("heartbeat"); there {
+		t.Error("the heartbeat was written into the foreign configuration; the Iran server is the one that beats")
+	}
+
+	link.Heartbeat = 0
+	server = sectionOf(t, RenderServer(link, "tcpmux", link.Ports, kharej), "server")
+	if _, there := server.Get("heartbeat"); there {
+		t.Error("a heartbeat of 0 was written into the Iran configuration")
+	}
+
+	// a tunnel the panel adopted keeps the setting the file has, until the
+	// operator gives one of their own
+	link.IranBase = ordered(map[string]any{"heartbeat": int64(40)})
+	server = sectionOf(t, RenderServer(link, "tcpmux", link.Ports, kharej), "server")
+	if value, _ := server.Get("heartbeat"); value != int64(40) {
+		t.Errorf("the adopted heartbeat of the Iran side is %v, it must be kept", value)
+	}
+	link.Heartbeat = 3
+	server = sectionOf(t, RenderServer(link, "tcpmux", link.Ports, kharej), "server")
+	if value, _ := server.Get("heartbeat"); value != int64(3) {
+		t.Errorf("the heartbeat of the Iran side is %v, it must override the adopted 40", value)
+	}
+}
+
 // TestAnAdoptedTunnelKeepsItsOwnSettings: a tunnel the panel found on a
 // server keeps the settings the panel does not manage.
 func TestAnAdoptedTunnelKeepsItsOwnSettings(t *testing.T) {

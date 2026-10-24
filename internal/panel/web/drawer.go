@@ -267,6 +267,7 @@ func (f *Facts) settingsBox(l *model.Link) string {
     <form>
     <div class="grid2">%s%s</div>
     %s
+    %s
     <label>The protocols the automatic repair of this tunnel tries</label>
     <div class="tchecks">%s</div>
     <div class="btns"><button class="btn sm" data-act="PUT /api/links/%s" data-done="Saved">Save</button>
@@ -276,6 +277,8 @@ func (f *Facts) settingsBox(l *model.Link) string {
 		num("Priority among the tunnels of this pair", "priority", l.Priority, 100, 0, 1),
 		num("Maximum TCP segment size (MSS)", "mss", l.MSS, 0, 0, 1)+
 			hint("For a path that connects and then stalls on large transfers: try 1400, then 1360 or 1280. 0 leaves the engine's own value. The setting is written on both ends."),
+		num("Heartbeat (seconds)", "heartbeat", l.Heartbeat, 0, 0, 1)+
+			hint("How often the Iran server sends a keep-alive down the control channel: a lower number notices a dead server sooner. 0 leaves the engine's own rhythm (a beat every 10 seconds). Written on the Iran server only."),
 		strings.Join(boxes, ""), escape(l.ID), deleteButton)
 }
 

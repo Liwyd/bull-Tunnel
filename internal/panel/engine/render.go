@@ -153,6 +153,13 @@ func serverSection(link *model.Link, transport string, ports []string, kharej *m
 	if link.MSS > 0 {
 		d.Set("mss", link.MSS)
 	}
+	// The heartbeat is the Iran side's alone: it is the server that sends
+	// the liveness byte down the control channel, and the client's own
+	// config has no such key. Zero writes no line, and the engine keeps
+	// its own rhythm.
+	if link.Heartbeat > 0 {
+		d.Set("heartbeat", link.Heartbeat)
+	}
 	if !d.Has("log_level") {
 		d.Set("log_level", "info")
 	}

@@ -55,6 +55,7 @@ transport = "tcpmux"           # the carrier, see below
 token = "6f1c…(32 hex chars)"  # shared secret: both ends must match
 accept_udp = false             # forward UDP as well as TCP
 mss = 1400                     # only when the path drops large packets
+heartbeat = 5                  # only when asked for: 1–10 seconds
 log_level = "info"
 ports = [
   "127.0.0.1:61000=127.0.0.1:22",  # the health probe (loopback only)
@@ -94,11 +95,19 @@ a tunnel connects and then stalls on the first large transfer, starting at
 1400 and going down to 1360 or 1280. `0`, or no line at all, leaves the
 engine's own value; the panel accepts 0 or a size between 536 and 65495.
 
+`heartbeat` is how often the Iran server sends a keep-alive byte down the
+control channel, so a client notices a server that has gone away without
+closing the socket. It is written on the Iran side only — the client's own
+config has no such key — and the engine clamps it to at most ten seconds
+whatever the line says. The panel therefore accepts 0 or a value between 1
+and 10 seconds; `0`, or no line at all, leaves the engine's own rhythm (a
+beat every 10 seconds).
+
 ### Keys the panel does not own
 
 When the panel rewrites a config it did not write itself, every key it does
-not manage is preserved (`mux_con`, `heartbeat`, …). The keys it does manage
-are `transport`, `token`, `ports`, `accept_udp`, `mss`,
+not manage is preserved (`mux_con`, …). The keys it does manage are
+`transport`, `token`, `ports`, `accept_udp`, `mss`, `heartbeat`,
 `bind_addr`/`remote_addr` and the tunnel port. The engine ignores the keys it
 does not know.
 

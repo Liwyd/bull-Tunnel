@@ -1231,6 +1231,7 @@ already work ✓.
 | 55 | The compression library Dependabot flagged is upgraded and `vendor/` is rebuilt | done |
 | 56 | A tunnel's maximum segment size (MSS) is a field, an API key, a config line on both ends and a line in the drawer | done |
 | 57 | The domain page says what it covers (the ports a healthy tunnel answers, per server in the failover order) and when it comes back to the primary | done |
+| 58 | A heartbeat per tunnel: a field, an API key, a config line on the Iran side and a line in the drawer | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design,
 the panel is Go and the dashboard is Go (phase 10 ✓).** What is left is
@@ -1491,13 +1492,25 @@ not worth it — these protocols are not important enough.
   so. Tests: the rendered TOML on both sides, the API round trip and its
   validation, the drawer field, and the two-sided deployment. The state
   fixtures, `docs/engine-schema.md` and the changelog carry the field.
+* ✅ **`heartbeat`** (commit 58, the beat of the control channel).
+  `model.Link.Heartbeat` → the `heartbeat` key of the link body and of
+  the API answer → validation (0, or 1–10 seconds: the engine clamps
+  anything above ten seconds to ten, so a bigger number would be a
+  setting it does not honour) → `d.Set("heartbeat", …)` in
+  `serverSection` **only** — the Iran side is the one that beats and the
+  client's config has no such key; 0 writes no line and leaves the
+  engine's own rhythm → the field and its hint in the drawer's settings.
+  A change goes through `SettingsChanged` with the MSS. Tests: the
+  rendered TOML on both ends (the foreign one must *not* carry it, and an
+  adopted file keeps its own value), the API round trip and its
+  validation, the drawer field — and the fixtures, `docs/engine-schema.md`
+  and the changelog carry the field.
 
 **In — panel-only, each one a field, a config line and a form line:**
 
 * the remaining per-tunnel knobs, in the order they earn their place:
-  `heartbeat` (NAT keep-alive), `dial_timeout` / `retry_interval`, then
-  `bandwidth_mbps` / `max_connections`, then the `kcp_*` / `mux_*`
-  tuning. Recipe per knob: a field on `model.Link` → the JSON key in
+  `dial_timeout` / `retry_interval`, then `bandwidth_mbps` /
+  `max_connections`, then the `kcp_*` / `mux_*` tuning. Recipe per knob: a field on `model.Link` → the JSON key in
   `api/collections.go`'s link body → one `d.Set` in
   `engine/render.go`'s `serverSection`/`clientSection` → a line in
   `web/forms.go`'s `linkForm` or the drawer's inline fields → assert

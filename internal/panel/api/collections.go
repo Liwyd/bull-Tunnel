@@ -237,6 +237,10 @@ func (s *Server) links(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, mssMessage)
 			return
 		}
+		if !validHeartbeat(body.Heartbeat) {
+			writeError(w, http.StatusBadRequest, heartbeatMessage)
+			return
+		}
 		link := body.model()
 		if link.IranID == "" || link.KharejID == "" {
 			writeError(w, http.StatusBadRequest, "the two servers of the tunnel are needed")
@@ -280,6 +284,13 @@ func (s *Server) linkByID(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if value, there := body["heartbeat"]; there {
+			number, ok := value.(float64)
+			if !ok || !validHeartbeat(int(number)) {
+				writeError(w, http.StatusBadRequest, heartbeatMessage)
+				return
+			}
+		}
 		// What the panel is given is written over the tunnel that is
 		// there, key by key — the way the Python panel's edit does. A
 		// tiny form in the drawer sends the one field it holds, and the
@@ -290,18 +301,21 @@ func (s *Server) linkByID(w http.ResponseWriter, r *http.Request) {
 		portsBefore := strings.Join(updated.Ports, ",")
 		udpBefore := updated.AcceptUDP
 		mssBefore := updated.MSS
+		heartbeatBefore := updated.Heartbeat
 		setString(body, "label", &updated.Label)
 		setIntDefault(body, "priority", &updated.Priority, 100)
 		setStrings(body, "allowed", &updated.Allowed)
 		setList(body, "ports", &updated.Ports)
 		setBool(body, "accept_udp", &updated.AcceptUDP)
 		setInt(body, "mss", &updated.MSS)
+		setInt(body, "heartbeat", &updated.Heartbeat)
 		setBool(body, "pinned", &updated.Pinned)
 		s.store.Links.Put(link.ID, updated)
 		switch {
-		case mssBefore != updated.MSS:
-			// the engine reads the MSS at start: both ends have to be
-			// written again, and the config of the far end carries it too
+		case mssBefore != updated.MSS || heartbeatBefore != updated.Heartbeat:
+			// the engine reads the MSS and the heartbeat when it starts:
+			// both ends have to be written again, and the config of the
+			// far end carries the setting too
 			s.orch.SettingsChanged(updated)
 		case portsBefore != strings.Join(updated.Ports, ",") || udpBefore != updated.AcceptUDP:
 			s.orch.PortsChanged(updated)
@@ -388,6 +402,23 @@ func validMSS(mss int) bool {
 	return mss == 0 || (mss >= minMSS && mss <= maxMSS)
 }
 
+// The heartbeat is how often the Iran server sends a liveness byte down the
+// control channel. The engine clamps it to at most ten seconds — that is
+// the longest its control channel goes without a beat, whatever a
+// configuration asks for — so a bigger number would be a setting the engine
+// does not honour and the operator does not get. Zero is no line at all:
+// the engine's own rhythm.
+const (
+	minHeartbeat     = 1
+	maxHeartbeat     = 10
+	heartbeatMessage = "the heartbeat must be 0 (the engine's own rhythm) or between 1 and 10 seconds"
+)
+
+// validHeartbeat says whether a heartbeat interval is one the engine uses.
+func validHeartbeat(seconds int) bool {
+	return seconds == 0 || (seconds >= minHeartbeat && seconds <= maxHeartbeat)
+}
+
 // linkBody is a tunnel as the panel sends and receives it.
 type linkBody struct {
 	ID         string   `json:"id"`
@@ -400,6 +431,7 @@ type linkBody struct {
 	Ports      []string `json:"ports"`
 	AcceptUDP  bool     `json:"accept_udp"`
 	MSS        int      `json:"mss"`
+	Heartbeat  int      `json:"heartbeat"`
 	Label      string   `json:"label"`
 	Priority   int      `json:"priority"`
 	Managed    bool     `json:"managed"`
@@ -420,6 +452,7 @@ func (b linkBody) model() *model.Link {
 		Ports:      b.Ports,
 		AcceptUDP:  b.AcceptUDP,
 		MSS:        b.MSS,
+		Heartbeat:  b.Heartbeat,
 		Label:      b.Label,
 		Priority:   b.Priority,
 		Managed:    b.Managed,
