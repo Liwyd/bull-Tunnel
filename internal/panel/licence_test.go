@@ -78,7 +78,7 @@ func TestTheAttributionTheLicenceRequiresIsWhereItMustBe(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("%s does not carry the two attribution lines, side by " +
+			t.Errorf("%s does not carry the two attribution lines, side by "+
 				"side and unaltered, where the engine's NOTICE requires them", file)
 		}
 	}
@@ -113,7 +113,7 @@ func TestTheLicenceFilesSayWhatTheyCover(t *testing.T) {
 	}
 	for _, want := range []string{"AGPL-3.0", "MIT", "internal/engine/NOTICE"} {
 		if !strings.Contains(string(notice), want) {
-			t.Errorf("the root NOTICE does not mention %q: a reader cannot " +
+			t.Errorf("the root NOTICE does not mention %q: a reader cannot "+
 				"tell which licence covers what from it", want)
 		}
 	}

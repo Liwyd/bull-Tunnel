@@ -1232,6 +1232,7 @@ already work ✓.
 | 56 | A tunnel's maximum segment size (MSS) is a field, an API key, a config line on both ends and a line in the drawer | done |
 | 57 | The domain page says what it covers (the ports a healthy tunnel answers, per server in the failover order) and when it comes back to the primary | done |
 | 58 | A heartbeat per tunnel: a field, an API key, a config line on the Iran side and a line in the drawer | done |
+| 59 | The licence test is formatted the way gofmt wants it — two string concatenations were committed with spaces around the `+` (a wart from commit 3809f47), so `gofmt -l` is clean again | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design,
 the panel is Go and the dashboard is Go (phase 10 ✓).** What is left is
