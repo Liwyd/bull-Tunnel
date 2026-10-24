@@ -331,3 +331,65 @@ func TestTheFeedKeepsTheTwoHundredNewestEvents(t *testing.T) {
 		t.Errorf("the feed holds an event that fell out of the 200: %s", feed)
 	}
 }
+
+// The page of a domain says what it covers and when it comes back: how many
+// of its ports a healthy tunnel answers — on the server the record points at
+// and on every server it may move to — and the countdown to the primary
+// while the record runs on a fallback.
+func TestTheDomainPageSaysWhatItCoversAndWhenItComesBack(t *testing.T) {
+	state := world(t)
+	page := func() string { return New(state, 1000, 990, nil, nil, Opts{}).Parts["dom-detail"] }
+	holds := func(where string, body string, want ...string) {
+		t.Helper()
+		for _, one := range want {
+			if !strings.Contains(body, one) {
+				t.Errorf("the page of the domain (%s) does not hold %q:\n%s", where, one, body)
+			}
+		}
+	}
+
+	// one port, one tunnel, up: the routes panel says it in its header,
+	// the failover list says it for the only server, and the server is
+	// both the primary and the one the record is on — so nothing counts
+	// down
+	holds("on its primary", page(),
+		`>1 / 1 port up<`,
+		`>primary<`,
+		`>current<`)
+	if strings.Contains(page(), "back to the primary server") {
+		t.Errorf("a domain on its primary server counts down a way back to it:\n%s", page())
+	}
+
+	// the tunnel drops: the number follows it
+	state.Links.Get("l1").Status = "down"
+	holds("tunnel down", page(), `>0 / 1 port up<`)
+	state.Links.Get("l1").Status = "up"
+
+	// a second Iran server, and the record standing on it: both servers
+	// are on the list, in the order the panel tries them, each with its
+	// own coverage — and the countdown back to the primary runs
+	state.Servers.Put("i2", &model.Server{ID: "i2", Name: "mashhad", Role: model.Iran,
+		IP: "198.51.100.9", Priority: 2, Enabled: true, Status: "online"})
+	state.Links.Put("l2", &model.Link{ID: "l2", KharejID: "k1", IranID: "i2", Transport: "tcp",
+		Ports: []string{"8443"}, Status: "up", Built: true})
+	domain := state.Domains.Get("d1")
+	domain.PrimaryIran = "i1"
+	domain.IranID = "i2"
+	domain.Group = []string{"l1", "l2"}
+	state.Domains.Put("d1", domain)
+	state.Links.Get("l2").UpSince = 990 // 990 up since, 600 of stability: 1590
+
+	fallback := page()
+	holds("on a fallback", fallback,
+		`data-at="1590" data-name="tehran"`,
+		`back to the primary server tehran in 9m 50s of stability`,
+		`>1 / 1 port up<`)
+	// the routes header says the coverage once, the failover list says it
+	// once per server: three in all
+	if strings.Count(fallback, `>1 / 1 port up<`) != 3 {
+		t.Errorf("the header and the two servers must each say what they cover:\n%s", fallback)
+	}
+	if strings.Index(fallback, ">primary<") > strings.Index(fallback, ">current<") {
+		t.Errorf("the failover list is not in the order the panel tries the servers:\n%s", fallback)
+	}
+}

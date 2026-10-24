@@ -1230,6 +1230,7 @@ already work ✓.
 | 54 | The 18MB of design mockups are deleted and nothing points at them; the one file of boilerplate is `CONTRIBUTING.md` | done |
 | 55 | The compression library Dependabot flagged is upgraded and `vendor/` is rebuilt | done |
 | 56 | A tunnel's maximum segment size (MSS) is a field, an API key, a config line on both ends and a line in the drawer | done |
+| 57 | The domain page says what it covers (the ports a healthy tunnel answers, per server in the failover order) and when it comes back to the primary | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design,
 the panel is Go and the dashboard is Go (phase 10 ✓).** What is left is
@@ -1259,11 +1260,17 @@ plan below: read **section 4** to continue from here.
   offered to the panel: they need raw sockets and root, and an unattended
   repair must not ask for either.
 * **The dashboard does not show how much of a domain's ports a healthy
-  tunnel covers, nor when the domain would fail back** — the API never
-  answers those two numbers, so the page says "—" and nothing. Both are
-  worked out inside the panel ✓ (the covering of a domain is a question the
-  orchestrator answers ✓, and the failback timer runs there ✓ and writes
-  what it does to the events ✓); they are not carried to the page yet ✓.
+  tunnel covers, nor when the domain would fail back** — ✅ **done
+  (commit 57).** The domain page says both now. The routes panel carries
+  the coverage of the server the record points at (green when every port
+  is up, amber for a part, red for none), the failover panel lists every
+  Iran server the record may move to with its own coverage in the order
+  the panel tries them — the coverage is one question asked of any
+  server, so the list and the header cannot disagree — and the countdown
+  back to the primary runs under the list the way it does in the drawer.
+  The countdown spans are named by their attribute now, not by an id,
+  because the drawer and the page are both in the DOM at the same time
+  and an id must be unique.
 * **The panel does not manage the layer-3 and the direct tunnels** of the
   engine: they are not reverse tunnels, and the panel's model has no place
   for them.

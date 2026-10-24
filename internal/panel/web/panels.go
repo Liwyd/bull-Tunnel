@@ -84,7 +84,12 @@ func (f *Facts) domainDetail(domain *model.Domain) string {
 	iran := f.ByID[domain.IranID]
 
 	routeRows := []string{}
+	covered, total := 0, 0
 	for _, one := range routes(f.State, domain, f.Status, f.Exits) {
+		total++
+		if one.Healthy {
+			covered++
+		}
 		class, link := "down", (*model.Link)(nil)
 		sub := "no tunnel opens this port on this server"
 		if one.LinkID != "" {
@@ -131,9 +136,45 @@ func (f *Facts) domainDetail(domain *model.Domain) string {
 		rows = `<span class="note">No port has been selected for this domain yet.</span>`
 	}
 
-	// The order the servers are tried in: the panel does not work the
-	// coverage of a domain out yet, so this says nothing until it does.
-	coverage := `<span class="note">—</span>`
+	// The servers the record may move to, in the order the panel tries
+	// them, with what each of them can carry now: the record goes to the
+	// first one that carries every port of the domain — the note above
+	// says so, and this list says which one that is. Under it, the
+	// countdown back to the primary, while the domain is running on a
+	// fallback.
+	failRows := []string{}
+	order := f.State.IranOrder(domain)
+	for i, id := range order {
+		server := f.ByID[id]
+		if server == nil {
+			continue
+		}
+		ok, portsHere := 0, 0
+		for _, one := range routesOn(f.State, domain, id, f.Status, f.Exits) {
+			portsHere++
+			if one.Healthy {
+				ok++
+			}
+		}
+		tags := ""
+		if i == 0 {
+			tags += chip("", "primary")
+		}
+		if id == domain.IranID {
+			tags += chip("ok", "current")
+		}
+		cover := `<span class="note">—</span>`
+		if portsHere > 0 {
+			cover = chip(coverClass(ok, portsHere), coverageText(ok, portsHere))
+		}
+		failRows = append(failRows, fmt.Sprintf(`<div class="opt"><span class="dot %s"></span>
+      <span class="grow"><span>%s <span class="mono muted small">%s</span></span></span>%s%s</div>`,
+			dotClass(server.Status), escape(server.Name), escape(server.IP), tags, cover))
+	}
+	failover := `<span class="note">No Iran server to move the record to yet.</span>`
+	if len(failRows) > 0 {
+		failover = `<div class="opt-list">` + strings.Join(failRows, "") + `</div>` + f.failback(domain)
+	}
 
 	account := "no DNS account"
 	if provider != nil {
@@ -162,6 +203,12 @@ func (f *Facts) domainDetail(domain *model.Domain) string {
 	iranName := "no Iran server"
 	if iran != nil {
 		iranName = iran.Name
+	}
+	// The header of the routes panel: the server the record points at, and
+	// how many of the ports listed below a healthy tunnel answers on it.
+	head := escape(iranName)
+	if total > 0 {
+		head += " " + chip(coverClass(covered, total), coverageText(covered, total))
 	}
 	statusWord := say(domain.Status)
 
@@ -217,7 +264,7 @@ func (f *Facts) domainDetail(domain *model.Domain) string {
     </div>
     <div class="panel-body">
       <p class="note">On a failure, the record moves to the first server in this list that has <b>all the ports of the domain</b> healthy.</p>
-      <div class="opt-list">%s</div>
+      %s
     </div>
   </div>`,
 		escape(domain.FQDN), prov, chipClass(domain.Status), escape(domain.Status), escape(statusWord),
@@ -226,8 +273,8 @@ func (f *Facts) domainDetail(domain *model.Domain) string {
 		escape(orDash(domain.CurrentIP)), domain.TTL, escape(f.ago(domain.LastSwitch)),
 		onOff(domain.AutoFailover), escape(account), errorLine(domain.Error),
 		escape(domain.ID), iconEdit, escape(domain.ID), iconRefresh, escape(domain.ID), iconTrash,
-		escape(iranName), rows, escape(domain.ID), iconEdit,
-		coverage)
+		head, rows, escape(domain.ID), iconEdit,
+		failover)
 }
 
 // exitSuffix is what a route says when the traffic leaves through a
@@ -237,6 +284,28 @@ func exitSuffix(text string) string {
 		return ""
 	}
 	return " ↪ " + escape(text)
+}
+
+// coverageText says how many ports are up: "1 / 2 ports up".
+func coverageText(ok, total int) string {
+	word := "ports"
+	if total == 1 {
+		word = "port"
+	}
+	return fmt.Sprintf("%d / %d %s up", ok, total, word)
+}
+
+// coverClass is the colour of a coverage chip: everything up is green, a
+// part of it is amber, none of it is red.
+func coverClass(ok, total int) string {
+	switch {
+	case ok >= total:
+		return "ok"
+	case ok > 0:
+		return "warn"
+	default:
+		return "bad"
+	}
 }
 
 // chipClass is the label of a status.

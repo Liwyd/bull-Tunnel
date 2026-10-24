@@ -7,6 +7,22 @@ only adds something.
 
 ## Unreleased
 
+### The page of a domain says what it covers and when it comes back
+
+The two numbers the dashboard never carried are on the domain page now:
+
+- The routes panel carries the coverage of the server the record points
+  at: how many of the domain's ports a healthy tunnel answers — green
+  when all of them are up, amber for a part of them, red for none.
+- The failover panel lists every Iran server the record may move to, in
+  the order the panel tries them, each with its own coverage — so the
+  server the note promises ("the first with all the ports healthy") is a
+  row with a number, not a promise.
+- The countdown back to the primary runs under that list while the record
+  is on a fallback, the way it does in the drawer. The countdown spans
+  are named by their attribute now, not by an id: the drawer and the
+  page are in the DOM at the same time, and an id must be unique.
+
 ### The maximum segment size of a tunnel
 
 Some paths connect and then stall on the first large transfer because they

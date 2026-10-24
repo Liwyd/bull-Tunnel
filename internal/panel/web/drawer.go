@@ -727,7 +727,9 @@ func (f *Facts) groupBox(d *model.Domain) string {
 // failback is the line that counts down the way back to the primary server,
 // when the domain is running on a fallback. The deadline is Go's to
 // compute; the span carries the epoch so the script can count the rest of
-// the sentence every second.
+// the sentence every second. The span is named by its attribute and not by
+// an id: the drawer and the page of the domain both carry one, and both
+// are in the page at the same time.
 func (f *Facts) failback(d *model.Domain) string {
 	order := f.State.IranOrder(d)
 	if len(order) < 2 || order[0] == d.IranID || !d.AutoFailover {
@@ -752,10 +754,10 @@ func (f *Facts) failback(d *model.Domain) string {
 	deadline := since + float64(f.State.Settings.FailbackAfter)
 	name := f.Name[primary]
 	if deadline <= f.Now {
-		return fmt.Sprintf(`<p><span id="failback-timer" data-name="%s">back to the primary server %s on the next check</span></p>`,
+		return fmt.Sprintf(`<p><span data-name="%s">back to the primary server %s on the next check</span></p>`,
 			escape(name), escape(name))
 	}
-	return fmt.Sprintf(`<p><span id="failback-timer" data-at="%d" data-name="%s">back to the primary server %s in %s of stability</span></p>`,
+	return fmt.Sprintf(`<p><span data-at="%d" data-name="%s">back to the primary server %s in %s of stability</span></p>`,
 		int64(deadline), escape(name), escape(name), escape(span(deadline-f.Now)))
 }
 

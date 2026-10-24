@@ -29,7 +29,7 @@ func TestTheScriptAsksForTheDrawerInsteadOfDrawingIt(t *testing.T) {
 	for _, kept := range []string{
 		`params.set("open", `,
 		`PARTS["drawer-body"] === ""`,
-		`getElementById("failback-timer")`,
+		`querySelectorAll("span[data-at]")`,
 		`el.dataset.at`,
 	} {
 		if !strings.Contains(script, kept) {

@@ -309,15 +309,23 @@ type route struct {
 // the tunnel that answers them.
 func routes(state *store.Store, domain *model.Domain, statusOf map[string]string,
 	exitsOf map[string][]forwarded) []route {
+	return routesOn(state, domain, domain.IranID, statusOf, exitsOf)
+}
+
+// routesOn is the same question asked of any Iran server the record could
+// point at — the failover list shows the coverage of every server the
+// domain may move to, not only of the one it is on now.
+func routesOn(state *store.Store, domain *model.Domain, iranID string, statusOf map[string]string,
+	exitsOf map[string][]forwarded) []route {
 	out := []route{}
-	if domain.IranID == "" {
+	if iranID == "" {
 		return out
 	}
 	who := map[string]string{}
 	for _, server := range state.Servers.List() {
 		who[server.ID] = server.Name
 	}
-	ports := state.PortMap(domain.IranID)
+	ports := state.PortMap(iranID)
 	for _, spec := range state.DomainSpecs(domain) {
 		entry := route{Spec: spec}
 		if link, there := ports[store.FirstPort(spec)]; there {

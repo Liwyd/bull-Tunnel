@@ -1097,20 +1097,21 @@ window.addEventListener("resize", () => {
 requestAnimationFrame(() => { lastStageW = stage.clientWidth; });
 
 /* The clock in the top bar, and the failback countdown. The countdown itself
-   is written by Go into the drawer (a span that carries the moment it runs
-   out, data-at, and the server it runs to, data-name); all that is left for
-   the script is to count it down once a second. */
+   is written by Go — into the drawer and into the page of the domain, as a
+   span that carries the moment it runs out (data-at) and the server it runs
+   to (data-name); all that is left for the script is to count every one of
+   them down once a second. */
 setInterval(() => {
   const d = new Date();
   $("#clock").textContent = [d.getHours(), d.getMinutes(), d.getSeconds()]
     .map((n) => String(n).padStart(2, "0")).join(":");
-  const el = document.getElementById("failback-timer");
-  if (!el || !el.dataset.at) return; // no moment to count to (or already due)
-  const left = Number(el.dataset.at) - nowS();
-  const name = el.dataset.name || "";
-  el.textContent = left <= 0
-    ? `back to the primary server ${name} on the next check`
-    : `back to the primary server ${name} in ${dur(left)} of stability`;
+  for (const el of document.querySelectorAll("span[data-at]")) {
+    const left = Number(el.dataset.at) - nowS();
+    const name = el.dataset.name || "";
+    el.textContent = left <= 0
+      ? `back to the primary server ${name} on the next check`
+      : `back to the primary server ${name} in ${dur(left)} of stability`;
+  }
 }, 1000);
 
 /* The quick settings of the settings page: the fields carry their keys and

@@ -230,7 +230,7 @@ func TestTheConnectionTestShowsTheLastMeasurement(t *testing.T) {
 // has nothing to count.
 func TestTheFailbackCountdownIsWorkedByGo(t *testing.T) {
 	// on the primary already: there is no countdown at all
-	if strings.Contains(drawer(t, world(t), "domain:d1"), "failback-timer") {
+	if strings.Contains(drawer(t, world(t), "domain:d1"), "back to the primary server") {
 		t.Error("a domain on its primary server counts down a way back to it")
 	}
 
@@ -251,7 +251,7 @@ func TestTheFailbackCountdownIsWorkedByGo(t *testing.T) {
 	state.Links.Get("l2").UpSince = 990
 	counting := drawer(t, state, "domain:d1")
 	hasAll(t, counting,
-		`id="failback-timer" data-at="1590" data-name="tehran"`,
+		`data-at="1590" data-name="tehran"`,
 		`back to the primary server tehran in 9m 50s of stability`,
 	)
 
@@ -259,7 +259,7 @@ func TestTheFailbackCountdownIsWorkedByGo(t *testing.T) {
 	// back, and there is nothing left to count
 	state.Links.Get("l2").UpSince = 0
 	ready := drawer(t, state, "domain:d1")
-	hasAll(t, ready, `id="failback-timer" data-name="tehran"`,
+	hasAll(t, ready, `data-name="tehran"`,
 		`back to the primary server tehran on the next check`)
 	if strings.Contains(ready, `data-at=`) {
 		t.Errorf("the countdown carries a moment it has already passed:\n%s", ready)
