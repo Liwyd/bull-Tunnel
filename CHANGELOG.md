@@ -7,6 +7,16 @@ only adds something.
 
 ## Unreleased
 
+- **The limiter counts the real address, and nothing reads for ever**
+  (the security review's S2): `X-Forwarded-For` is only believed from a
+  proxy on this machine — and then the last address is taken, the one the
+  proxy added — so a caller can no longer reset the login limiter at will
+  or point its counting at somebody else; every request body is bounded,
+  64KB at the door before sign-in and 100MB in the API (above the largest
+  backup a restore brings); and the panel's HTTP server reads for at most
+  five minutes, writes for at most five and closes a silent connection
+  after two, while the websocket clears its deadlines when it takes the
+  connection over, so a live page is unaffected.
 - **The dashboard is not shown before sign-in** (the security review's
   S1): `GET /` without a session answers the shell — the sign-in card and
   the furniture around it — and none of the network. The server names,

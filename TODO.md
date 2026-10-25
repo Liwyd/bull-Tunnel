@@ -118,7 +118,7 @@ builds the release files, boots the panel from a fresh data directory
 and asks everything an operator asks on the first day).
 
 **The next work** is the security review's queue (section 3), worst
-first: **S2** next. The detail of every planned item is section 4.
+first: **S3** next. The detail of every planned item is section 4.
 
 ---
 
@@ -151,8 +151,8 @@ first:
 | F2 | The id of a tunnel is written raw into the health script that runs on the Iran server: a crafted id (from the API or a restored state file) becomes part of a shell that runs every check cycle | ✅ done (commit 62) |
 | F3 | `/api/setup` fails open: when `auth.json` cannot be read at start, the panel answers "not configured" and anyone who reaches the port can set the admin password | ✅ done (commit 63) |
 | S1 | `GET /` answers the whole dashboard — server names, public IPs, roles, domain names — before anyone signs in | ✅ done (commit 64) |
-| S2 | The login limiter believes `X-Forwarded-For`, so a caller resets it at will; request bodies have no size limit and the server sets no read/write timeouts | next |
-| S3 | The websocket can be written from two goroutines at once (the library panics, the panel dies) and the state is read without the lock while it is being written | not done |
+| S2 | The login limiter believes `X-Forwarded-For`, so a caller resets it at will; request bodies have no size limit and the server sets no read/write timeouts | ✅ done (commit 65) |
+| S3 | The websocket can be written from two goroutines at once (the library panics, the panel dies) and the state is read without the lock while it is being written | next |
 | D1 | Saving the settings writes the Telegram mask over the real bot token, silently blinding every alert | not done |
 | D2 | The engine-download settings are wired one parameter off in `cmd/bull-tunnel-panel`: the release is ignored and the source URL is sent as the token | not done |
 | D3 | Some state-changing calls are GET and there is no CSRF token; only `SameSite=Strict` stands in the way | not done |
@@ -543,6 +543,7 @@ section 6, of the later ones in the changelog.
 | 62 | The id of an object is the panel's own shape at the door (letters, digits, dot, dash, underscore — refused with 400 otherwise), the id the health script echoes back is escaped for the shell that reads it, and a name carrying a line break in a configuration's header stays one line of comment instead of becoming a key of the tunnel's TOML (F2) | done |
 | 63 | The setup cannot take over a login file the panel cannot read: it answers 500 and leaves the file alone, its attempts are limited like the login's, and the session endpoint says what is wrong without the path or the system's reason — those go to the log of the service and to the state shown signed in (F3) | done |
 | 64 | The page is the shell before sign-in: `GET /` without a session answers the sign-in card and the furniture around it, and none of the network — the names, the addresses and the domains come with the session now; the script draws the dashboard from the API either way (S1) | done |
+| 65 | The limiter counts the address the connection came from: `X-Forwarded-For` is only believed from a proxy on this machine, and then the last hop is taken; every body is bounded — 64KB at the door before sign-in, 100MB in the API above the largest backup; and the panel's server reads for at most five minutes, writes for at most five, and closes a silent connection after two (S2) | done |
 
 ---
 

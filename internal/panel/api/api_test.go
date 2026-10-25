@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -374,5 +375,74 @@ func TestThePageBeforeSignInSaysNothingAboutTheNetwork(t *testing.T) {
 		if !strings.Contains(page, told) {
 			t.Errorf("the page signed in does not say %q any more", told)
 		}
+	}
+}
+
+// The limiter counts the attempts of an address, and the address is the
+// one the connection came from: X-Forwarded-For is only believed from a
+// proxy on this machine, so that a caller cannot give himself a new
+// "address" on every attempt or point the counting at somebody else.
+func TestTheLimiterIsNotResetByAHeader(t *testing.T) {
+	// a direct request: the header is not believed
+	direct := httptest.NewRequest(http.MethodGet, "/api/session", nil)
+	direct.RemoteAddr = "198.51.100.9:4444"
+	direct.Header.Set("X-Forwarded-For", "203.0.113.99")
+	if got := clientIP(direct); got != "198.51.100.9" {
+		t.Errorf("a direct request is counted as %q, it must be counted as the address it came from", got)
+	}
+	// behind the proxy of this machine: the last address of the header,
+	// the one the proxy added
+	proxied := httptest.NewRequest(http.MethodGet, "/api/session", nil)
+	proxied.RemoteAddr = "127.0.0.1:5555"
+	proxied.Header.Set("X-Forwarded-For", "203.0.113.99, 192.0.2.7")
+	if got := clientIP(proxied); got != "192.0.2.7" {
+		t.Errorf("a request behind the local proxy is counted as %q, it must be counted as the client the proxy names", got)
+	}
+
+	// end to end: eight refused setups from one direct address stop being
+	// answered, even when the caller writes himself a new forwarded
+	// address on every attempt
+	dir := t.TempDir()
+	login := auth.New(filepath.Join(dir, "auth.json"))
+	if err := login.SetPassword("admin", "s3cret-s3cret"); err != nil {
+		t.Fatalf("the password cannot be set: %v", err)
+	}
+	panel, _ := aServerWithAuth(t, login)
+	attempt := func(forwarded string) int {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/api/setup", strings.NewReader(`{"password": "x"}`))
+		request.RemoteAddr = "198.51.100.9:4444"
+		request.Header.Set("X-Forwarded-For", forwarded)
+		panel.setup(recorder, request)
+		return recorder.Code
+	}
+	for n := 1; n <= 8; n++ {
+		if code := attempt(fmt.Sprintf("203.0.113.%d", n)); code != http.StatusConflict {
+			t.Fatalf("attempt %d answers %d, it must be 409", n, code)
+		}
+	}
+	if code := attempt("203.0.113.99"); code != http.StatusTooManyRequests {
+		t.Errorf("the ninth attempt answers %d, it must be 429 with a header of his own choosing", code)
+	}
+}
+
+// The body of a request is bounded: the credentials are one line, so the
+// door reads at most 64KB before anyone has signed in, and the API reads
+// at most 100MB — above the largest backup a restore ever brings.
+func TestTheBodyOfARequestIsBounded(t *testing.T) {
+	// before sign-in: a megabyte of username does not fit
+	_, server := aServer(t)
+	big := `{"username": "` + strings.Repeat("a", 2<<20) + `", "password": "x"}`
+	if status, _ := aGet(t, server, http.MethodPost, "/api/setup", big, nil); status != http.StatusBadRequest {
+		t.Errorf("a setup of two megabytes answers %d, it must be 400", status)
+	}
+
+	// the API: a body that only fits past the limit is cut off
+	huge := `{"data": "` + strings.Repeat("x", maxBodyBytes+16) + `"}`
+	var into struct {
+		Data string `json:"data"`
+	}
+	if err := readBody(httptest.NewRequest(http.MethodPost, "/api/links", strings.NewReader(huge)), &into); err == nil {
+		t.Error("a body that asks for more than the limit was read to the end")
 	}
 }

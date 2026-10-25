@@ -142,6 +142,16 @@ func main() {
 		Addr:              host + ":" + port,
 		Handler:           panel.Handler(),
 		ReadHeaderTimeout: 20 * time.Second,
+		// A request is read for at most five minutes — long enough for
+		// the largest backup to arrive over a slow line — and an answer
+		// is written for at most five, so a reader that stops reading
+		// does not hold the panel's memory for ever. The websocket
+		// clears its deadlines when it takes the connection over, so a
+		// live page is not affected by either.
+		ReadTimeout: 5 * time.Minute,
+		// A connection nobody speaks on is closed after two minutes.
+		IdleTimeout:  2 * time.Minute,
+		WriteTimeout: 5 * time.Minute,
 	}
 	certificate, key := os.Getenv("BT_SSL_CERT"), os.Getenv("BT_SSL_KEY")
 	if certificate != "" && key != "" {

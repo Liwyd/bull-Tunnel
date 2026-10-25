@@ -74,6 +74,9 @@ func (s *Server) setup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "the login file could not be read; the reason is in the log")
 		return
 	}
+	// The credentials are one line; nothing bigger is ever read here,
+	// and this is answered before anyone has signed in.
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	var body credentials
 	if err := readBody(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "the request is not readable")
@@ -102,6 +105,8 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusTooManyRequests, "too many wrong passwords; try again in "+itoa(left)+" seconds")
 		return
 	}
+	// The credentials are one line; nothing bigger is ever read here.
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	var body credentials
 	if err := readBody(r, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "the request is not readable")

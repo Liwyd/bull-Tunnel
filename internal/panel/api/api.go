@@ -10,6 +10,7 @@ import (
 	"crypto/hmac"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -238,15 +239,26 @@ func sessionToken(r *http.Request) string {
 	return cookie.Value
 }
 
-// clientIP is the address of the client: the panel is usually behind a
-// reverse proxy, and the proxy sets X-Forwarded-For.
+// clientIP is the address of the client, for the limiter and the logs.
+//
+// The panel is usually behind a reverse proxy, and the proxy sets
+// X-Forwarded-For — but the header is only believed when the request
+// comes from a proxy on this machine. Anyone else can write the header
+// for themselves, and an address of their own choosing would have the
+// limiter count their attempts against somebody else, or never count
+// them at all. Behind the local proxy the last address of the header is
+// taken: that is the one the proxy added.
 func clientIP(r *http.Request) string {
-	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-		return strings.TrimSpace(strings.Split(fwd, ",")[0])
-	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+		return host
+	}
+	hops := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	if last := strings.TrimSpace(hops[len(hops)-1]); last != "" {
+		return last
 	}
 	return host
 }
@@ -278,12 +290,19 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]any{"detail": message})
 }
 
+// maxBodyBytes is the largest body the API reads. The backup restore
+// takes a file of up to 70MB as base64 — about 94MB of text — and that
+// is the biggest thing the panel is ever given; everything else is a
+// fraction of this. A request that asks for more is cut off before the
+// panel holds it.
+const maxBodyBytes = 100 << 20
+
 // readBody reads the body of a request into a value.
 func readBody(r *http.Request, into any) error {
 	if r.Body == nil {
 		return fmt.Errorf("the request has no body")
 	}
-	return json.NewDecoder(r.Body).Decode(into)
+	return json.NewDecoder(io.LimitReader(r.Body, maxBodyBytes)).Decode(into)
 }
 
 // index is the page of the panel.
