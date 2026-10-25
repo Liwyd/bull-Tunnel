@@ -16,6 +16,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,10 +43,13 @@ type Auth struct {
 	data     map[string]any
 	mtime    time.Time
 	haveTime bool
-	// Error says what went wrong with the file, if anything. The panel
-	// shows it: a login file that cannot be read must not lock the operator
-	// out without saying why.
-	Error string
+	// fileError says what went wrong with the file, if anything. The
+	// operator has to be told: a login file that cannot be read must not
+	// lock them out without saying why. The reason is said once in the
+	// log when it happens, and it is in the state of the panel for the
+	// operator who is signed in. It is written with the lock held, so it
+	// is read through FileError and never on its own.
+	fileError string
 }
 
 // New opens the login file.
@@ -59,7 +63,7 @@ func New(path string) *Auth {
 	if secret, _ := a.data["secret"].(string); secret == "" {
 		a.data["secret"] = randomHex(32)
 		// A file that exists but cannot be read is left alone.
-		if a.Error == "" {
+		if a.fileError == "" {
 			a.save()
 		}
 	}
@@ -90,22 +94,41 @@ func (a *Auth) reloadLocked() {
 		// where it is for the operator to look at, and the reason is shown
 		// in the panel. A file that is fixed changes its time, and it is
 		// read again.
-		a.Error = fmt.Sprintf("the login file could not be read: %v", err)
+		a.noteErrorLocked(fmt.Sprintf("the login file could not be read: %v", err))
 		a.mtime = info.ModTime()
 		a.haveTime = true
 		return
 	}
 	var data map[string]any
 	if err := json.Unmarshal(raw, &data); err != nil {
-		a.Error = fmt.Sprintf("the login file could not be read: %v", err)
+		a.noteErrorLocked(fmt.Sprintf("the login file could not be read: %v", err))
 		a.mtime = info.ModTime()
 		a.haveTime = true
 		return
 	}
 	a.data = data
-	a.Error = ""
+	a.fileError = ""
 	a.mtime = info.ModTime()
 	a.haveTime = true
+}
+
+// noteErrorLocked remembers what went wrong with the file, with the lock
+// held, and says it in the log the first time: the operator is told once
+// when the file breaks, not once per request.
+func (a *Auth) noteErrorLocked(message string) {
+	if a.fileError == "" {
+		log.Print(message)
+	}
+	a.fileError = message
+}
+
+// FileError says what went wrong with the login file, if anything. It
+// reloads first, so it says what is true now.
+func (a *Auth) FileError() string {
+	a.reload()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.fileError
 }
 
 // save writes the login file.

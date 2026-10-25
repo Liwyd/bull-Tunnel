@@ -7,6 +7,14 @@ only adds something.
 
 ## Unreleased
 
+- **The setup cannot take over a broken login** (the security review's
+  F3): when the login file exists but cannot be read, `/api/setup`
+  answers 500 and leaves the file alone instead of handing the panel to
+  whoever reaches the port first; setup attempts are now rate-limited
+  like the login's; and the session endpoint tells an unauthenticated
+  caller only that the login file could not be read — the path and the
+  system's reason go to the log of the service and to the state shown
+  signed in.
 - **An id can no longer reach the shell or the configuration** (the
   security review's F2): the API refuses an id outside the panel's own
   shape — letters, digits, dot, dash and underscore — for tunnels,

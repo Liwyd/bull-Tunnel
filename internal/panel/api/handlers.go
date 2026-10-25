@@ -19,8 +19,13 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		username = s.auth.Username()
 	}
 	errorMessage := ""
-	if s.auth != nil {
-		errorMessage = s.auth.Error
+	if s.auth != nil && s.auth.FileError() != "" {
+		// What exactly went wrong — the path of the file, the system's
+		// own reason — is in the log of the service and in the state the
+		// operator is shown signed in. This endpoint answers whoever
+		// reaches the port before signing in, so it says what is wrong
+		// and not where.
+		errorMessage = "the login file could not be read; the reason is in the log"
 	}
 	loggedIn := s.auth != nil && s.auth.Verify(sessionToken(r))
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -44,8 +49,29 @@ func (s *Server) setup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	who := clientIP(r)
+	allowed, left := s.limiter.Allowed(who)
+	if !allowed {
+		writeError(w, http.StatusTooManyRequests, "too many attempts; try again in "+itoa(left)+" seconds")
+		return
+	}
+	if s.auth == nil {
+		writeError(w, http.StatusInternalServerError, "the panel has no login at all")
+		return
+	}
 	if s.auth.Configured() {
+		s.limiter.Fail(who)
 		writeError(w, http.StatusConflict, "already configured")
+		return
+	}
+	// The login file exists but could not be read: Configured() answers
+	// "no" because nothing could be read from it, and setup would take
+	// that for a fresh panel and write a new password over the file of
+	// the operator — whoever reaches the port first would own the panel.
+	// The file is left alone and the attempt is refused.
+	if s.auth.FileError() != "" {
+		s.limiter.Fail(who)
+		writeError(w, http.StatusInternalServerError, "the login file could not be read; the reason is in the log")
 		return
 	}
 	var body credentials
@@ -148,8 +174,10 @@ func (s *Server) fullState() map[string]any {
 	if s.store.LoadError != "" {
 		errors = append(errors, s.store.LoadError)
 	}
-	if s.auth != nil && s.auth.Error != "" {
-		errors = append(errors, s.auth.Error)
+	if s.auth != nil {
+		if detail := s.auth.FileError(); detail != "" {
+			errors = append(errors, detail)
+		}
 	}
 	full["settings"] = settings
 	full["busy"] = s.busy()

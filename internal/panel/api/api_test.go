@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,9 +18,17 @@ import (
 func aServer(t *testing.T) (*Server, *httptest.Server) {
 	t.Helper()
 	dir := t.TempDir()
+	return aServerWithAuth(t, auth.New(filepath.Join(dir, "auth.json")))
+}
+
+// aServerWithAuth is the panel with the login the test gave it — the same
+// panel as aServer, only the login file is the test's to break or to set
+// up first.
+func aServerWithAuth(t *testing.T, login *auth.Auth) (*Server, *httptest.Server) {
+	t.Helper()
+	dir := t.TempDir()
 	state := store.New(filepath.Join(dir, "state.json"))
 	brain := orch.New(state)
-	login := auth.New(filepath.Join(dir, "auth.json"))
 	panel := New(Options{
 		Store:        state,
 		Orchestrator: brain,
@@ -204,5 +213,104 @@ func TestTheServerIsAddedAndForgotten(t *testing.T) {
 	servers, _ = answer["servers"].([]any)
 	if len(servers) != 0 {
 		t.Errorf("the state shows %d servers, it must show none", len(servers))
+	}
+}
+
+// The door must not open by breaking: when the login file exists but
+// could not be read, the panel has no password in memory and says "not
+// configured" — setup must not take that for a fresh panel and write a
+// new password over the file of the operator. Whoever reaches the port
+// would own the panel.
+func TestSetupCannotTakeOverALoginFileThePanelCannotRead(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "auth.json")
+	if err := os.WriteFile(path, []byte("{ this is not json"), 0o600); err != nil {
+		t.Fatalf("the login file cannot be written: %v", err)
+	}
+	login := auth.New(path)
+	_, server := aServerWithAuth(t, login)
+
+	status, _ := aGet(t, server, http.MethodPost, "/api/setup",
+		`{"username": "admin", "password": "hunter2hunter2"}`, nil)
+	if status != http.StatusInternalServerError {
+		t.Errorf("the setup answers %d, it must be 500 and leave the file alone", status)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the login file is not there: %v", err)
+	}
+	if string(raw) != "{ this is not json" {
+		t.Errorf("the login file is now %q, it must be the one that was there", raw)
+	}
+	if login.Configured() {
+		t.Error("the panel is configured through a file it could not read")
+	}
+	if login.Check("admin", "hunter2hunter2") {
+		t.Error("a password was taken over a login file that could not be read")
+	}
+}
+
+// A panel with no login file at all is a panel on its first day: setup is
+// the way it gets its password, and that must keep working.
+func TestSetupTakesThePasswordOnTheFirstDay(t *testing.T) {
+	dir := t.TempDir()
+	login := auth.New(filepath.Join(dir, "auth.json"))
+	_, server := aServerWithAuth(t, login)
+
+	status, _ := aGet(t, server, http.MethodPost, "/api/setup",
+		`{"username": "operator", "password": "s3cret-s3cret"}`, nil)
+	if status != http.StatusOK {
+		t.Errorf("the setup answers %d, it must be 200", status)
+	}
+	if !login.Check("operator", "s3cret-s3cret") {
+		t.Error("the password of the first day was not taken")
+	}
+}
+
+// The setup answers before anyone has proved anything, so an address that
+// keeps asking is stopped the way the login stops one that keeps getting
+// the password wrong.
+func TestSetupIsRateLimited(t *testing.T) {
+	dir := t.TempDir()
+	login := auth.New(filepath.Join(dir, "auth.json"))
+	if err := login.SetPassword("admin", "s3cret-s3cret"); err != nil {
+		t.Fatalf("the password cannot be set: %v", err)
+	}
+	_, server := aServerWithAuth(t, login)
+
+	for attempt := 1; attempt <= 8; attempt++ {
+		if status, _ := aGet(t, server, http.MethodPost, "/api/setup", `{"password": "x"}`, nil); status != http.StatusConflict {
+			t.Fatalf("attempt %d answers %d, it must be 409", attempt, status)
+		}
+	}
+	if status, _ := aGet(t, server, http.MethodPost, "/api/setup", `{"password": "x"}`, nil); status != http.StatusTooManyRequests {
+		t.Errorf("the ninth attempt answers %d, it must be 429", status)
+	}
+}
+
+// The session answers whoever reaches the port before signing in, so it
+// must not carry the inside of the machine: the operator is told that the
+// login file cannot be read, and the path of the file and the system's
+// own reason stay in the log and in the state shown signed in.
+func TestTheSessionDoesNotGiveAStrangerThePathOfTheLoginFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "auth.json")
+	if err := os.WriteFile(path, []byte("{ this is not json"), 0o600); err != nil {
+		t.Fatalf("the login file cannot be written: %v", err)
+	}
+	login := auth.New(path)
+	_, server := aServerWithAuth(t, login)
+
+	status, answer := aGet(t, server, http.MethodGet, "/api/session", "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("the session answers %d, it must be 200", status)
+	}
+	told, _ := answer["error"].(string)
+	const safe = "the login file could not be read; the reason is in the log"
+	if told == "" {
+		t.Fatal("the session does not say that the login file is broken")
+	}
+	if told != safe {
+		t.Errorf("the session says %q, it must say %q and nothing of the machine's inside", told, safe)
 	}
 }

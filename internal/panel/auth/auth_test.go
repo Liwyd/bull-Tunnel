@@ -92,7 +92,7 @@ func TestALoginFileThatCannotBeReadDoesNotLockTheOperatorOut(t *testing.T) {
 		t.Fatalf("the file cannot be written: %v", err)
 	}
 	a := New(path)
-	if a.Error == "" {
+	if a.FileError() == "" {
 		t.Error("the panel does not say that the login file is broken")
 	}
 	// the file is still there, untouched
