@@ -210,3 +210,42 @@ func TestADomainIsEditedWithoutForgettingTheRest(t *testing.T) {
 		t.Errorf("the name is %q, it must be the new one", edited.FQDN)
 	}
 }
+
+// The id of a new object is asked for at the door: an id becomes a file
+// name, a unit name and a word in a command line on the servers, so a
+// tunnel, a server, a domain and a DNS account may only be given the
+// letters, digits, dot, dash and underscore the panel writes itself. A
+// crafted id is refused with 400 and is stored nowhere; an id of the
+// panel's own shape is taken.
+func TestAnIdOutsideThePanelsOwnShapeIsRefused(t *testing.T) {
+	panel, server := aServer(t)
+	cookie := aLogin(t, server)
+	hostile := `l1"; touch pwned; echo "`
+	cases := []struct{ path, body string }{
+		{"/api/links", `{"id": "l1\"; touch pwned; echo \"", "iran_id": "i1", "kharej_id": "k1"}`},
+		{"/api/servers", `{"id": "l1\"; touch pwned; echo \"", "name": "n", "role": "iran", "ip": "1.2.3.4"}`},
+		{"/api/domains", `{"id": "l1\"; touch pwned; echo \"", "fqdn": "x.example", "provider_id": "p1"}`},
+		{"/api/providers", `{"id": "l1\"; touch pwned; echo \"", "name": "n", "zone": "example.com"}`},
+	}
+	for _, c := range cases {
+		if status, answer := aGet(t, server, http.MethodPost, c.path, c.body, cookie); status != http.StatusBadRequest {
+			t.Errorf("POST %s with a crafted id answers %d, it must be 400: %v", c.path, status, answer)
+		}
+	}
+	if panel.store.Links.Get(hostile) != nil || panel.store.Servers.Get(hostile) != nil ||
+		panel.store.Domains.Get(hostile) != nil || panel.store.Providers.Get(hostile) != nil {
+		t.Error("a crafted id was stored under its own name")
+	}
+	stored := len(panel.store.Links.List()) + len(panel.store.Servers.List()) +
+		len(panel.store.Domains.List()) + len(panel.store.Providers.List())
+	if stored != 0 {
+		t.Errorf("%d objects exist next to the refusals, there must be none", stored)
+	}
+	if status, _ := aGet(t, server, http.MethodPost, "/api/links",
+		`{"id": "l-keep_1.a", "iran_id": "i1", "kharej_id": "k1"}`, cookie); status != http.StatusOK {
+		t.Errorf("an id of the panel's own shape answers %d, it must be 200", status)
+	}
+	if panel.store.Links.Get("l-keep_1.a") == nil {
+		t.Error("the tunnel with an id of the panel's own shape is not stored")
+	}
+}

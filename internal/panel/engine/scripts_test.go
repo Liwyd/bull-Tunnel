@@ -1,9 +1,13 @@
 package engine
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Liwyd/bull-Tunnel/internal/panel/model"
 )
@@ -51,4 +55,41 @@ func readFixture(t *testing.T, dir string, name string) string {
 		t.Fatalf("the fixture cannot be read: %v", err)
 	}
 	return string(content)
+}
+
+// TestTheIdOfATunnelIsOnlyTheLettersItHolds: the id is written into the
+// line the health script echoes back, inside double quotes, and the panel
+// reads that line back as the id. Whatever an id that is not one of the
+// panel's may hold — it may come from a restored state file — it must
+// round-trip as those letters and must never be run by the shell that
+// executes the script every check cycle.
+func TestTheIdOfATunnelIsOnlyTheLettersItHolds(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh is needed to run the script")
+	}
+	dir := t.TempDir()
+	_, _, link := mk()
+	hostile := `l$(touch pwned-quote)"; touch pwned-semi #`
+	link.ID = hostile
+	link.IranName = ""
+	link.IranUnit = ""
+	link.Normalize()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sh", "-c", CheckScript([]*model.Link{link}))
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("the script does not run: %v", err)
+	}
+	if !strings.Contains(string(out), "@@"+hostile+"|") {
+		t.Errorf("the id did not come back as the letters it holds:\n%s", out)
+	}
+	if entries, readErr := os.ReadDir(dir); readErr == nil && len(entries) != 0 {
+		t.Errorf("the id was run: it left %v behind in the directory", entries)
+	}
+	if probes := ParseCheck(string(out), map[string]*model.Link{hostile: link}); probes[hostile] == nil {
+		t.Error("the panel cannot read back the line its own script wrote")
+	}
 }

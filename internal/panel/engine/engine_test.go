@@ -578,3 +578,29 @@ var errNotANumber = errNumber("not a number")
 type errNumber string
 
 func (e errNumber) Error() string { return string(e) }
+
+// TestTheHeaderOfTheConfigCannotBecomeTheConfig: the header of the
+// configuration is written as a comment, and a name in it that carries a
+// line break would put the line after it into the configuration as a key
+// of its own. A server's name is the operator's own text, so the break is
+// taken out before the file is written.
+func TestTheHeaderOfTheConfigCannotBecomeTheConfig(t *testing.T) {
+	kharej, iran, link := mk()
+	kharej.Name = "K\n[evil]\ninjected = 1"
+	iran.Name = "I\r\n[evil]\rinjected = 2"
+	for name, text := range map[string]string{
+		"the Iran side":   RenderServer(link, "tcpmux", link.Ports, kharej),
+		"the kharej side": RenderClient(link, "tcpmux", iran),
+	} {
+		all, err := ParseTOML(text)
+		if err != nil {
+			t.Fatalf("%s of the tunnel is not readable as TOML: %v", name, err)
+		}
+		if _, there := all.Get("evil"); there {
+			t.Errorf("%s: a name in the header opened a table of its own", name)
+		}
+		if _, there := all.Get("injected"); there {
+			t.Errorf("%s: a name in the header wrote a key of its own", name)
+		}
+	}
+}

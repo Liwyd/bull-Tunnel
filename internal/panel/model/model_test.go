@@ -174,3 +174,25 @@ func TestALinkWithoutAnIdentifierGetsOne(t *testing.T) {
 		t.Errorf("the identifier of the link is %q, it must be l42", kept.ID)
 	}
 }
+
+// TestAnIdIsOnlyTheLettersTheServersCanHold: an id of the panel becomes a
+// file name, a unit name and a word in a command line on the servers, so
+// the only shape it may have is the one the engine allows in a name —
+// letters, digits, dot, dash, underscore — and an empty string is not an
+// id at all (a new one is generated instead).
+func TestAnIdIsOnlyTheLettersTheServersCanHold(t *testing.T) {
+	for _, id := range []string{"l8224d3", NewID("l"), NewID("s"), "s_sc-1.a", "A.b_c-9", "v1.1.3"} {
+		if !ValidID(id) {
+			t.Errorf("%q is the shape the panel writes to its servers, and ValidID refuses it", id)
+		}
+	}
+	hostile := []string{
+		"", "two words", "a b", `a"b`, "a;b", "a$(id)", "a`id`", "a/b",
+		`..\state`, "a\nb", "a\rb", "a|b", "a&b", "a>b", "a\tb",
+	}
+	for _, id := range hostile {
+		if ValidID(id) {
+			t.Errorf("%q is not the shape of a file name, and ValidID takes it", id)
+		}
+	}
+}

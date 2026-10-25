@@ -5,6 +5,17 @@ All the versions of bull-Tunnel. The project follows
 change that may break a configuration, the one after it is a change that
 only adds something.
 
+## Unreleased
+
+- **An id can no longer reach the shell or the configuration** (the
+  security review's F2): the API refuses an id outside the panel's own
+  shape — letters, digits, dot, dash and underscore — for tunnels,
+  servers, domains and DNS accounts; the health script escapes the id it
+  echoes back, so even an id from a restored state file round-trips as
+  those letters and is never run; and a name carrying a line break in a
+  configuration's header line stays one line of comment instead of
+  becoming a key of the tunnel's TOML.
+
 ## 1.4.0 — 2026-10-25
 
 The dashboard tells the operator what it knows. The page of a domain

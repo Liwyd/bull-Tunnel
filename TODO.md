@@ -77,6 +77,12 @@ node --check static/app.js
 bash tests/install-check.sh     # release files → unpack → boot → everything an operator asks
 ```
 
+To watch it working by hand:
+
+```bash
+go run ./cmd/bull-tunnel-panel --demo --data /tmp/panel-demo --port 18080
+```
+
 ---
 
 ## 1. Where the project stands — the checkpoint of 2026-10-25
@@ -112,7 +118,7 @@ builds the release files, boots the panel from a fresh data directory
 and asks everything an operator asks on the first day).
 
 **The next work** is the security review's queue (section 3), worst
-first: **F2** next. The detail of every planned item is section 4.
+first: **F3** next. The detail of every planned item is section 4.
 
 ---
 
@@ -142,8 +148,8 @@ first:
 | # | Finding | Status |
 |---|---------|--------|
 | F1 | A carrier name of the operator's choosing could reach the command the panel runs over SSH on the foreign server — via `POST /api/probe`, via the settings' `candidate_transports`, and inside the measurement itself | ✅ done (commit 60) |
-| F2 | The id of a tunnel is written raw into the health script that runs on the Iran server: a crafted id (from the API or a restored state file) becomes part of a shell that runs every check cycle | next |
-| F3 | `/api/setup` fails open: when `auth.json` cannot be read at start, the panel answers "not configured" and anyone who reaches the port can set the admin password | not done |
+| F2 | The id of a tunnel is written raw into the health script that runs on the Iran server: a crafted id (from the API or a restored state file) becomes part of a shell that runs every check cycle | ✅ done (commit 62) |
+| F3 | `/api/setup` fails open: when `auth.json` cannot be read at start, the panel answers "not configured" and anyone who reaches the port can set the admin password | next |
 | S1 | `GET /` answers the whole dashboard — server names, public IPs, roles, domain names — before anyone signs in | not done |
 | S2 | The login limiter believes `X-Forwarded-For`, so a caller resets it at will; request bodies have no size limit and the server sets no read/write timeouts | not done |
 | S3 | The websocket can be written from two goroutines at once (the library panics, the panel dies) and the state is read without the lock while it is being written | not done |
@@ -532,6 +538,9 @@ section 6, of the later ones in the changelog.
 | 57 | The domain page says what it covers (the ports a healthy tunnel answers, per server in the failover order) and when it comes back to the primary | done |
 | 58 | A heartbeat per tunnel: a field, an API key, a config line on the Iran side and a line in the drawer | done |
 | 59 | The licence test is formatted the way gofmt wants it — two string concatenations were committed with spaces around the `+` (a wart from commit 3809f47), so `gofmt -l` is clean again | done |
+| 60 | A carrier name of the operator's choosing could reach the command the panel runs over SSH: only the panel's own carriers are taken now, refused at the API of the connection test, in the settings, and inside the measurement itself | done |
+| 61 | The release 1.4.0: the version has one home (`internal/panel/version.go`), the changelog carries the heading `## 1.4.0 — 2026-10-25`, and the tag `v1.4.0` makes the CI build the release files and publish the release | done |
+| 62 | The id of an object is the panel's own shape at the door (letters, digits, dot, dash, underscore — refused with 400 otherwise), the id the health script echoes back is escaped for the shell that reads it, and a name carrying a line break in a configuration's header stays one line of comment instead of becoming a key of the tunnel's TOML (F2) | done |
 
 ---
 

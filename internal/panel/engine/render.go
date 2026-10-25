@@ -82,7 +82,7 @@ func tomlList(length int, element func(int) string) string {
 func dumpSection(name string, data *model.Ordered, header string) string {
 	lines := []string{}
 	if header != "" {
-		lines = append(lines, header)
+		lines = append(lines, commentLine(header))
 	}
 	lines = append(lines, "["+name+"]")
 	subs := []struct {
@@ -105,6 +105,16 @@ func dumpSection(name string, data *model.Ordered, header string) string {
 		out += "\n" + dumpSection(name+"."+sub.key, &sub.value, "")
 	}
 	return out
+}
+
+// commentLine keeps a header on the one line it was written for: it is
+// written as a TOML comment at the top of the configuration, and a name
+// carrying a line break would put the line after it into that
+// configuration as a key of its own.
+func commentLine(line string) string {
+	line = strings.ReplaceAll(line, "\r\n", " ")
+	line = strings.ReplaceAll(line, "\n", " ")
+	return strings.ReplaceAll(line, "\r", " ")
 }
 
 // asSection is a value of a table when it is a table itself.

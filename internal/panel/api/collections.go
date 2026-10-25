@@ -95,6 +95,10 @@ func (s *Server) servers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		server := body.model()
+		if !model.ValidID(server.ID) {
+			writeError(w, http.StatusBadRequest, "the id of a server may only contain letters, digits, dot, dash and underscore")
+			return
+		}
 		if server.Role != model.Iran && server.Role != model.Kharej {
 			writeError(w, http.StatusBadRequest, "the role must be iran or kharej")
 			return
@@ -243,6 +247,10 @@ func (s *Server) links(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		link := body.model()
+		if !model.ValidID(link.ID) {
+			writeError(w, http.StatusBadRequest, "the id of a tunnel may only contain letters, digits, dot, dash and underscore")
+			return
+		}
 		if link.IranID == "" || link.KharejID == "" {
 			writeError(w, http.StatusBadRequest, "the two servers of the tunnel are needed")
 			return
@@ -500,6 +508,10 @@ func (s *Server) domains(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		domain := body.model()
+		if !model.ValidID(domain.ID) {
+			writeError(w, http.StatusBadRequest, "the id of a domain may only contain letters, digits, dot, dash and underscore")
+			return
+		}
 		if domain.FQDN == "" || domain.ProviderID == "" {
 			writeError(w, http.StatusBadRequest, "the name and the DNS account of the domain are needed")
 			return
@@ -646,6 +658,10 @@ func (s *Server) providers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		provider := body.model()
+		if !model.ValidID(provider.ID) {
+			writeError(w, http.StatusBadRequest, "the id of a DNS account may only contain letters, digits, dot, dash and underscore")
+			return
+		}
 		if provider.Name == "" || provider.Zone == "" {
 			writeError(w, http.StatusBadRequest, "the name and the zone of the account are needed")
 			return

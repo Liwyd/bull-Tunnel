@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"time"
 )
@@ -83,6 +84,21 @@ func ValidTransport(name string) bool {
 		}
 	}
 	return false
+}
+
+// safeID is the shape of an id the panel accepts: the same letters,
+// digits, dot, dash and underscore the engine allows in a name it writes
+// to a server (`safeName` in engine/ports.go). An id becomes a file name,
+// a unit name and a word in a command line on the servers, so nothing
+// outside this shape may ever be one.
+var safeID = regexp.MustCompile(`^[A-Za-z0-9_.\-]+$`)
+
+// ValidID says whether a string may be the id of a tunnel, a server, a
+// domain or a DNS account. The API refuses an id outside this shape
+// before anything is stored under it. An empty string is not an id: a new
+// one is generated instead.
+func ValidID(id string) bool {
+	return safeID.MatchString(id)
 }
 
 // DefaultTransports are the carriers a new tunnel is built on, in the order

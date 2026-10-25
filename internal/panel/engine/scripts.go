@@ -57,6 +57,21 @@ func probeSnippet(port int) string {
 	return fmt.Sprintf("timeout 3 bash -c 'exec 3<>/dev/tcp/127.0.0.1/%d; head -c 4 <&3' 2>/dev/null", port)
 }
 
+// dquote writes a string into a double-quoted shell word: the four
+// characters the shell reads inside those quotes are handed back to it
+// escaped. An id of the panel (letters, digits, dot, dash, underscore)
+// comes out of this unchanged, so the script of the contract stays byte
+// for byte; an id that is not one — from a restored state file — comes
+// out as the letters it holds, and never as the shell it might have been.
+func dquote(s string) string {
+	return strings.NewReplacer(
+		`\`, `\\`,
+		`"`, `\"`,
+		`$`, `\$`,
+		"`", "\\`",
+	).Replace(s)
+}
+
 // CheckScript is one round trip per Iran server: the state of the unit, the
 // engine's own view, an end-to-end probe where the tunnel has one, and the
 // established connections on the tunnel port (from /proc, no tools needed)
@@ -75,7 +90,7 @@ c=$(grep -o '"connected": *[a-z]*' %s/%s.metrics.json 2>/dev/null | grep -o '[a-
 %s
 e=$(cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | awk '{ split($2,a,":"); if (a[2]=="%04X" && $4=="01") n++ } END { print n+0 }')
 echo "@@%s|$a|$c|$p|$(( t1 - t0 ))|$e"
-`, unit, ConfDir, name, probe, x.TunnelPort, x.ID))
+`, unit, ConfDir, name, probe, x.TunnelPort, dquote(x.ID)))
 	}
 	return strings.Join(parts, "\n")
 }
