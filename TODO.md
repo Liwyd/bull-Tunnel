@@ -1234,6 +1234,7 @@ already work ✓.
 | 58 | A heartbeat per tunnel: a field, an API key, a config line on the Iran side and a line in the drawer | done |
 | 59 | The licence test is formatted the way gofmt wants it — two string concatenations were committed with spaces around the `+` (a wart from commit 3809f47), so `gofmt -l` is clean again | done |
 | 60 | A carrier name of the operator's choosing could reach the command the panel runs over SSH: only the panel's own carriers are taken now, refused at the API of the connection test, in the settings, and inside the measurement itself | done |
+| 61 | The release 1.4.0: the version has one home (`internal/panel/version.go`), the changelog carries the heading `## 1.4.0 — 2026-10-25`, and the tag `v1.4.0` makes the CI build the release files and publish the release | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design,
 the panel is Go and the dashboard is Go (phase 10 ✓).** What is left is

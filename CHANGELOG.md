@@ -5,7 +5,16 @@ All the versions of bull-Tunnel. The project follows
 change that may break a configuration, the one after it is a change that
 only adds something.
 
-## Unreleased
+## 1.4.0 — 2026-10-25
+
+The dashboard tells the operator what it knows. The page of a domain
+answers the two numbers it never carried — how many of its ports a
+healthy tunnel answers, on every server the record may move to, and when
+the record comes back to the primary — the tunnels gained the two knobs
+the engine honours (`heartbeat`, `mss`), and the connection test takes
+only the panel's own carriers where it builds a command line for the
+servers. The compression library was upgraded to the patched release
+Dependabot flagged.
 
 ### The carriers a measurement may try are the panel's own
 

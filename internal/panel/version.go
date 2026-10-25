@@ -6,4 +6,4 @@ package panel
 // the home moved here. The build script reads it from this file and stamps
 // it into the binaries, and the binaries that are built without the stamp
 // still say the right thing.
-const Version = "1.3.0"
+const Version = "1.4.0"
