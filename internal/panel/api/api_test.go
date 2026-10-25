@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Liwyd/bull-Tunnel/internal/panel/auth"
+	"github.com/Liwyd/bull-Tunnel/internal/panel/model"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/orch"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/store"
 )
@@ -312,5 +314,65 @@ func TestTheSessionDoesNotGiveAStrangerThePathOfTheLoginFile(t *testing.T) {
 	}
 	if told != safe {
 		t.Errorf("the session says %q, it must say %q and nothing of the machine's inside", told, safe)
+	}
+}
+
+// aHTML asks the panel for a page exactly as the browser gets it: the
+// bytes, not a JSON answer.
+func aHTML(t *testing.T, server *httptest.Server, path string, cookie *http.Cookie) (int, string) {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodGet, server.URL+path, nil)
+	if err != nil {
+		t.Fatalf("the request cannot be made: %v", err)
+	}
+	if cookie != nil {
+		request.AddCookie(cookie)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("the request failed: %v", err)
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("the page cannot be read: %v", err)
+	}
+	return response.StatusCode, string(raw)
+}
+
+// The page is the shell before sign-in: the names, the addresses and the
+// domains of the panel are for the operator who has signed in. The script
+// draws the whole dashboard from the API once he has, so the shell loses
+// him nothing.
+func TestThePageBeforeSignInSaysNothingAboutTheNetwork(t *testing.T) {
+	panel, server := aServer(t)
+	panel.store.Servers.Put("k1", &model.Server{ID: "k1", Name: "frankfurt-exit", Role: model.Kharej,
+		IP: "203.0.113.7", Priority: 1, Enabled: true, Status: "online"})
+	panel.store.Servers.Put("i1", &model.Server{ID: "i1", Name: "tehran-box", Role: model.Iran,
+		IP: "198.51.100.4", Priority: 1, Enabled: true, Status: "online"})
+	panel.store.Domains.Put("d1", &model.Domain{ID: "d1", FQDN: "secret.example", ProviderID: "p1", IranID: "i1"})
+
+	status, page := aHTML(t, server, "/", nil)
+	if status != http.StatusOK {
+		t.Fatalf("the page answers %d, it must be 200", status)
+	}
+	if !strings.Contains(page, `id="auth"`) {
+		t.Error("the page before sign-in has no sign-in card")
+	}
+	for _, secret := range []string{"frankfurt-exit", "tehran-box", "203.0.113.7", "198.51.100.4", "secret.example"} {
+		if strings.Contains(page, secret) {
+			t.Errorf("the page before sign-in says %q about the network", secret)
+		}
+	}
+
+	cookie := aLogin(t, server)
+	status, page = aHTML(t, server, "/", cookie)
+	if status != http.StatusOK {
+		t.Fatalf("the page signed in answers %d, it must be 200", status)
+	}
+	for _, told := range []string{"tehran-box", "203.0.113.7"} {
+		if !strings.Contains(page, told) {
+			t.Errorf("the page signed in does not say %q any more", told)
+		}
 	}
 }

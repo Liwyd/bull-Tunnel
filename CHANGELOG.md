@@ -7,6 +7,12 @@ only adds something.
 
 ## Unreleased
 
+- **The dashboard is not shown before sign-in** (the security review's
+  S1): `GET /` without a session answers the shell — the sign-in card and
+  the furniture around it — and none of the network. The server names,
+  the addresses and the domains come with the session; the dashboard is
+  drawn by the script from the API either way, so nothing changes for the
+  operator who signs in.
 - **The setup cannot take over a broken login** (the security review's
   F3): when the login file exists but cannot be read, `/api/setup`
   answers 500 and leaves the file alone instead of handing the panel to

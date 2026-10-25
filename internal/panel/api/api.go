@@ -295,10 +295,21 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	s.store.RLock()
-	view := web.ReadFacts(s.store, now(), s.orch.LastCheck(), s.busy(), s.flapping()).View()
-	s.store.RUnlock()
-	content, err := web.Page(s.version, view)
+	// Before sign-in the page is the shell: the sign-in card and the
+	// furniture around it, without the network view. The names, the
+	// addresses and the domains of the panel are for the operator who
+	// has signed in — and nothing is lost by it, because the script
+	// draws the whole dashboard from the API once he has.
+	var content []byte
+	var err error
+	if s.auth != nil && s.auth.Verify(sessionToken(r)) {
+		s.store.RLock()
+		view := web.ReadFacts(s.store, now(), s.orch.LastCheck(), s.busy(), s.flapping()).View()
+		s.store.RUnlock()
+		content, err = web.Page(s.version, view)
+	} else {
+		content, err = web.Shell(s.version)
+	}
 	if err != nil {
 		// the page could not be rendered: the one that is on the disk is
 		// better than nothing.
