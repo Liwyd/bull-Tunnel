@@ -7,6 +7,15 @@ only adds something.
 
 ## Unreleased
 
+### The carriers a measurement may try are the panel's own
+
+A carrier name is written into the command the panel runs over SSH on the
+foreign server. The panel now takes its own carriers — the engine's list,
+`tcpmux` … `wss` — and refuses anything else, in three places: the API of
+the connection test, the settings' list of carriers to try, and the
+measurement itself, which is the last gate before the shell. A name of
+anyone's own making can no longer become part of a command.
+
 ### A heartbeat per tunnel
 
 The control channel of a tunnel can beat on demand now: `heartbeat` is

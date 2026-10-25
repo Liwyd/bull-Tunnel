@@ -96,3 +96,32 @@ func TestTheConnectionTestIsKeptForTheDrawer(t *testing.T) {
 		t.Error("the state file holds the measurements of the moment")
 	}
 }
+
+// A carrier name is written into the command the panel runs over SSH on
+// the foreign server, so the connection test takes the panel's own carriers
+// — the engine's list — and nothing else. The list of carriers to try in
+// the settings ends up on the same command line (the measurement takes it
+// when no carrier is named), so it is written the same way.
+func TestTheConnectionTestOnlyTakesThePanelsOwnCarriers(t *testing.T) {
+	panel, server := aServer(t)
+	cookie := aLogin(t, server)
+	twoSides(t, panel)
+
+	if status, _ := aGet(t, server, http.MethodPost, "/api/probe",
+		`{"server": "k1", "peer": "i1", "transports": ["tcp; touch /tmp/pwn"]}`, cookie); status != http.StatusBadRequest {
+		t.Errorf("a carrier of the operator's own making is %d, it must be 400", status)
+	}
+	if status, _ := aGet(t, server, http.MethodPost, "/api/probe",
+		`{"server": "k1", "peer": "i1", "transports": ["tcp"]}`, cookie); status != http.StatusOK {
+		t.Errorf("the carrier tcp is the panel's own and must be measured, the answer is %d", status)
+	}
+
+	if status, _ := aGet(t, server, http.MethodPut, "/api/settings",
+		`{"candidate_transports": ["tcp", "$(id)"]}`, cookie); status != http.StatusBadRequest {
+		t.Error("a carrier of the operator's own making was written into the settings")
+	}
+	if status, _ := aGet(t, server, http.MethodPut, "/api/settings",
+		`{"candidate_transports": ["tcp", "ws"]}`, cookie); status != http.StatusOK {
+		t.Error("the carriers of the panel were refused by the settings")
+	}
+}

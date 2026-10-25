@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -751,6 +752,24 @@ func (s *Server) settings(w http.ResponseWriter, r *http.Request) {
 		if err := readBody(r, &body); err != nil {
 			writeError(w, http.StatusBadRequest, "the request is not readable")
 			return
+		}
+		// The list of carriers to try ends up on a command line run over
+		// SSH (the measurement takes it when no carrier is named), so the
+		// panel takes its own carriers and nothing else.
+		if value, there := body["candidate_transports"]; there {
+			list, ok := value.([]any)
+			if !ok {
+				writeError(w, http.StatusBadRequest, "the carriers to try must be a list of names")
+				return
+			}
+			for _, one := range list {
+				name, isText := one.(string)
+				if !isText || !model.ValidTransport(name) {
+					writeError(w, http.StatusBadRequest,
+						fmt.Sprintf("the panel does not offer the carrier %v", one))
+					return
+				}
+			}
 		}
 		s.applySettings(body)
 		s.orch.Changed()

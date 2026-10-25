@@ -1233,11 +1233,44 @@ already work ✓.
 | 57 | The domain page says what it covers (the ports a healthy tunnel answers, per server in the failover order) and when it comes back to the primary | done |
 | 58 | A heartbeat per tunnel: a field, an API key, a config line on the Iran side and a line in the drawer | done |
 | 59 | The licence test is formatted the way gofmt wants it — two string concatenations were committed with spaces around the `+` (a wart from commit 3809f47), so `gofmt -l` is clean again | done |
+| 60 | A carrier name of the operator's choosing could reach the command the panel runs over SSH: only the panel's own carriers are taken now, refused at the API of the connection test, in the settings, and inside the measurement itself | done |
 
 **All the findings of the audit are closed, the graph is the type-1 design,
 the panel is Go and the dashboard is Go (phase 10 ✓).** What is left is
 the work that never ends — watching the panel on a live server — and the
 plan below: read **section 4** to continue from here.
+
+### The security review of the control panel (October 2026)
+
+The control plane (`internal/panel`) was reviewed for security after the
+last release. Every finding gets its own commit, its own test and its own
+row in the table above; they are fixed in this order, worst first:
+
+| # | Finding | Status |
+|---|---------|--------|
+| F1 | A carrier name of the operator's choosing could reach the command the panel runs over SSH on the foreign server — via `POST /api/probe`, via the settings' `candidate_transports`, and inside the measurement itself | ✅ done (commit 60) |
+| F2 | The id of a tunnel is written raw into the health script that runs on the Iran server: a crafted id (from the API or a restored state file) becomes part of a shell that runs every check cycle | next |
+| F3 | `/api/setup` fails open: when `auth.json` cannot be read at start, the panel answers "not configured" and anyone who reaches the port can set the admin password | not done |
+| S1 | `GET /` answers the whole dashboard — server names, public IPs, roles, domain names — before anyone signs in | not done |
+| S2 | The login limiter believes `X-Forwarded-For`, so a caller resets it at will; request bodies have no size limit and the server sets no read/write timeouts | not done |
+| S3 | The websocket can be written from two goroutines at once (the library panics, the panel dies) and the state is read without the lock while it is being written | not done |
+| D1 | Saving the settings writes the Telegram mask over the real bot token, silently blinding every alert | not done |
+| D2 | The engine-download settings are wired one parameter off in `cmd/bull-tunnel-panel`: the release is ignored and the source URL is sent as the token | not done |
+| D3 | Some state-changing calls are GET and there is no CSRF token; only `SameSite=Strict` stands in the way | not done |
+| D4 | The Telegram `api_base` and the DoH resolvers take any URL: the bot token can be sent to a host of the operator's typing and internal addresses are reachable | not done |
+| D5 | A POST with an id that already exists takes the object over, masks and all | not done |
+| D6 | Restoring a backup decompresses without a bound: a small file can ask for gigabytes | not done |
+| W1 | `command_key` — the key that signs the commands the agent obeys — is sent raw where every other secret is masked | not done |
+| W2 | Internal error detail (paths, hosts) is answered to the browser, including on the unauthenticated session endpoint | not done |
+| W3 | The session cookie is `Secure` only when the request itself was TLS | not done |
+| W4 | The websocket upgrade accepts any origin | not done |
+| W5 | The command channel is gated on the agent only; the panel sends whatever is asked | not done |
+| W6 | The local management key counts for every route, and behind a reverse proxy every request looks local | not done |
+| W7 | Creating a link or a domain does not check that the servers it names exist | not done |
+
+Nothing in this list is a hole in the engine or in the crypto: the review
+found the password hashing, the session signing, the quoting of names for
+the shell, the backup encryption and the static serving sound.
 
 ### What is left to do, and is not a fault
 

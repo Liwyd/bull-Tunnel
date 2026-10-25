@@ -72,6 +72,19 @@ const (
 // by the tests of both panels.
 var AllTransports = []string{"tcpmux", "wsmux", "tcp", "ws", "stealth", "kcp", "quic", "wssmux", "wss"}
 
+// ValidTransport says whether a carrier is one of the list above. A carrier
+// name is written into a command line and run on the servers, so nothing
+// outside this list may ever reach that line: the names here are fixed
+// literals, and anything else the caller is given is refused.
+func ValidTransport(name string) bool {
+	for _, transport := range AllTransports {
+		if transport == name {
+			return true
+		}
+	}
+	return false
+}
+
 // DefaultTransports are the carriers a new tunnel is built on, in the order
 // they are tried.
 var DefaultTransports = []string{"tcpmux", "wsmux", "tcp", "ws", "stealth", "kcp", "quic"}

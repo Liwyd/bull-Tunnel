@@ -36,6 +36,17 @@ func (s *Server) probe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "the request is not readable")
 		return
 	}
+	// A carrier name is written into a command line and run over SSH on
+	// the foreign server. Only the carriers the panel itself offers may
+	// reach it — a name of the operator's own making is refused here,
+	// before it can become part of a shell.
+	for _, transport := range body.Transports {
+		if !model.ValidTransport(transport) {
+			writeError(w, http.StatusBadRequest,
+				fmt.Sprintf("the panel does not offer the carrier %q", transport))
+			return
+		}
+	}
 	iran, kharej, err := s.probeSides(body.Server, body.Peer, body.IranID, body.KharejID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

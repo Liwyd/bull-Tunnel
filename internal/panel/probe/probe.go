@@ -192,9 +192,21 @@ func Measure(st *store.Store, carrier Carrier, iran *model.Server, kharej *model
 	}
 	only := []string{}
 	for _, t := range transports {
-		if t != "" {
-			only = append(only, t)
+		if t == "" {
+			continue
 		}
+		// The name goes onto a command line on the foreign server: only a
+		// carrier the panel offers may ever reach it, whatever the caller
+		// asked for. The API refuses them too — this is the last gate
+		// before the shell.
+		if !model.ValidTransport(t) {
+			return map[string]any{
+				"ok":      false,
+				"error":   fmt.Sprintf("the panel does not offer the carrier %q", t),
+				"results": []any{},
+			}
+		}
+		only = append(only, t)
 	}
 	command := fmt.Sprintf("%s probe -c %s --samples %d", binPath, ConfigPath, sampleCount)
 	if len(only) > 0 {
