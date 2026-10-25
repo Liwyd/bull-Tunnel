@@ -1,12 +1,27 @@
-# bull-Tunnel — Fix Plan (TODO)
+# bull-Tunnel — the working plan
 
-This file is the working plan for the repair of bull-Tunnel. It is updated before
-every commit, and it records **what the next commit does, in detail**, so that
-no step is taken "from memory".
+This file is how the work on this repository is planned and recorded. It is
+updated in the same commit as the change it describes, so it always says
+where the work stands.
+
+Read it in this order:
+
+- **section 0** — how to work here: the standing rules and the commands
+  that verify a change.
+- **section 1** — where the project stands right now.
+- **section 2** — the roadmap: the checkpoints ahead, in order, and what
+  each of them waits for.
+- **sections 3–4** — the queues: the security fixes, then the rest of
+  the backlog.
+- **section 5** — the record of every commit.
+- **section 6** — the history: why the repository looks the way it does.
+  Nothing there is a plan; it is kept so that a decision never has to be
+  rediscovered.
 
 ---
 
-## 0. Standing rules for myself (read before every change)
+## 0. How to work in this repo (read before every change)
+
 
 1. **Never break a live system.** The panel runs on a live server and manages
    live tunnels. Every change must be backwards compatible with the state file
@@ -26,14 +41,16 @@ no step is taken "from memory".
 4. **The previous working version is the reference.** `../Tunnelmanager`
    (the `tunnelmanager` package) is a version of this panel that works in
    production. When in doubt about behaviour, read it and follow it.
-5. **Small, verifiable steps.** One concern per commit. Run the whole test
-   suite (`pytest` + `go test`) before every commit.
+5. **Small, verifiable steps.** One concern per commit. Run the
+   verification block below (the same commands the CI runs) on every
+   change, before every commit.
 6. **No silent failures.** An exception must never escape into the monitor
    loop and kill it; an error must always reach the operator (event log,
    Telegram, and the panel).
-7. **The dashboard will be rewritten in Go.** Keep the front-end logic thin and
-   put the truth in the API: the panel's state must be complete and
-   self-describing so that a future Go front-end needs no server-side change.
+7. **The dashboard is Go now (phase 10) — keep it thin.** Keep the
+   front-end logic thin and put the truth in the API: the panel's state
+   must be complete and self-describing, so that a page is added or
+   changed without the protocol between them growing.
 8. **Comment the why, not the what.** The codebase explains itself in prose;
    keep that style (English, no filler).
 9. **Never commit secrets, never print them.** Passwords, tokens and the
@@ -48,15 +65,490 @@ no step is taken "from memory".
     and **the Go panel never imports a package of the engine**, so that the
     two stay separate works. See "The plan: the whole panel in Go" below.
 
+
+**The verification of a change** — the same commands the CI runs, on
+every commit, before it is pushed:
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go vet ./...
+go test -race ./... -skip 'TestStartDoesNotReturnUntilThePortsAreFree|TestWriteBatchDoesNotAllocatePerCall|TestAnExplicitServerNameIsNotRewritten'
+node --check static/app.js
+bash tests/install-check.sh     # release files → unpack → boot → everything an operator asks
+```
+
 ---
 
-## 1. What is wrong (the audit)
+## 1. Where the project stands — the checkpoint of 2026-10-25
+
+**What the panel is.** A control plane that owns tunnels between servers
+in Iran and abroad over SSH — it installs the engine, builds its
+configuration, watches the health of every tunnel, moves the DNS records
+of a domain when a path breaks, repairs a broken tunnel with another
+carrier, and serves one dashboard over a live websocket. The engine is
+the data plane: versioned, shipped and updated by the panel from its own
+releases page. The panel is MIT (`internal/panel/`); the engine is
+AGPL-3.0 and stays vendored and untouched (`internal/engine/`, with its
+attribution in the NOTICE).
+
+**Where the code is.** Every line of the panel, the dashboard and the
+management tool is Go; the Python panel is gone. The dashboard is worked
+out by Go page by page — the parts are HTML the panel builds, and the
+script only swaps them in. The audit that started this rewrite is
+closed; it is history (section 6).
+
+**What was just released.** `v1.4.0` (2026-10-25): the page of a domain
+says what it covers and when it comes back to the primary; the tunnels
+gained the `heartbeat` and `mss` knobs; the connection test takes only
+the panel's own carriers (the first fix of the security review); the
+compression library is at the patched release. The tag makes the CI
+publish the release files for every platform, and every green push
+refreshes the rolling `build-main` release — the answer to
+`releases/latest`, which is what a live panel installs the engine from.
+
+**The state of the tree.** Green: `go vet`, the whole suite under the
+race detector, the dashboard's script, and the installation check (which
+builds the release files, boots the panel from a fresh data directory
+and asks everything an operator asks on the first day).
+
+**The next work** is the security review's queue (section 3), worst
+first: **F2** next. The detail of every planned item is section 4.
+
+---
+
+## 2. The roadmap — the checkpoints, in order
+
+A checkpoint is a stretch of work; every commit inside it still updates
+this file and carries its own test. A checkpoint is done when the queue
+it names is empty and the tree is green.
+
+| # | Checkpoint | What it waits for |
+|---|---|---|
+| 1 | **The security queue** (section 3): F2, F3, S1, S2, S3, then D1–D6, then W1–W7 — one commit each, worst first | nothing: this is the next work |
+| 2 | **The knobs the engine already carries** (section 4, phase 12): `dial_timeout` / `retry_interval`, then `bandwidth_mbps` / `max_connections`, then the `kcp_*` / `mux_*` tuning | nothing; after checkpoint 1 |
+| 3 | **The real-server trial** (section 4, phase 13): a live Iran server and a live foreign server, end to end | servers to test on |
+| 4 | **The releases page cleanup** (section 4, phase 11.3): delete the old `v1.1.*` releases from the page (the tags stay) | the owner's word — it changes the public page |
+| 5 | **Watching it live** (section 4, phase 13): the work that never ends | the panel running in production |
+
+---
+
+## 3. The security review — the queue of fixes (October 2026)
+
+The control plane (`internal/panel`) was reviewed for security after the
+last release. Every finding gets its own commit, its own test and its own
+row in the status table (section 5); they are fixed in this order, worst
+first:
+
+| # | Finding | Status |
+|---|---------|--------|
+| F1 | A carrier name of the operator's choosing could reach the command the panel runs over SSH on the foreign server — via `POST /api/probe`, via the settings' `candidate_transports`, and inside the measurement itself | ✅ done (commit 60) |
+| F2 | The id of a tunnel is written raw into the health script that runs on the Iran server: a crafted id (from the API or a restored state file) becomes part of a shell that runs every check cycle | next |
+| F3 | `/api/setup` fails open: when `auth.json` cannot be read at start, the panel answers "not configured" and anyone who reaches the port can set the admin password | not done |
+| S1 | `GET /` answers the whole dashboard — server names, public IPs, roles, domain names — before anyone signs in | not done |
+| S2 | The login limiter believes `X-Forwarded-For`, so a caller resets it at will; request bodies have no size limit and the server sets no read/write timeouts | not done |
+| S3 | The websocket can be written from two goroutines at once (the library panics, the panel dies) and the state is read without the lock while it is being written | not done |
+| D1 | Saving the settings writes the Telegram mask over the real bot token, silently blinding every alert | not done |
+| D2 | The engine-download settings are wired one parameter off in `cmd/bull-tunnel-panel`: the release is ignored and the source URL is sent as the token | not done |
+| D3 | Some state-changing calls are GET and there is no CSRF token; only `SameSite=Strict` stands in the way | not done |
+| D4 | The Telegram `api_base` and the DoH resolvers take any URL: the bot token can be sent to a host of the operator's typing and internal addresses are reachable | not done |
+| D5 | A POST with an id that already exists takes the object over, masks and all | not done |
+| D6 | Restoring a backup decompresses without a bound: a small file can ask for gigabytes | not done |
+| W1 | `command_key` — the key that signs the commands the agent obeys — is sent raw where every other secret is masked | not done |
+| W2 | Internal error detail (paths, hosts) is answered to the browser, including on the unauthenticated session endpoint | not done |
+| W3 | The session cookie is `Secure` only when the request itself was TLS | not done |
+| W4 | The websocket upgrade accepts any origin | not done |
+| W5 | The command channel is gated on the agent only; the panel sends whatever is asked | not done |
+| W6 | The local management key counts for every route, and behind a reverse proxy every request looks local | not done |
+| W7 | Creating a link or a domain does not check that the servers it names exist | not done |
+
+Nothing in this list is a hole in the engine or in the crypto: the review
+found the password hashing, the session signing, the quoting of names for
+the shell, the backup encryption and the static serving sound.
+
+---
+
+## 4. The rest of the backlog
+
+### What is left to do, and is not a fault
+
+* **Dependabot reported one high-severity vulnerability** in a dependency
+  (`github.com/Liwyd/bull-Tunnel/security/dependabot/2`) — ✅ **done
+  (commit 55).** It was `github.com/klauspost/compress` ≤ v1.18.6
+  (GHSA-259r-337f-4rfw, CVE-2026-113727): a crafted S2 dictionary
+  overflows the repeat index and crashes the process with an out-of-bounds
+  write. The module came in through `utls`, which imports its
+  `zstd` package; this project never calls `s2.NewDict`, and the
+  vulnerable `s2` package was not even vendored. `go.mod`, `go.sum` and
+  `vendor/` are at v1.18.7 now, which is the patched release, and the
+  whole Go suite passes under the race detector as the CI runs it.
+* **Try it on the real servers.** Everything here was verified against the
+  simulated network and against a tunnel on the loopback: the panel comes
+  up, the demo adopts the tunnels that are already running, moves a record
+  when a tunnel dies and repairs the tunnel with another carrier, and the
+  engine measures all nine carriers without disturbing the tunnel that is
+  carrying the traffic. What has not happened yet is a real Iran server
+  and a real foreign server, with the panel talking to them over SSH.
+* **The engine's experimental carriers** (`xdi`, `pck`, `spoof`) are not
+  offered to the panel: they need raw sockets and root, and an unattended
+  repair must not ask for either.
+* **The dashboard does not show how much of a domain's ports a healthy
+  tunnel covers, nor when the domain would fail back** — ✅ **done
+  (commit 57).** The domain page says both now. The routes panel carries
+  the coverage of the server the record points at (green when every port
+  is up, amber for a part, red for none), the failover panel lists every
+  Iran server the record may move to with its own coverage in the order
+  the panel tries them — the coverage is one question asked of any
+  server, so the list and the header cannot disagree — and the countdown
+  back to the primary runs under the list the way it does in the drawer.
+  The countdown spans are named by their attribute now, not by an id,
+  because the drawer and the page are both in the DOM at the same time
+  and an id must be unique.
+* **The panel does not manage the layer-3 and the direct tunnels** of the
+  engine: they are not reverse tunnels, and the panel's model has no place
+  for them.
+* **Two upstream tests are timing sensitive** and fail from time to time
+  under the race detector — the same tests fail the same way in the
+  repository the code comes from. The CI
+  skips them there and runs them on their own, without the detector.
+* **The test job of the CI failed on the runner for a while** — and the
+  fault was in a test of this repository, not in the panel: the test of the
+  set compared the number of models with the number of models the set gave
+  a moment later ✓, while another goroutine was writing the set ✓. On a
+  slow runner the two numbers are never the same ✓, and on a laptop the
+  test passed by luck ✓. The comparison is made when nobody writes the set
+  any more ✓. The CI runs the suite again, one package at a time, when the
+  first run fails ✓ — a real failure is still a failure ✓.
+* **The race detector only sees what the machine it runs on happens to
+  interleave** ✓: the panel was written with the lock in place on the
+  readers ✓, and the runner found the writers that were left ✓ — one at a
+  time ✓, each one of them a race that was really there ✓. The test that
+  runs the cycle ✓, the repair ✓, the discovery ✓ and the operator moving a
+  domain ✓ at the same time ✓ is in the suite now ✓, and it is the one that
+  finds them ✓.
+
+---
+
+### The plan in detail — phases 11 to 13
+
+### Phase 11 — the repository is a product  (11.1, 11.2 and 11.4 done; 11.3 waits for the owner's word — the credentials are on this machine now)
+
+**11.1 One name — the fork's origin disappears.** ✅ done (commit 52),
+with **one correction to the plan as written here**, found by reading the
+engine's own `NOTICE` before touching anything:
+
+> The engine's `NOTICE` carries Section 7 additional terms, and clause
+> (1) ATTRIBUTION requires the line
+> `Based on BackPack by Amin Mohammadi (AminMGMT) / https://github.com/AminMGMT/BackPack`
+> to be kept **visible and unaltered in: "this NOTICE file, and the README
+> of your distribution."** Option (a) as drafted above said the name
+> leaves the README too — taking that literally would breach the very
+> term the plan said to keep unaltered. So option (a) was executed as:
+> the name leaves everything a user reads *except* the three places the
+> licence names — `internal/engine/NOTICE`, `internal/engine/README.md`
+> and the Licences section of the root `README.md`, where the
+> attribution line stays byte-for-byte. The root `NOTICE` was rewritten
+> in the project's own words and points at those three files.
+
+What was done in commit 52:
+
+* `cmd/bull-tunnel-engine/main.go` — `const Attribution` is gone, and
+  with it the third line of the `-v` output (the panel reads two lines,
+  `head -n2`, so nothing breaks; the licence names notices, not a
+  command's output). Header comments reworded in the project's own
+  words.
+* `internal/engine/app/app.go` — the dead updater constants
+  `RepoOwner`/`RepoName`/`SourceURL` deleted (`SourceURL` had no
+  callers); a comment records why and that a re-sync brings them back.
+* `internal/engine/TRADEMARK.md` — **created.** The engine's `NOTICE`
+  clause (2) referenced it ("See TRADEMARK.md for the detail") and the
+  file did not exist: a dangling notice reference, now fixed.
+* `NOTICE` (root) — rewritten: the attribution paragraph moves out, one
+  honest line says which licence covers what and points at the engine's
+  own `NOTICE`/`README`/`TRADEMARK.md`.
+* `README.md`, `CHANGELOG.md`, `docs/engine-schema.md`, `build.sh`,
+  `.github/workflows/ci.yml`, `deploy/install.sh`,
+  `cmd/bull-tunnel/main.go`, `cmd/bull-tunnel/menu.go`,
+  `internal/panel/engine/driver.go`,
+  `internal/engine/agent/protocol.go` — prose and comments reworded in
+  the project's own words; the attribution blocks in the READMEs stay.
+* this file — the audit and history sections rewritten in the project's
+  own words.
+* a test: `internal/panel/licence_test.go` asserts the attribution line
+  is present and unaltered where the engine's `NOTICE` requires it, that
+  the engine tree is still AGPL-3.0 and the panel still MIT, and that
+  the name no longer appears anywhere else in the tracked tree.
+
+The remaining options stand, if anyone ever wants the last line gone:
+
+* **(b) ask, then unify.** Write to the upstream author (GitHub account
+  named in the attribution line), in writing, to drop the attribution
+  requirement and/or relicense the fork under MIT. Permission granted →
+  delete the last notices, put the whole repository under one licence,
+  reduce `NOTICE` to the copyright line, and delete the test's
+  attribution clause.
+* **(c) unify on AGPL-3.0 now.** One licence, no permission needed —
+  but every user of the panel inherits AGPL's obligations. A real
+  change in what the project is.
+
+**11.2 The README, written like a tool, not like a pitch.** ✅ done
+(commit 53), 685 → 565 lines, and the pitch left with the history: no
+Roadmap (every row of it was ✅ Done, so it was a wall of trophies), no
+"Migrating from the previous version", no "Features" list of adjectives.
+The README is now nine sections in the order a new operator meets the
+program — what it is, install, the first run, how the pieces fit, the
+dashboard, where the secrets are, running it as a service, developing
+it, licences — with the one-line installer above the screenshot, before
+the contents list.
+
+**Three places where the plan as written above was wrong, corrected by
+reading the code:**
+
+* The plan asked for the secrets section to say "Telegram token, DNS
+  keys, SSH host keys". The truth is worse and the README says it: the
+  state file (`<data>/state.json`, mode 0600) holds the SSH passwords and
+  the DNS API tokens **in the clear**, which is why the installer makes
+  the data directory 0700 and why a backup password is not optional in
+  practice. What is actually encrypted: the admin password (PBKDF2-SHA,
+  16-byte salt, 200,000 iterations) and the backup (AES-256-GCM, key
+  from scrypt).
+* The plan asked for "how to run it as a service (`BT_PORT`/`BT_HOST`,
+  the data directory, `-check`)". The panel takes flags too — `--host`,
+  `--port`, `--data`, `--demo`, `--check`, `--static-dir` — so the
+  section is a table of the environment *and* the flags, read from
+  `/etc/default/bull-tunnel`.
+* "The dashboard in one short paragraph" did not survive contact with
+  the five pages and the ⚡ connection test: it is a section, and the
+  screenshots it needs (`dashboard-dark`, `dashboard-light`, `server`)
+  went with it.
+
+`docs/` got the knife too, and it turned up a contradiction:
+`docs/architecture.md` said in one line that host keys are **not**
+verified (`known_hosts=None`) and fifteen lines below that they **are**
+pinned. Commit 5 pinned them; the first line was stale, and it is fixed.
+The one place that still says the data plane does not go over DNS now
+says so without pointing at a roadmap this commit deletes.
+
+A test in `internal/panel/readme_test.go` holds the shape: the nine
+headings in order, the installer at the top, the attribution block in
+the Licences section, the name of the origin nowhere else in the
+README — and the README's claims about the state file, the password and
+the backup checked against the code that makes them true, so a claim
+that stops being true is a failing test and not a lie in print.
+
+**11.3 The releases page.** ⏸ waiting for the owner's word — the
+credentials are on this machine now (the API is reachable with them), but
+deleting a release changes the public page, so nothing is deleted without
+being asked. The work: today `build-main` (rolling, marked latest), `v1.3.0`,
+`v1.2.0` and the pre-Go `v1.1.3`–`v1.1.0`. Keep the rolling release and
+every Go-era tag; delete `v1.1.0`–`v1.1.3` **from the releases page
+only** (the tags stay, so anything pinning them still works), and
+confirm the panel's `engine_release` setting still says `latest` so
+servers follow the rolling one. New tagged releases need nothing changed
+in CI (`generate_release_notes` already writes them).
+
+**11.4 The dead weight and the one file of boilerplate.** ✅ done
+(commit 54). The `new-ui/` directory — 12 SVGs, 18MB — is deleted, and
+`du -sh` on the working tree (excluding `.git` and `vendor`) went from
+24MB to 6.5MB. The plan said "referenced by nothing"; that was checked
+first, and it was **wrong in one respect, worth writing down**: five
+files did cite it. `static/style.css` (the palette header and the graph
+cards), `static/app.js` (the wire labels), `internal/panel/web/network.go`
+(the column order) and `internal/panel/web/card.go` (the card shape) all
+pointed at `new-ui/type1/graphs.svg` or `new-ui/type2/seven.svg`.
+
+None of them loaded an asset — every one was a provenance comment, and
+in four of the five the design was already written out in full in the
+comment beside the pointer. So the deletion loses no design knowledge:
+the palette is in the `style.css` header and in the changelog, the
+type-1/type-2 decision is in the changelog and in this file, and the
+comments were rewritten to say what the design *is* rather than where
+the mockup *was*.
+
+What was left pointing at a file that no longer exists:
+`internal/panel/licence_test.go` skipped `new-ui/` while walking the tree
+for the origin's name — that skip is removed, since the directory it
+guarded is gone. The two historical references stay: `CHANGELOG.md`
+records what version 1.3.0 shipped against, and commit 9 above records
+what it did. Rewriting either would falsify a record.
+
+The boilerplate: one `CONTRIBUTING.md`, the five commands and the commit
+style. No templates, no code of conduct — no one has asked.
+
+### Phase 12 — the rest of the engine's potential  (started — `mss` and `heartbeat` are done, the rest is planned)
+
+The rule for this phase: **only what the current base carries.** If it
+needs the model, the orchestrator or the config writer rebuilt, it is
+not worth it — these protocols are not important enough.
+
+**Done so far:**
+
+* ✅ **`mss`** (commit 56, broken-MTU paths). `model.Link.MSS` → the
+  `mss` key of the link body and of the API answer → `d.Set("mss", …)` in
+  both `serverSection` and `clientSection` when it is above zero → the
+  field and its hint in the drawer's settings box. The API takes 0 or
+  536–65495 and refuses the rest; a number the kernel refuses would leave
+  the tunnel down. 0 writes no line, so the engine keeps its own value and
+  an adopted tunnel keeps the one in its file. A change is applied to both
+  ends through `Orchestrator.SettingsChanged`; a tunnel that is busy is
+  left to its rebuild, which reads the saved value, and the event log says
+  so. Tests: the rendered TOML on both sides, the API round trip and its
+  validation, the drawer field, and the two-sided deployment. The state
+  fixtures, `docs/engine-schema.md` and the changelog carry the field.
+* ✅ **`heartbeat`** (commit 58, the beat of the control channel).
+  `model.Link.Heartbeat` → the `heartbeat` key of the link body and of
+  the API answer → validation (0, or 1–10 seconds: the engine clamps
+  anything above ten seconds to ten, so a bigger number would be a
+  setting it does not honour) → `d.Set("heartbeat", …)` in
+  `serverSection` **only** — the Iran side is the one that beats and the
+  client's config has no such key; 0 writes no line and leaves the
+  engine's own rhythm → the field and its hint in the drawer's settings.
+  A change goes through `SettingsChanged` with the MSS. Tests: the
+  rendered TOML on both ends (the foreign one must *not* carry it, and an
+  adopted file keeps its own value), the API round trip and its
+  validation, the drawer field — and the fixtures, `docs/engine-schema.md`
+  and the changelog carry the field.
+
+**In — panel-only, each one a field, a config line and a form line:**
+
+* the remaining per-tunnel knobs, in the order they earn their place:
+  `dial_timeout` / `retry_interval`, then `bandwidth_mbps` /
+  `max_connections`, then the `kcp_*` / `mux_*` tuning. Recipe per knob: a field on `model.Link` → the JSON key in
+  `api/collections.go`'s link body → one `d.Set` in
+  `engine/render.go`'s `serverSection`/`clientSection` → a line in
+  `web/forms.go`'s `linkForm` or the drawer's inline fields → assert
+  the emitted config line the way `engine/driver_test.go` does.
+  `dumpSection` already emits any key, so the renderer needs no schema
+  change — that is what makes each of these "panel-only".
+* `fallback_transports` / `fallback_dwell`: the engine rotates carriers
+  on its own, but the panel's status, pin, retest and repair all speak
+  about *one* transport per tunnel. Expose it only after the status
+  language has an answer for a rotating link — a decision first, a
+  checkbox second.
+
+**Out — decided against, and why:**
+
+* `xdi`, `pck`: raw sockets and root; the engine itself keeps them out
+  of its own carrier list (`cmd/bull-tunnel-engine/main.go`), and an
+  unattended repair must never rotate into a carrier the server cannot
+  run. If they are ever wanted: pin-only, behind capability detection,
+  never in the automatic pool.
+* `spoof`: the engine refuses it as a reverse transport; it exists only
+  for the L3 tunnel.
+* L3 `[l3]` and `[direct]` tunnels: the scan skips them
+  (`panel/engine/scan.go`), the model has no kind for them, and they
+  invert the topology the orchestrator assumes (Iran listens, kharej
+  dials). A rework, not a feature.
+* the `udp` transport alone (not TCP-probeable — it would break
+  discovery and repair), the managed `naive`/`xray` helpers and the
+  quota sidecar (different control paths), the engine's sniffer monitor
+  page (the panel has its own health).
+
+**Already done in this direction:** the UDP switch of the tunnel form
+(row 43) — `accept_udp` was wired in model, API and renderer and simply
+had no UI — and the collector's marks (row 46). The habit is worth
+keeping: grep a model field against the forms; "wired but invisible" is
+how `accept_udp` happened.
+
+### Phase 13 — the work that never ends
+
+The bullets under *What is left to do, and is not a fault* above **are**
+this phase — the real-server trial, the two timing-sensitive tests, the
+two numbers the API used never to send (done in commit 57), and the
+L3/direct tunnels. Read that
+list as the standing backlog: work it in order,
+and add to it instead of starting a second one. Two more entries for
+it: the fixtures of `tests/contract/` may take their final name when
+the contract is complete (the note in phase 2), and any change to
+`.github/workflows/ci.yml` must be watched through one full run — CI
+now publishes three moving things (the image, `build-main`, and `v*`
+on a tag).
+
+
+---
+
+## 5. The status of every commit
+
+One row per commit, oldest first; the story of the early ones is in
+section 6, of the later ones in the changelog.
+
+| Commit | What | State |
+|---|---|---|
+| 1 | `TODO.md` | done |
+| 2 | The engine is the vendored one | done |
+| 3 | The critical panel bugs | done |
+| 4 | The medium panel bugs | done |
+| 5 | The front-end | done |
+| 6 | Tests, docs, changelog | done |
+| 7 | The rename and the management tool | done |
+| 8 | The release | done |
+| 9 | The network graph follows the type-1 design | done |
+| 10 | The Go rewrite — phase 0 (the licence) | done |
+| 11 | The Go rewrite — phase 1 (one module) | done |
+| 12 | The Go rewrite — phase 2 (the state) | done |
+| 13 | The Go rewrite — phase 3 (ssh) | done |
+| 14 | The Go rewrite — phase 4 (the engine driver) | done |
+| 15 | The health script counts milliseconds, not microseconds | done |
+| 16 | The Go rewrite — phase 5 (dns, telegram, backups) | done |
+| 17 | The questions the panel asks its state | done |
+| 18 | The decisions of the brain | done |
+| 19 | The Go rewrite — phase 6 (the orchestrator) | done |
+| 20 | The door of the panel (the auth) | done |
+| 21 | The state the dashboard is shown | done |
+| 22 | The web interface of the panel, in Go | done |
+| 23 | The timing sensitive test, run a few times | done |
+| 24 | The connection test of the panel, in Go | done |
+| 25 | The endpoints that talk to the outside | done |
+| 26 | The declared dependencies cannot pull a vulnerable version | done |
+| 27 | The Go rewrite — phase 7 (the api) | done |
+| 28 | The Go rewrite — phase 8 (the command) | done |
+| 29 | The panel itself, in Go | done |
+| 30 | The image is built again | done |
+| 31 | The panel does not fall over its own state | done |
+| 32 | The Go rewrite — phase 9 (the switchover) | done |
+| 33 | The writers of the state take the lock too | done |
+| 34 | The Go rewrite — phase 10 (the dashboard) | done |
+| 35 | The dashboard — the shell is Go | done |
+| 36 | The dashboard — the network view and the graph are Go | done |
+| 37 | The dashboard — the other views are Go | done |
+| 38 | The dashboard — the forms are Go | done |
+| 39 | The build of every push | done |
+| 40 | The release of every push follows main | done |
+| 41 | The release v1.3.0 | done |
+| 42 | The copyright line names the author | done |
+| 43 | The tunnel form can forward UDP | done |
+| 44 | The feed of events is Go | done |
+| 45 | The quick settings are collected like every other form | done |
+| 46 | What the collector sends is what the API wants | done |
+| 47 | The drawer is worked by Go | done |
+| 48 | The connection test takes the two sides | done |
+| 49 | The JavaScript that drew the drawer is gone | done |
+| 50 | The installation checks itself | done |
+| 51 | The TODO says where the project stands and what is planned | done |
+| 52 | One name — the fork's origin leaves the project's words; the attribution stays where the engine's licence puts it, and the notice points at a `TRADEMARK.md` that exists | done |
+| 53 | The README is written like a tool: nine sections in the order a new operator meets the program, no Roadmap of trophies, no migration story, and the secrets section says what is actually in the clear | done |
+| 54 | The 18MB of design mockups are deleted and nothing points at them; the one file of boilerplate is `CONTRIBUTING.md` | done |
+| 55 | The compression library Dependabot flagged is upgraded and `vendor/` is rebuilt | done |
+| 56 | A tunnel's maximum segment size (MSS) is a field, an API key, a config line on both ends and a line in the drawer | done |
+| 57 | The domain page says what it covers (the ports a healthy tunnel answers, per server in the failover order) and when it comes back to the primary | done |
+| 58 | A heartbeat per tunnel: a field, an API key, a config line on the Iran side and a line in the drawer | done |
+| 59 | The licence test is formatted the way gofmt wants it — two string concatenations were committed with spaces around the `+` (a wart from commit 3809f47), so `gofmt -l` is clean again | done |
+
+---
+
+## 6. History — how this repo was rebuilt
+
+Nothing below is a plan. It is the record of the rebuild — the audit
+that found the faults, the first commits that closed them, the licence
+reasoning, and the phases that shipped the Go panel — kept so that a
+decision never has to be rediscovered. The current plan is sections 1–4.
+
+### The audit — what was wrong
 
 The audit of the whole system (Python panel, Go engine, front-end, deploy
 scripts) produced 53 findings. They are grouped here by the commit that fixes
 them.
 
-### A. The engine is not the real engine (critical)
+#### A. The engine is not the real engine (critical)
 
 | # | Finding |
 |---|---|
@@ -67,7 +559,7 @@ them.
 
 **Fix (commit 2):** replace `engine/` with the real, vendored AGPL-3.0 engine.
 
-### B. Critical panel bugs
+#### B. Critical panel bugs
 
 | # | Finding |
 |---|---|
@@ -79,7 +571,7 @@ them.
 | 10 | A corrupt `auth.json` or `state.json` makes the panel crash at start-up (`bulltunnel/auth.py:40`, `bulltunnel/store.py:52`). |
 | 11 | `POST /api/links/{id}/release` raises `KeyError` (HTTP 500) when the handover target is gone (`bulltunnel/app.py:800`). |
 
-### C. Medium panel bugs
+#### C. Medium panel bugs
 
 | # | Finding |
 |---|---|
@@ -108,7 +600,7 @@ them.
 | 34 | A handover chain is not checked for cycles when it is written. |
 | 35 | `release_handovers()` and the failover path can race with a repair on the same link. |
 
-### D. Front-end (`bulltunnel/static/app.js`)
+#### D. Front-end (`bulltunnel/static/app.js`)
 
 | # | Finding |
 |---|---|
@@ -126,7 +618,7 @@ them.
 | 47 | The demo's chaos never picks a victim. |
 | 48 | The demo still knows `kcp`/`quic` as if they worked. |
 
-### E. Packaging / deployment
+#### E. Packaging / deployment
 
 | # | Finding |
 |---|---|
@@ -138,12 +630,12 @@ them.
 
 ---
 
-## 2. The commits (in order)
+### The first commits (in order)
 
-### Commit 1 — this file
+#### Commit 1 — this file
 `TODO.md`: the audit, the standing rules and the commit plan.
 
-### Commit 2 — the engine is the vendored one  ✅ done
+#### Commit 2 — the engine is the vendored one  ✅ done
 
 * ✅ The hand-written engine is gone (`internal/proto`, `internal/carrier`,
   `internal/tunnel`, `internal/config`, `internal/probe`, `internal/metrics`,
@@ -176,7 +668,7 @@ them.
 
 **Findings closed by this commit:** 1, 2, 3, 4, 16, 17, 18, 53 (partly).
 
-### Commit 3 — the critical panel bugs  ✅ done
+#### Commit 3 — the critical panel bugs  ✅ done
 
 Findings 5, 6, 7, 8, 9, 10, 11.
 
@@ -201,7 +693,7 @@ Findings 5, 6, 7, 8, 9, 10, 11.
 
 **Findings closed by this commit:** 5, 6, 7, 8, 9, 10, 11, 25 (partly).
 
-### Commit 4 — the medium panel bugs  ✅ done
+#### Commit 4 — the medium panel bugs  ✅ done
 
 Findings 12 to 35 (14 of them turned out not to be faults — they are
 recorded below with the reason).
@@ -254,7 +746,7 @@ recorded below with the reason).
 **Findings closed by this commit:** 12, 13, 15, 19, 22, 24, 26, 27, 28, 29,
 31, 32, 33, 34, 35.
 
-### Commit 5 — the front-end  ✅ done
+#### Commit 5 — the front-end  ✅ done
 
 Findings 36 to 48.
 
@@ -289,7 +781,7 @@ Findings 36 to 48.
 **Findings closed by this commit:** 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
 46, 47, 48.
 
-### Commit 7 — the rename and the management tool  ✅ done
+#### Commit 7 — the rename and the management tool  ✅ done
 
 * ✅ The project is **bull-Tunnel**: the package is `bulltunnel`, the
   binary is `bull-tunnel-engine`, the service is `bull-tunnel.service`,
@@ -304,7 +796,7 @@ Findings 36 to 48.
   the install and can fetch the panel itself, so the whole installation is
   one line.
 
-### Commit 8 — the release  ✅ done
+#### Commit 8 — the release  ✅ done
 
 The release is published from the tag: the CI builds the panel and the
 engine for the four architectures, writes the checksums and attaches them
@@ -336,7 +828,7 @@ to exist before a fresh installation can install the engine.
   the other half: made on purpose, with the notes of what changed, and
   the versions an operator pins when a server must not move.
 
-### Commit 6 — tests, docs and the changelog  ✅ done
+#### Commit 6 — tests, docs and the changelog  ✅ done
 
 * ✅ `docs/engine-schema.md` is the contract of the engine that is actually
   shipped: the carriers, the configuration, the metrics file, the commands
@@ -352,7 +844,7 @@ to exist before a fresh installation can install the engine.
   architectures, measures all nine carriers against a real tunnel and does
   not disturb the tunnel that is carrying the traffic.
 
-### Commit 9 — the network graph follows the type-1 design  ✅ done
+#### Commit 9 — the network graph follows the type-1 design  ✅ done
 
 The graph of the network view is built from `new-ui/type1/graphs.svg`, in
 the type-2 palette. The shell stays type 2; the graph is the one place
@@ -379,7 +871,7 @@ left out.
 
 ---
 
-# The plan: the whole panel in Go
+#### The plan: the whole panel in Go
 
 **What the end state is.** One repository, one Go module, two binaries:
 
@@ -394,7 +886,11 @@ version, the same repository, the same build. The panel drives the engine
 over SSH, exactly as the Python panel does today, and never imports a
 package of the engine.
 
-### Why "contract, not linking" — the licence
+---
+
+### The licence, and the rules of the rewrite
+
+#### Why "contract, not linking" — the licence
 
 The engine is AGPL-3.0 (inherited code, vendored) and the panel is
 MIT. Those can live in the same repository, and stay that way, **as long as
@@ -426,7 +922,7 @@ Two things follow, and they are not optional:
   and the name and logo behind that line are trademarks: the project has
   its own name and its own logo, which is what the clause asks for.
 
-### The rules of the rewrite
+#### The rules of the rewrite
 
 1. **The API is frozen.** The web interface and the management command
    depend on it. A change to an endpoint needs the front-end, the
@@ -444,7 +940,12 @@ Two things follow, and they are not optional:
    acceptance list is met.** The tests, the CI and the build are green, and
    the TODO is updated with what was done.
 
-### Phase 0 — the licence, the attribution and the framing  ✅ done
+
+---
+
+### The phases of the rebuild — 0 to 10
+
+#### Phase 0 — the licence, the attribution and the framing  ✅ done
 
 * ✅ `NOTICE` at the root: the line the AGPL's Section 7 asks for, unaltered,
   with the AGPL's own wording around it.
@@ -472,7 +973,7 @@ finds the line in `NOTICE` and in `README.md` ✓, `internal/engine/LICENSE` is 
 AGPL ✓, the panel's licence is still MIT ✓, and the README no longer
 introduces the engine as somebody else's ✓.
 
-### Phase 1 — one Go module  ✅ done
+#### Phase 1 — one Go module  ✅ done
 
 * ✅ `go.mod`: `module github.com/Liwyd/bull-Tunnel`, `go 1.26.9` (what the
   engine asks for ✓). The requirements are the engine's own, and `vendor/`
@@ -506,7 +1007,7 @@ engine's binary still prints its version and its nine carriers ✓, and a
 tunnel that the old engine brought up still comes up ✓ (the config format
 did not change ✓).
 
-### Phase 2 — the state and the model  ✅ done
+#### Phase 2 — the state and the model  ✅ done
 
 * ✅ `internal/panel/model`: the same structures as `bulltunnel/models.py`
   ✓ (the same JSON names ✓, the same defaults ✓). The reading is
@@ -538,7 +1039,7 @@ did not change ✓).
 **Done when:** a `state.json` of every version in `tests/fixtures/` loads
 in Go and comes out identical ✓.
 
-### Phase 3 — the SSH layer  ✅ done
+#### Phase 3 — the SSH layer  ✅ done
 
 * ✅ `internal/panel/ssh`: the pool (one connection per server ✓, reused
   ✓), the host keys (pinned ✓, the fingerprint shown ✓, a changed key
@@ -561,7 +1062,7 @@ in Go and comes out identical ✓.
 **Done when:** the panel can open a connection, run a command, put a file
 and read the host key of a server it has never seen ✓.
 
-### Phase 4 — the driver of the engine  ✅ done
+#### Phase 4 — the driver of the engine  ✅ done
 
 * ✅ `internal/panel/engine`: the rendering of the configuration (the same
   TOML ✓ — the same `server`/`client` sections ✓, the same port mappings
@@ -588,7 +1089,7 @@ and read the host key of a server it has never seen ✓.
 and comes up ✓, and the Go panel writes a configuration the engine accepts
 ✓ (the same bytes ✓).
 
-### Commit 15 — the health script counts milliseconds, not microseconds  ✅ done
+#### Commit 15 — the health script counts milliseconds, not microseconds  ✅ done
 
 A fault found while the driver of the engine was written in Go: the clock
 of the health script counted **microseconds** and the panel showed them as
@@ -608,7 +1109,7 @@ the time a tunnel took to come up was a thousand times too big.
 (The old measurements in the history of a tunnel are in the old unit and
 fade away by themselves; the numbers from now on are the real ones.)
 
-### Phase 5 — the DNS, the Telegram and the backups  ✅ done
+#### Phase 5 — the DNS, the Telegram and the backups  ✅ done
 
 * ✅ `internal/panel/dns`: the Cloudflare and the Arvan clients ✓ (the same
   requests ✓, the same TXT quoting ✓), the resolvers ✓.
@@ -627,7 +1128,7 @@ fade away by themselves; the numbers from now on are the real ones.)
 **Done when:** a backup written by the Python panel restores with the Go
 panel and the other way round ✓.
 
-### Commit 17 — the questions the panel asks its state  ✅ done
+#### Commit 17 — the questions the panel asks its state  ✅ done
 
 The state knows more than it stores: which tunnels join two servers, which
 of them exposes a port now, and what a domain may use. The orchestrator
@@ -645,7 +1146,7 @@ panels.
   what the Python panel answers for a state ✓, and the Go panel must give
   the same answers ✓.
 
-### Commit 18 — the decisions of the brain  ✅ done
+#### Commit 18 — the decisions of the brain  ✅ done
 
 The brain of the panel: what it decides about the tunnels and the domains.
 The decisions are here ✓; the work they lead to (the SSH calls ✓, the DNS
@@ -660,7 +1161,7 @@ changes ✓) comes with the rest of the panel ✓.
   holds what the Python panel decides for a state ✓, and the Go panel must
   decide the same ✓ — down to the words it says to the operator ✓.
 
-### Phase 6 — the orchestrator  ✅ done
+#### Phase 6 — the orchestrator  ✅ done
 
 * ✅ `internal/panel/orch`: the state machine of `bulltunnel/orchestrator.py`:
   the discovery ✓, the adoption ✓, the checks ✓, the repair ✓, the
@@ -685,7 +1186,7 @@ work moves there with it.
 **Done when:** the Go orchestrator makes the same decisions as the Python
 one on the same fixtures ✓ (the contract test ✓).
 
-### Commit 20 — the door of the panel  ✅ done
+#### Commit 20 — the door of the panel  ✅ done
 
 The first half of the API: the login file ✓, the sessions ✓ and the rate
 limiter of the login ✓.
@@ -703,7 +1204,7 @@ limiter of the login ✓.
   ✓) — the operator does not have to log in again when the panel is
   swapped ✓.
 
-### Commit 21 — the state the dashboard is shown  ✅ done
+#### Commit 21 — the state the dashboard is shown  ✅ done
 
 The shape of the state the web interface renders: it is a contract between
 the two panels, and the front-end depends on it.
@@ -716,7 +1217,7 @@ the two panels, and the front-end depends on it.
 * ✅ The fixture `tests/fixtures/state-snapshot.json` holds what the Python
   panel shows for a state ✓, and the Go panel must show the same ✓.
 
-### Commit 22 — the web interface of the panel, in Go  ✅ done
+#### Commit 22 — the web interface of the panel, in Go  ✅ done
 
 The API the front-end talks to: the same endpoints ✓, the same answers ✓.
 
@@ -738,7 +1239,7 @@ Telegram test ✓, of the probe ✓ and of the command channel ✓ — they come
 with the command channel's own work ✓ (phase 8 ✓) and with the backups'
 own work ✓.
 
-### Commit 23 — the timing sensitive test, run a few times  ✅ done
+#### Commit 23 — the timing sensitive test, run a few times  ✅ done
 
 The CI ran the upstream test that asks that the UDP server's port be free
 the moment `Start` returns — three times, in a row. The test is timing
@@ -751,7 +1252,7 @@ code comes from, which is where it was written.
   The reason is written next to it ✓, so nobody has to find out again why
   the test is there twice.
 
-### Commit 24 — the connection test of the panel, in Go  ✅ done
+#### Commit 24 — the connection test of the panel, in Go  ✅ done
 
 The ⚡ button of the panel: the measurement of the path between two servers,
 done on the servers themselves, over the carrier, exactly the way the tunnel
@@ -774,7 +1275,7 @@ never worked.** Only the host is bracketed now, and only when it is an IPv6
 one: `[2001:db8::1]:3080` ✓, `10.0.0.2:3080` ✓. The fix is in both panels
 ✓, and the tests say it ✓.
 
-### Commit 25 — the endpoints that talk to the outside  ✅ done
+#### Commit 25 — the endpoints that talk to the outside  ✅ done
 
 The rest of the API: the measurement of the path ✓, the command channel ✓,
 the Telegram test ✓ and the backups ✓.
@@ -786,7 +1287,7 @@ the Telegram test ✓ and the backups ✓.
   restore ✓ — the state being replaced is kept first ✓, in case it was a
   mistake ✓).
 
-### Commit 26 — the declared dependencies cannot pull a vulnerable version  ✅ done
+#### Commit 26 — the declared dependencies cannot pull a vulnerable version  ✅ done
 
 The floors of the dependencies were old enough to allow versions with known
 faults: `asyncssh>=2.14` allowed the path traversal of the SCP and of the
@@ -797,7 +1298,7 @@ wheels with a vulnerable OpenSSL (fixed in 48.0.1).
   the panel asks for versions that are not known to be faulty ✓, and what
   is installed already was ✓.
 
-### Phase 7 — the API  ✅ done
+#### Phase 7 — the API  ✅ done
 
 * ✅ `internal/panel/api`: the endpoints of the Python panel, one for one ✓
   — the session ✓, the setup ✓, the login ✓, the logout ✓, the state ✓,
@@ -815,7 +1316,7 @@ wheels with a vulnerable OpenSSL (fixed in 48.0.1).
 **Done when:** the web interface (the current `static/`) works against the
 Go panel without a change ✓, and the API answers the same JSON ✓.
 
-### Phase 8 — the management command  ✅ done
+#### Phase 8 — the management command  ✅ done
 
 `cmd/bull-tunnel`: the hand on the panel. It runs on the machine the panel
 runs on, talks to the panel over its own API and needs no password: the
@@ -834,7 +1335,7 @@ and the panel accepts that key only from this machine.
 **Done when:** `bull-tunnel` opens the menu and every command does what the
 Python one did ✓.
 
-### Commit 29 — the panel itself, in Go  ✅ done
+#### Commit 29 — the panel itself, in Go  ✅ done
 
 `cmd/bull-tunnel-panel` is the panel: the API, the web interface, the
 monitor and the bot, in one binary.
@@ -860,7 +1361,7 @@ panel is Go ✓. The Python panel stays in the tree until the last commit of
 the rewrite, so that the two can still be compared — that is what the
 fixtures are for.
 
-### Commit 30 — the image is built again  ✅ done
+#### Commit 30 — the image is built again  ✅ done
 
 The `.dockerignore` still excluded the Go module — it was written when the
 image carried the Python panel — so the build of the image failed at the
@@ -872,7 +1373,7 @@ first `COPY` ("/go.mod: not found").
 * ✅ The image is built and it runs ✓: the panel answers ✓, the page is
   served ✓ and the health check of the container is green ✓.
 
-### Commit 31 — the panel does not fall over its own state  ✅ done
+#### Commit 31 — the panel does not fall over its own state  ✅ done
 
 The Go panel is two things at once: the monitor writes the state, and the
 web interface reads it. **Go does not forgive a map that is read and written
@@ -901,7 +1402,7 @@ bounded and rare, and it is better than a panel that falls over. **Fixed in
 commit 32 ✓**: the cycle gives the lock back between its phases, and the
 test says so ✓.
 
-### Commit 32 — the demo, and the lock of the state  ✅ done
+#### Commit 32 — the demo, and the lock of the state  ✅ done
 
 The demo is how a newcomer watches the failovers without a server, and the
 Go panel had none. It also carried two bugs of the port, found by writing
@@ -946,7 +1447,7 @@ reader (the cycle) took it ✓, the writer did not ✓: the race detector saw
 it ✓, and the panel did not fall over (the values are a state and a
 number ✓). **Fixed in commit 34 ✓**.
 
-### Commit 33 — the Python panel is gone  ✅ done
+#### Commit 33 — the Python panel is gone  ✅ done
 
 The panel is Go, from the first line to the last: the binary, the service,
 the installer, the image, the management tool and the demo. The Python panel
@@ -983,7 +1484,7 @@ against ✓ — and it is gone.
   slow runner the two numbers are never the same ✓. The comparison is made
   when nobody writes the set any more ✓.
 
-### Commit 34 — the writers of the state take the lock too  ✅ done
+#### Commit 34 — the writers of the state take the lock too  ✅ done
 
 Commit 32 gave the lock of the state to the readers — the cycle ✓ — and
 said what was left: the *writers* of the fields of a tunnel ✓, the repair ✓
@@ -1016,7 +1517,7 @@ taking the lock ✓. The race detector saw it ✓.
   race detector ✓ (`internal/panel/orch/work_test.go` ✓). It fails without
   the lock ✓.
 
-### Phase 9 — the switchover  ✅ done
+#### Phase 9 — the switchover  ✅ done
 
 The panel is Go now: the binary, the service, the installer and the image
 are the Go panel's ✓, and the release carries the panel and the management
@@ -1037,7 +1538,7 @@ tool ✓.
 panel comes up ✓, the demo runs ✓, and the release carries the two
 binaries ✓. **It does.**
 
-### Phase 10 — the dashboard in Go  ✅ done
+#### Phase 10 — the dashboard in Go  ✅ done
 
 The API carries the whole truth, so the dashboard can be rewritten without
 touching the server: the network graph is a canvas ✓, the pages are
@@ -1155,7 +1656,7 @@ carries the state as it does today ✓, the operator does the same things he
 did before ✓, and `static/app.js` is the theme, the canvas, the socket
 and the thin layer that collects what he writes and sends it ✓.
 
-### The order, and what may not be skipped
+#### The order, and what may not be skipped
 
 ```
 0 licence  →  1 one module  →  2 state  →  3 ssh  →  4 engine driver
@@ -1167,437 +1668,4 @@ Phase 7 needs 2, 3, 4, 5 and 6 ✓. Phase 9 needs 8 ✓. Nothing may be
 skipped, and nothing may be done twice: the point of the order is that the
 API is written **once**, against a state, a driver and an orchestrator that
 already work ✓.
-
----
-
-## 3. Status
-
-| Commit | What | State |
-|---|---|---|
-| 1 | `TODO.md` | done |
-| 2 | The engine is the vendored one | done |
-| 3 | The critical panel bugs | done |
-| 4 | The medium panel bugs | done |
-| 5 | The front-end | done |
-| 6 | Tests, docs, changelog | done |
-| 7 | The rename and the management tool | done |
-| 8 | The release | done |
-| 9 | The network graph follows the type-1 design | done |
-| 10 | The Go rewrite — phase 0 (the licence) | done |
-| 11 | The Go rewrite — phase 1 (one module) | done |
-| 12 | The Go rewrite — phase 2 (the state) | done |
-| 13 | The Go rewrite — phase 3 (ssh) | done |
-| 14 | The Go rewrite — phase 4 (the engine driver) | done |
-| 15 | The health script counts milliseconds, not microseconds | done |
-| 16 | The Go rewrite — phase 5 (dns, telegram, backups) | done |
-| 17 | The questions the panel asks its state | done |
-| 18 | The decisions of the brain | done |
-| 19 | The Go rewrite — phase 6 (the orchestrator) | done |
-| 20 | The door of the panel (the auth) | done |
-| 21 | The state the dashboard is shown | done |
-| 22 | The web interface of the panel, in Go | done |
-| 23 | The timing sensitive test, run a few times | done |
-| 24 | The connection test of the panel, in Go | done |
-| 25 | The endpoints that talk to the outside | done |
-| 26 | The declared dependencies cannot pull a vulnerable version | done |
-| 27 | The Go rewrite — phase 7 (the api) | done |
-| 28 | The Go rewrite — phase 8 (the command) | done |
-| 29 | The panel itself, in Go | done |
-| 30 | The image is built again | done |
-| 31 | The panel does not fall over its own state | done |
-| 32 | The Go rewrite — phase 9 (the switchover) | done |
-| 33 | The writers of the state take the lock too | done |
-| 34 | The Go rewrite — phase 10 (the dashboard) | done |
-| 35 | The dashboard — the shell is Go | done |
-| 36 | The dashboard — the network view and the graph are Go | done |
-| 37 | The dashboard — the other views are Go | done |
-| 38 | The dashboard — the forms are Go | done |
-| 39 | The build of every push | done |
-| 40 | The release of every push follows main | done |
-| 41 | The release v1.3.0 | done |
-| 42 | The copyright line names the author | done |
-| 43 | The tunnel form can forward UDP | done |
-| 44 | The feed of events is Go | done |
-| 45 | The quick settings are collected like every other form | done |
-| 46 | What the collector sends is what the API wants | done |
-| 47 | The drawer is worked by Go | done |
-| 48 | The connection test takes the two sides | done |
-| 49 | The JavaScript that drew the drawer is gone | done |
-| 50 | The installation checks itself | done |
-| 51 | The TODO says where the project stands and what is planned | done |
-| 52 | One name — the fork's origin leaves the project's words; the attribution stays where the engine's licence puts it, and the notice points at a `TRADEMARK.md` that exists | done |
-| 53 | The README is written like a tool: nine sections in the order a new operator meets the program, no Roadmap of trophies, no migration story, and the secrets section says what is actually in the clear | done |
-| 54 | The 18MB of design mockups are deleted and nothing points at them; the one file of boilerplate is `CONTRIBUTING.md` | done |
-| 55 | The compression library Dependabot flagged is upgraded and `vendor/` is rebuilt | done |
-| 56 | A tunnel's maximum segment size (MSS) is a field, an API key, a config line on both ends and a line in the drawer | done |
-| 57 | The domain page says what it covers (the ports a healthy tunnel answers, per server in the failover order) and when it comes back to the primary | done |
-| 58 | A heartbeat per tunnel: a field, an API key, a config line on the Iran side and a line in the drawer | done |
-| 59 | The licence test is formatted the way gofmt wants it — two string concatenations were committed with spaces around the `+` (a wart from commit 3809f47), so `gofmt -l` is clean again | done |
-| 60 | A carrier name of the operator's choosing could reach the command the panel runs over SSH: only the panel's own carriers are taken now, refused at the API of the connection test, in the settings, and inside the measurement itself | done |
-| 61 | The release 1.4.0: the version has one home (`internal/panel/version.go`), the changelog carries the heading `## 1.4.0 — 2026-10-25`, and the tag `v1.4.0` makes the CI build the release files and publish the release | done |
-
-**All the findings of the audit are closed, the graph is the type-1 design,
-the panel is Go and the dashboard is Go (phase 10 ✓).** What is left is
-the work that never ends — watching the panel on a live server — and the
-plan below: read **section 4** to continue from here.
-
-### The security review of the control panel (October 2026)
-
-The control plane (`internal/panel`) was reviewed for security after the
-last release. Every finding gets its own commit, its own test and its own
-row in the table above; they are fixed in this order, worst first:
-
-| # | Finding | Status |
-|---|---------|--------|
-| F1 | A carrier name of the operator's choosing could reach the command the panel runs over SSH on the foreign server — via `POST /api/probe`, via the settings' `candidate_transports`, and inside the measurement itself | ✅ done (commit 60) |
-| F2 | The id of a tunnel is written raw into the health script that runs on the Iran server: a crafted id (from the API or a restored state file) becomes part of a shell that runs every check cycle | next |
-| F3 | `/api/setup` fails open: when `auth.json` cannot be read at start, the panel answers "not configured" and anyone who reaches the port can set the admin password | not done |
-| S1 | `GET /` answers the whole dashboard — server names, public IPs, roles, domain names — before anyone signs in | not done |
-| S2 | The login limiter believes `X-Forwarded-For`, so a caller resets it at will; request bodies have no size limit and the server sets no read/write timeouts | not done |
-| S3 | The websocket can be written from two goroutines at once (the library panics, the panel dies) and the state is read without the lock while it is being written | not done |
-| D1 | Saving the settings writes the Telegram mask over the real bot token, silently blinding every alert | not done |
-| D2 | The engine-download settings are wired one parameter off in `cmd/bull-tunnel-panel`: the release is ignored and the source URL is sent as the token | not done |
-| D3 | Some state-changing calls are GET and there is no CSRF token; only `SameSite=Strict` stands in the way | not done |
-| D4 | The Telegram `api_base` and the DoH resolvers take any URL: the bot token can be sent to a host of the operator's typing and internal addresses are reachable | not done |
-| D5 | A POST with an id that already exists takes the object over, masks and all | not done |
-| D6 | Restoring a backup decompresses without a bound: a small file can ask for gigabytes | not done |
-| W1 | `command_key` — the key that signs the commands the agent obeys — is sent raw where every other secret is masked | not done |
-| W2 | Internal error detail (paths, hosts) is answered to the browser, including on the unauthenticated session endpoint | not done |
-| W3 | The session cookie is `Secure` only when the request itself was TLS | not done |
-| W4 | The websocket upgrade accepts any origin | not done |
-| W5 | The command channel is gated on the agent only; the panel sends whatever is asked | not done |
-| W6 | The local management key counts for every route, and behind a reverse proxy every request looks local | not done |
-| W7 | Creating a link or a domain does not check that the servers it names exist | not done |
-
-Nothing in this list is a hole in the engine or in the crypto: the review
-found the password hashing, the session signing, the quoting of names for
-the shell, the backup encryption and the static serving sound.
-
-### What is left to do, and is not a fault
-
-* **Dependabot reported one high-severity vulnerability** in a dependency
-  (`github.com/Liwyd/bull-Tunnel/security/dependabot/2`) — ✅ **done
-  (commit 55).** It was `github.com/klauspost/compress` ≤ v1.18.6
-  (GHSA-259r-337f-4rfw, CVE-2026-113727): a crafted S2 dictionary
-  overflows the repeat index and crashes the process with an out-of-bounds
-  write. The module came in through `utls`, which imports its
-  `zstd` package; this project never calls `s2.NewDict`, and the
-  vulnerable `s2` package was not even vendored. `go.mod`, `go.sum` and
-  `vendor/` are at v1.18.7 now, which is the patched release, and the
-  whole Go suite passes under the race detector as the CI runs it.
-* **Try it on the real servers.** Everything here was verified against the
-  simulated network and against a tunnel on the loopback: the panel comes
-  up, the demo adopts the tunnels that are already running, moves a record
-  when a tunnel dies and repairs the tunnel with another carrier, and the
-  engine measures all nine carriers without disturbing the tunnel that is
-  carrying the traffic. What has not happened yet is a real Iran server
-  and a real foreign server, with the panel talking to them over SSH.
-* **The engine's experimental carriers** (`xdi`, `pck`, `spoof`) are not
-  offered to the panel: they need raw sockets and root, and an unattended
-  repair must not ask for either.
-* **The dashboard does not show how much of a domain's ports a healthy
-  tunnel covers, nor when the domain would fail back** — ✅ **done
-  (commit 57).** The domain page says both now. The routes panel carries
-  the coverage of the server the record points at (green when every port
-  is up, amber for a part, red for none), the failover panel lists every
-  Iran server the record may move to with its own coverage in the order
-  the panel tries them — the coverage is one question asked of any
-  server, so the list and the header cannot disagree — and the countdown
-  back to the primary runs under the list the way it does in the drawer.
-  The countdown spans are named by their attribute now, not by an id,
-  because the drawer and the page are both in the DOM at the same time
-  and an id must be unique.
-* **The panel does not manage the layer-3 and the direct tunnels** of the
-  engine: they are not reverse tunnels, and the panel's model has no place
-  for them.
-* **Two upstream tests are timing sensitive** and fail from time to time
-  under the race detector — the same tests fail the same way in the
-  repository the code comes from. The CI
-  skips them there and runs them on their own, without the detector.
-* **The test job of the CI failed on the runner for a while** — and the
-  fault was in a test of this repository, not in the panel: the test of the
-  set compared the number of models with the number of models the set gave
-  a moment later ✓, while another goroutine was writing the set ✓. On a
-  slow runner the two numbers are never the same ✓, and on a laptop the
-  test passed by luck ✓. The comparison is made when nobody writes the set
-  any more ✓. The CI runs the suite again, one package at a time, when the
-  first run fails ✓ — a real failure is still a failure ✓.
-* **The race detector only sees what the machine it runs on happens to
-  interleave** ✓: the panel was written with the lock in place on the
-  readers ✓, and the runner found the writers that were left ✓ — one at a
-  time ✓, each one of them a race that was really there ✓. The test that
-  runs the cycle ✓, the repair ✓, the discovery ✓ and the operator moving a
-  domain ✓ at the same time ✓ is in the suite now ✓, and it is the one that
-  finds them ✓.
-
----
-
-## 4. The plan from here — read this to continue
-
-**Where the project stands.** Sections 0–3 are history: the audit is
-closed, the panel is Go from the first line, phases 0–10 ship in the
-status table above, `v1.3.0` is published, and the rolling release
-(`build-main`) is republished by CI after every green push and is the
-answer to `releases/latest` — so what a server installs never goes stale
-between tags. Phase 11 is done except the releases-page cleanup, which is
-blocked on a machine with GitHub credentials; phase 12 has its first knob,
-the MSS (commit 56); phase 13 is the list that never closes.
-
-**First, confirm the tree is green** — these are the commands the CI
-runs, and they are the whole verification this project asks for:
-
-```bash
-export PATH=$PATH:/usr/local/go/bin
-go vet ./...
-go test -race ./... -skip 'TestStartDoesNotReturnUntilThePortsAreFree|TestWriteBatchDoesNotAllocatePerCall|TestAnExplicitServerNameIsNotRewritten'
-node --check static/app.js
-bash tests/install-check.sh     # release files → unpack → boot → everything an operator asks
-go run ./cmd/bull-tunnel-panel --demo --data /tmp/panel-demo --port 18080
-```
-
-**What the panel is** (for the README below): a control plane that owns
-tunnels between servers in Iran and abroad over SSH — it installs the
-engine, builds its configuration, watches the health of every tunnel,
-moves the DNS records of a domain when a path breaks, repairs a broken
-tunnel with another carrier, and serves one dashboard over a live
-websocket. The engine is the data plane: versioned, shipped and updated
-by the panel from its own releases page.
-
-### Phase 11 — the repository is a product  (11.1, 11.2 and 11.4 done; 11.3 blocked — no GitHub credentials on this machine)
-
-**11.1 One name — the fork's origin disappears.** ✅ done (commit 52),
-with **one correction to the plan as written here**, found by reading the
-engine's own `NOTICE` before touching anything:
-
-> The engine's `NOTICE` carries Section 7 additional terms, and clause
-> (1) ATTRIBUTION requires the line
-> `Based on BackPack by Amin Mohammadi (AminMGMT) / https://github.com/AminMGMT/BackPack`
-> to be kept **visible and unaltered in: "this NOTICE file, and the README
-> of your distribution."** Option (a) as drafted above said the name
-> leaves the README too — taking that literally would breach the very
-> term the plan said to keep unaltered. So option (a) was executed as:
-> the name leaves everything a user reads *except* the three places the
-> licence names — `internal/engine/NOTICE`, `internal/engine/README.md`
-> and the Licences section of the root `README.md`, where the
-> attribution line stays byte-for-byte. The root `NOTICE` was rewritten
-> in the project's own words and points at those three files.
-
-What was done in commit 52:
-
-* `cmd/bull-tunnel-engine/main.go` — `const Attribution` is gone, and
-  with it the third line of the `-v` output (the panel reads two lines,
-  `head -n2`, so nothing breaks; the licence names notices, not a
-  command's output). Header comments reworded in the project's own
-  words.
-* `internal/engine/app/app.go` — the dead updater constants
-  `RepoOwner`/`RepoName`/`SourceURL` deleted (`SourceURL` had no
-  callers); a comment records why and that a re-sync brings them back.
-* `internal/engine/TRADEMARK.md` — **created.** The engine's `NOTICE`
-  clause (2) referenced it ("See TRADEMARK.md for the detail") and the
-  file did not exist: a dangling notice reference, now fixed.
-* `NOTICE` (root) — rewritten: the attribution paragraph moves out, one
-  honest line says which licence covers what and points at the engine's
-  own `NOTICE`/`README`/`TRADEMARK.md`.
-* `README.md`, `CHANGELOG.md`, `docs/engine-schema.md`, `build.sh`,
-  `.github/workflows/ci.yml`, `deploy/install.sh`,
-  `cmd/bull-tunnel/main.go`, `cmd/bull-tunnel/menu.go`,
-  `internal/panel/engine/driver.go`,
-  `internal/engine/agent/protocol.go` — prose and comments reworded in
-  the project's own words; the attribution blocks in the READMEs stay.
-* this file — the audit and history sections rewritten in the project's
-  own words.
-* a test: `internal/panel/licence_test.go` asserts the attribution line
-  is present and unaltered where the engine's `NOTICE` requires it, that
-  the engine tree is still AGPL-3.0 and the panel still MIT, and that
-  the name no longer appears anywhere else in the tracked tree.
-
-The remaining options stand, if anyone ever wants the last line gone:
-
-* **(b) ask, then unify.** Write to the upstream author (GitHub account
-  named in the attribution line), in writing, to drop the attribution
-  requirement and/or relicense the fork under MIT. Permission granted →
-  delete the last notices, put the whole repository under one licence,
-  reduce `NOTICE` to the copyright line, and delete the test's
-  attribution clause.
-* **(c) unify on AGPL-3.0 now.** One licence, no permission needed —
-  but every user of the panel inherits AGPL's obligations. A real
-  change in what the project is.
-
-**11.2 The README, written like a tool, not like a pitch.** ✅ done
-(commit 53), 685 → 565 lines, and the pitch left with the history: no
-Roadmap (every row of it was ✅ Done, so it was a wall of trophies), no
-"Migrating from the previous version", no "Features" list of adjectives.
-The README is now nine sections in the order a new operator meets the
-program — what it is, install, the first run, how the pieces fit, the
-dashboard, where the secrets are, running it as a service, developing
-it, licences — with the one-line installer above the screenshot, before
-the contents list.
-
-**Three places where the plan as written above was wrong, corrected by
-reading the code:**
-
-* The plan asked for the secrets section to say "Telegram token, DNS
-  keys, SSH host keys". The truth is worse and the README says it: the
-  state file (`<data>/state.json`, mode 0600) holds the SSH passwords and
-  the DNS API tokens **in the clear**, which is why the installer makes
-  the data directory 0700 and why a backup password is not optional in
-  practice. What is actually encrypted: the admin password (PBKDF2-SHA,
-  16-byte salt, 200,000 iterations) and the backup (AES-256-GCM, key
-  from scrypt).
-* The plan asked for "how to run it as a service (`BT_PORT`/`BT_HOST`,
-  the data directory, `-check`)". The panel takes flags too — `--host`,
-  `--port`, `--data`, `--demo`, `--check`, `--static-dir` — so the
-  section is a table of the environment *and* the flags, read from
-  `/etc/default/bull-tunnel`.
-* "The dashboard in one short paragraph" did not survive contact with
-  the five pages and the ⚡ connection test: it is a section, and the
-  screenshots it needs (`dashboard-dark`, `dashboard-light`, `server`)
-  went with it.
-
-`docs/` got the knife too, and it turned up a contradiction:
-`docs/architecture.md` said in one line that host keys are **not**
-verified (`known_hosts=None`) and fifteen lines below that they **are**
-pinned. Commit 5 pinned them; the first line was stale, and it is fixed.
-The one place that still says the data plane does not go over DNS now
-says so without pointing at a roadmap this commit deletes.
-
-A test in `internal/panel/readme_test.go` holds the shape: the nine
-headings in order, the installer at the top, the attribution block in
-the Licences section, the name of the origin nowhere else in the
-README — and the README's claims about the state file, the password and
-the backup checked against the code that makes them true, so a claim
-that stops being true is a failing test and not a lie in print.
-
-**11.3 The releases page.** ⛔ blocked — there is no `gh` CLI, no GitHub
-token and no credentials on this machine, so the releases page cannot be
-touched from here. The work, when a machine with credentials is in front
-of someone: today `build-main` (rolling, marked latest), `v1.3.0`,
-`v1.2.0` and the pre-Go `v1.1.3`–`v1.1.0`. Keep the rolling release and
-every Go-era tag; delete `v1.1.0`–`v1.1.3` **from the releases page
-only** (the tags stay, so anything pinning them still works), and
-confirm the panel's `engine_release` setting still says `latest` so
-servers follow the rolling one. New tagged releases need nothing changed
-in CI (`generate_release_notes` already writes them).
-
-**11.4 The dead weight and the one file of boilerplate.** ✅ done
-(commit 54). The `new-ui/` directory — 12 SVGs, 18MB — is deleted, and
-`du -sh` on the working tree (excluding `.git` and `vendor`) went from
-24MB to 6.5MB. The plan said "referenced by nothing"; that was checked
-first, and it was **wrong in one respect, worth writing down**: five
-files did cite it. `static/style.css` (the palette header and the graph
-cards), `static/app.js` (the wire labels), `internal/panel/web/network.go`
-(the column order) and `internal/panel/web/card.go` (the card shape) all
-pointed at `new-ui/type1/graphs.svg` or `new-ui/type2/seven.svg`.
-
-None of them loaded an asset — every one was a provenance comment, and
-in four of the five the design was already written out in full in the
-comment beside the pointer. So the deletion loses no design knowledge:
-the palette is in the `style.css` header and in the changelog, the
-type-1/type-2 decision is in the changelog and in this file, and the
-comments were rewritten to say what the design *is* rather than where
-the mockup *was*.
-
-What was left pointing at a file that no longer exists:
-`internal/panel/licence_test.go` skipped `new-ui/` while walking the tree
-for the origin's name — that skip is removed, since the directory it
-guarded is gone. The two historical references stay: `CHANGELOG.md`
-records what version 1.3.0 shipped against, and commit 9 above records
-what it did. Rewriting either would falsify a record.
-
-The boilerplate: one `CONTRIBUTING.md`, the five commands and the commit
-style. No templates, no code of conduct — no one has asked.
-
-### Phase 12 — the rest of the engine's potential  (started — the MSS is done, the rest is planned)
-
-The rule for this phase: **only what the current base carries.** If it
-needs the model, the orchestrator or the config writer rebuilt, it is
-not worth it — these protocols are not important enough.
-
-**Done so far:**
-
-* ✅ **`mss`** (commit 56, broken-MTU paths). `model.Link.MSS` → the
-  `mss` key of the link body and of the API answer → `d.Set("mss", …)` in
-  both `serverSection` and `clientSection` when it is above zero → the
-  field and its hint in the drawer's settings box. The API takes 0 or
-  536–65495 and refuses the rest; a number the kernel refuses would leave
-  the tunnel down. 0 writes no line, so the engine keeps its own value and
-  an adopted tunnel keeps the one in its file. A change is applied to both
-  ends through `Orchestrator.SettingsChanged`; a tunnel that is busy is
-  left to its rebuild, which reads the saved value, and the event log says
-  so. Tests: the rendered TOML on both sides, the API round trip and its
-  validation, the drawer field, and the two-sided deployment. The state
-  fixtures, `docs/engine-schema.md` and the changelog carry the field.
-* ✅ **`heartbeat`** (commit 58, the beat of the control channel).
-  `model.Link.Heartbeat` → the `heartbeat` key of the link body and of
-  the API answer → validation (0, or 1–10 seconds: the engine clamps
-  anything above ten seconds to ten, so a bigger number would be a
-  setting it does not honour) → `d.Set("heartbeat", …)` in
-  `serverSection` **only** — the Iran side is the one that beats and the
-  client's config has no such key; 0 writes no line and leaves the
-  engine's own rhythm → the field and its hint in the drawer's settings.
-  A change goes through `SettingsChanged` with the MSS. Tests: the
-  rendered TOML on both ends (the foreign one must *not* carry it, and an
-  adopted file keeps its own value), the API round trip and its
-  validation, the drawer field — and the fixtures, `docs/engine-schema.md`
-  and the changelog carry the field.
-
-**In — panel-only, each one a field, a config line and a form line:**
-
-* the remaining per-tunnel knobs, in the order they earn their place:
-  `dial_timeout` / `retry_interval`, then `bandwidth_mbps` /
-  `max_connections`, then the `kcp_*` / `mux_*` tuning. Recipe per knob: a field on `model.Link` → the JSON key in
-  `api/collections.go`'s link body → one `d.Set` in
-  `engine/render.go`'s `serverSection`/`clientSection` → a line in
-  `web/forms.go`'s `linkForm` or the drawer's inline fields → assert
-  the emitted config line the way `engine/driver_test.go` does.
-  `dumpSection` already emits any key, so the renderer needs no schema
-  change — that is what makes each of these "panel-only".
-* `fallback_transports` / `fallback_dwell`: the engine rotates carriers
-  on its own, but the panel's status, pin, retest and repair all speak
-  about *one* transport per tunnel. Expose it only after the status
-  language has an answer for a rotating link — a decision first, a
-  checkbox second.
-
-**Out — decided against, and why:**
-
-* `xdi`, `pck`: raw sockets and root; the engine itself keeps them out
-  of its own carrier list (`cmd/bull-tunnel-engine/main.go`), and an
-  unattended repair must never rotate into a carrier the server cannot
-  run. If they are ever wanted: pin-only, behind capability detection,
-  never in the automatic pool.
-* `spoof`: the engine refuses it as a reverse transport; it exists only
-  for the L3 tunnel.
-* L3 `[l3]` and `[direct]` tunnels: the scan skips them
-  (`panel/engine/scan.go`), the model has no kind for them, and they
-  invert the topology the orchestrator assumes (Iran listens, kharej
-  dials). A rework, not a feature.
-* the `udp` transport alone (not TCP-probeable — it would break
-  discovery and repair), the managed `naive`/`xray` helpers and the
-  quota sidecar (different control paths), the engine's sniffer monitor
-  page (the panel has its own health).
-
-**Already done in this direction:** the UDP switch of the tunnel form
-(row 43) — `accept_udp` was wired in model, API and renderer and simply
-had no UI — and the collector's marks (row 46). The habit is worth
-keeping: grep a model field against the forms; "wired but invisible" is
-how `accept_udp` happened.
-
-### Phase 13 — the work that never ends
-
-The bullets under *What is left to do, and is not a fault* above **are**
-this phase — the real-server trial, the two timing-sensitive tests, the
-two numbers the API never sends, and the L3/direct tunnels. Read that
-list as the standing backlog: work it in order,
-and add to it instead of starting a second one. Two more entries for
-it: the fixtures of `tests/contract/` may take their final name when
-the contract is complete (the note in phase 2), and any change to
-`.github/workflows/ci.yml` must be watched through one full run — CI
-now publishes three moving things (the image, `build-main`, and `v*`
-on a tag).
-
-
-
-
-
-
 
