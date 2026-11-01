@@ -4,6 +4,15 @@ import (
 	"github.com/Liwyd/bull-Tunnel/internal/panel/model"
 )
 
+const storeMask = "••••"
+
+func maskIf(secret string) string {
+	if secret == "" {
+		return ""
+	}
+	return storeMask
+}
+
 // Snapshot is what the dashboard renders. The secrets are masked.
 //
 // The links carry the ports they expose now, the tunnel that exposes them
@@ -203,7 +212,7 @@ func serverPublic(server *model.Server) map[string]any {
 		"enabled":           server.Enabled,
 		"probe_target":      server.ProbeTarget,
 		"host_key":          server.HostKey,
-		"command_key":       server.CommandKey,
+		"command_key":       maskIf(server.CommandKey),
 		"status":            server.Status,
 		"last_seen":         server.LastSeen,
 		"ssh_latency_ms":    server.SSHLatencyMS,

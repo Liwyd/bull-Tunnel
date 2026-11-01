@@ -99,6 +99,10 @@ func (s *Server) servers(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "the id of a server may only contain letters, digits, dot, dash and underscore")
 			return
 		}
+		if s.store.Servers.Has(server.ID) {
+			writeError(w, http.StatusConflict, "an object with this id already exists")
+			return
+		}
 		if server.Role != model.Iran && server.Role != model.Kharej {
 			writeError(w, http.StatusBadRequest, "the role must be iran or kharej")
 			return
@@ -151,6 +155,9 @@ func (s *Server) serverByID(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.SSHKey == "" || body.SSHKey == mask {
 			updated.SSHKey = server.SSHKey
+		}
+		if body.CommandKey == "" || body.CommandKey == mask {
+			updated.CommandKey = server.CommandKey
 		}
 		s.store.Servers.Put(server.ID, updated)
 		s.orch.Changed()
@@ -249,6 +256,10 @@ func (s *Server) links(w http.ResponseWriter, r *http.Request) {
 		link := body.model()
 		if !model.ValidID(link.ID) {
 			writeError(w, http.StatusBadRequest, "the id of a tunnel may only contain letters, digits, dot, dash and underscore")
+			return
+		}
+		if s.store.Links.Has(link.ID) {
+			writeError(w, http.StatusConflict, "an object with this id already exists")
 			return
 		}
 		if link.IranID == "" || link.KharejID == "" {
@@ -390,6 +401,10 @@ func (s *Server) serverAction(w http.ResponseWriter, r *http.Request, server *mo
 			s.readAnswer(w, r, server)
 			return
 		}
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
 		s.sendCommand(w, r, server)
 	default:
 		writeError(w, http.StatusNotFound, "not found")
@@ -510,6 +525,10 @@ func (s *Server) domains(w http.ResponseWriter, r *http.Request) {
 		domain := body.model()
 		if !model.ValidID(domain.ID) {
 			writeError(w, http.StatusBadRequest, "the id of a domain may only contain letters, digits, dot, dash and underscore")
+			return
+		}
+		if s.store.Domains.Has(domain.ID) {
+			writeError(w, http.StatusConflict, "an object with this id already exists")
 			return
 		}
 		if domain.FQDN == "" || domain.ProviderID == "" {
@@ -660,6 +679,10 @@ func (s *Server) providers(w http.ResponseWriter, r *http.Request) {
 		provider := body.model()
 		if !model.ValidID(provider.ID) {
 			writeError(w, http.StatusBadRequest, "the id of a DNS account may only contain letters, digits, dot, dash and underscore")
+			return
+		}
+		if s.store.Providers.Has(provider.ID) {
+			writeError(w, http.StatusConflict, "an object with this id already exists")
 			return
 		}
 		if provider.Name == "" || provider.Zone == "" {
@@ -819,6 +842,16 @@ func (s *Server) applySettings(body map[string]any) {
 	setString(body, "engine_release", &settings.EngineRelease)
 	setString(body, "engine_source", &settings.EngineSource)
 	setStrings(body, "doh_resolvers", &settings.DohResolvers)
+	// Validate DoH resolvers (must be http/https, no private/loopback IPs if desired, or at least valid http/https URLs)
+	validResolvers := []string{}
+	for _, u := range settings.DohResolvers {
+		if strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://") {
+			validResolvers = append(validResolvers, u)
+		}
+	}
+	if len(validResolvers) > 0 {
+		settings.DohResolvers = validResolvers
+	}
 	setBool(body, "backup_enabled", &settings.BackupEnabled)
 	setString(body, "backup_time", &settings.BackupTime)
 	setString(body, "backup_tz", &settings.BackupTZ)
@@ -830,7 +863,24 @@ func (s *Server) applySettings(body map[string]any) {
 		settings.BackupPassword = secret
 	}
 	if telegram, there := body["telegram"].(map[string]any); there {
-		settings.Telegram = telegram
+		if token, ok := telegram["bot_token"].(string); ok && token != "" && token != mask {
+			settings.Telegram["bot_token"] = token
+		} else if _, hasToken := telegram["bot_token"]; !hasToken {
+			// if bot_token is not present, don't touch it
+		} else if token == "" {
+			settings.Telegram["bot_token"] = ""
+		}
+		for k, v := range telegram {
+			if k != "bot_token" {
+				if k == "api_base" {
+					if apiBase, ok := v.(string); ok && (strings.HasPrefix(apiBase, "https://") || strings.HasPrefix(apiBase, "http://")) {
+						settings.Telegram[k] = apiBase
+					}
+				} else {
+					settings.Telegram[k] = v
+				}
+			}
+		}
 	}
 }
 

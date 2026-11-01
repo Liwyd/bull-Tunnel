@@ -183,7 +183,8 @@ func Unpack(blob []byte, password string) (Data, error) {
 			return Data{}, backupError("this is not a bull-Tunnel backup file")
 		}
 		defer reader.Close()
-		plain, err := io.ReadAll(reader)
+		// limit decompressed size to 100MB to avoid zip bomb / out of memory
+		plain, err := io.ReadAll(io.LimitReader(reader, 100<<20))
 		if err != nil {
 			return Data{}, backupError("this is not a bull-Tunnel backup file")
 		}
