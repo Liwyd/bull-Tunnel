@@ -265,13 +265,19 @@ func clientIP(r *http.Request) string {
 
 // setCookie gives the browser the session.
 func (s *Server) setCookie(w http.ResponseWriter, r *http.Request) {
+	secure := r.TLS != nil
+	if !secure {
+		if proto := r.Header.Get("X-Forwarded-Proto"); strings.EqualFold(proto, "https") {
+			secure = true
+		}
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     auth.Cookie,
 		Value:    s.auth.Issue(),
 		MaxAge:   auth.SessionTTL,
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		Secure:   r.TLS != nil,
+		Secure:   secure,
 		Path:     "/",
 	})
 }

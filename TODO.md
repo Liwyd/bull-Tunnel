@@ -160,9 +160,9 @@ first:
 | D5 | A POST with an id that already exists takes the object over, masks and all | ✅ done (commit 67) |
 | D6 | Restoring a backup decompresses without a bound: a small file can ask for gigabytes | ✅ done (commit 67) |
 | W1 | `command_key` — the key that signs the commands the agent obeys — is sent raw where every other secret is masked | ✅ done (commit 67) |
-| W2 | Internal error detail (paths, hosts) is answered to the browser, including on the unauthenticated session endpoint | not done |
-| W3 | The session cookie is `Secure` only when the request itself was TLS | not done |
-| W4 | The websocket upgrade accepts any origin | not done |
+| W2 | Internal error detail (paths, hosts) is answered to the browser, including on the unauthenticated session endpoint | ✅ done (commit 68) |
+| W3 | The session cookie is `Secure` only when the request itself was TLS | ✅ done (commit 68) |
+| W4 | The websocket upgrade accepts any origin | ✅ done (commit 68) |
 | W5 | The command channel is gated on the agent only; the panel sends whatever is asked | not done |
 | W6 | The local management key counts for every route, and behind a reverse proxy every request looks local | not done |
 | W7 | Creating a link or a domain does not check that the servers it names exist | not done |

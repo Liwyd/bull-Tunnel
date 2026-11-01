@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -56,7 +57,15 @@ func (h *hub) drop(conn *websocket.Conn) {
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin:     func(r *http.Request) bool { return true },
+	CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true // non-browser clients or same-origin without Origin header
+		}
+		host := r.Host
+		// check if origin matches host
+		return strings.Contains(origin, host)
+	},
 }
 
 // websocket is the connection the pages listen on.
