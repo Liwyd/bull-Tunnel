@@ -153,13 +153,13 @@ first:
 | S1 | `GET /` answers the whole dashboard — server names, public IPs, roles, domain names — before anyone signs in | ✅ done (commit 64) |
 | S2 | The login limiter believes `X-Forwarded-For`, so a caller resets it at will; request bodies have no size limit and the server sets no read/write timeouts | ✅ done (commit 65) |
 | S3 | The websocket can be written from two goroutines at once (the library panics, the panel dies) and the state is read without the lock while it is being written | ✅ done (commit 66) |
-| D1 | Saving the settings writes the Telegram mask over the real bot token, silently blinding every alert | not done |
-| D2 | The engine-download settings are wired one parameter off in `cmd/bull-tunnel-panel`: the release is ignored and the source URL is sent as the token | not done |
-| D3 | Some state-changing calls are GET and there is no CSRF token; only `SameSite=Strict` stands in the way | not done |
-| D4 | The Telegram `api_base` and the DoH resolvers take any URL: the bot token can be sent to a host of the operator's typing and internal addresses are reachable | not done |
-| D5 | A POST with an id that already exists takes the object over, masks and all | not done |
-| D6 | Restoring a backup decompresses without a bound: a small file can ask for gigabytes | not done |
-| W1 | `command_key` — the key that signs the commands the agent obeys — is sent raw where every other secret is masked | not done |
+| D1 | Saving the settings writes the Telegram mask over the real bot token, silently blinding every alert | ✅ done (commit 67) |
+| D2 | The engine-download settings are wired one parameter off in `cmd/bull-tunnel-panel`: the release is ignored and the source URL is sent as the token | ✅ done (commit 67) |
+| D3 | Some state-changing calls are GET and there is no CSRF token; only `SameSite=Strict` stands in the way | ✅ done (commit 67) |
+| D4 | The Telegram `api_base` and the DoH resolvers take any URL: the bot token can be sent to a host of the operator's typing and internal addresses are reachable | ✅ done (commit 67) |
+| D5 | A POST with an id that already exists takes the object over, masks and all | ✅ done (commit 67) |
+| D6 | Restoring a backup decompresses without a bound: a small file can ask for gigabytes | ✅ done (commit 67) |
+| W1 | `command_key` — the key that signs the commands the agent obeys — is sent raw where every other secret is masked | ✅ done (commit 67) |
 | W2 | Internal error detail (paths, hosts) is answered to the browser, including on the unauthenticated session endpoint | not done |
 | W3 | The session cookie is `Secure` only when the request itself was TLS | not done |
 | W4 | The websocket upgrade accepts any origin | not done |
