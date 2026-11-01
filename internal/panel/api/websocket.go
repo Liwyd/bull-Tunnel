@@ -10,28 +10,36 @@ import (
 // The websocket carries the state to the open pages: the panel pushes it at
 // every change, and the page answers with a ping to keep the connection
 // alive.
+type hubClient struct {
+	conn *websocket.Conn
+	mu   sync.Mutex
+}
+
 type hub struct {
 	mu      sync.Mutex
-	clients map[*websocket.Conn]bool
+	clients map[*websocket.Conn]*hubClient
 }
 
 // newHub returns an empty hub.
 func newHub() *hub {
-	return &hub{clients: map[*websocket.Conn]bool{}}
+	return &hub{clients: map[*websocket.Conn]*hubClient{}}
 }
 
 // send tells every open page something.
 func (h *hub) send(message any) {
 	h.mu.Lock()
-	clients := make([]*websocket.Conn, 0, len(h.clients))
-	for conn := range h.clients {
-		clients = append(clients, conn)
+	clients := make([]*hubClient, 0, len(h.clients))
+	for _, client := range h.clients {
+		clients = append(clients, client)
 	}
 	h.mu.Unlock()
-	for _, conn := range clients {
-		if err := conn.WriteJSON(message); err != nil {
-			conn.Close()
-			h.drop(conn)
+	for _, client := range clients {
+		client.mu.Lock()
+		err := client.conn.WriteJSON(message)
+		client.mu.Unlock()
+		if err != nil {
+			client.conn.Close()
+			h.drop(client.conn)
 		}
 	}
 }
@@ -61,15 +69,24 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	client := &hubClient{conn: conn}
 	s.hub.mu.Lock()
-	s.hub.clients[conn] = true
+	s.hub.clients[conn] = client
 	s.hub.mu.Unlock()
 	defer func() {
 		s.hub.drop(conn)
 		conn.Close()
 	}()
 	// the page gets the state at once
-	conn.WriteJSON(map[string]any{"type": "state", "state": s.fullState()})
+	client.mu.Lock()
+	s.store.RLock()
+	stateMsg := map[string]any{"type": "state", "state": s.fullState()}
+	s.store.RUnlock()
+	err = client.conn.WriteJSON(stateMsg)
+	client.mu.Unlock()
+	if err != nil {
+		return
+	}
 	for {
 		// the keepalive pings of the page
 		if _, _, err := conn.ReadMessage(); err != nil {
