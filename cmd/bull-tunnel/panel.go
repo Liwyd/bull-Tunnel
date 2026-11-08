@@ -22,11 +22,17 @@ const (
 )
 
 // dataDir is where the panel keeps its files.
+//
+// It must be the same directory the panel itself uses — the login file and
+// the management key live there, and a tool that looked next door would
+// change a password the panel never reads and present a key the panel never
+// wrote. The default is the one of the panel's own command line and of the
+// service: /var/lib/bull-tunnel.
 func dataDir() string {
 	if dir := os.Getenv("BT_DATA_DIR"); dir != "" {
 		return dir
 	}
-	return "/var/lib/bulltunnel"
+	return "/var/lib/bull-tunnel"
 }
 
 // keyFile is the file with the key of this tool.

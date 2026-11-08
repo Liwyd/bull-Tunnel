@@ -7,6 +7,16 @@ only adds something.
 
 ## Unreleased
 
+- **The management tool looks where the panel keeps its files**: its own
+  directory was `/var/lib/bulltunnel` while the panel keeps its files in
+  `/var/lib/bull-tunnel`, so `bull-tunnel passwd` — the command the README
+  gives for changing the password — wrote the login into a directory the
+  panel never opens, and the management key the tool presented was never
+  the panel's. On a fresh installation the panel therefore came up with no
+  password at all and `/api/setup` was open to whoever reached the port,
+  while the password the installer printed opened nothing. The default is
+  the panel's directory now, and a test ties it to the `--data` of the
+  service.
 - **The limiter counts the real address, and nothing reads for ever**
   (the security review's S2): `X-Forwarded-For` is only believed from a
   proxy on this machine — and then the last address is taken, the one the
