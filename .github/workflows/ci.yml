@@ -82,6 +82,14 @@ jobs:
         # dashboard, the drawer, the forms, the settings and a
         # connection test. It needs no root and no server.
         run: bash tests/install-check.sh --dist /tmp/dist
+      - name: the installer
+        # The one-line installer itself, the way the one line runs it:
+        # piped from the network with no checkout beside it, as an ordinary
+        # user, into a temporary directory, with the system commands standing
+        # in for themselves. It needs no root, no systemd and no network
+        # either — and it must leave a working panel with the password it
+        # printed, on a fresh install and on an upgrade.
+        run: bash tests/installer-check.sh --dist /tmp/dist
 
   image:
     name: docker image

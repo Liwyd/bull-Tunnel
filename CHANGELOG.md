@@ -17,6 +17,25 @@ only adds something.
   while the password the installer printed opened nothing. The default is
   the panel's directory now, and a test ties it to the `--data` of the
   service.
+- **The one-line installer installs** (found on a fresh server): the
+  installer removed `/opt/bull-tunnel/bin` and then moved the new binaries
+  into it, so on a fresh machine it stopped at
+  `mv: cannot move '…' to '…/bin/': Not a directory` — with the program of
+  the panel already gone and the service down. The new code is now built
+  in a staging folder next to the old one and the two directories are
+  exchanged with a rename while the service is stopped: the path the
+  service reads from is never empty, a failure puts the old code back
+  where it was, and a failure after the stop starts the panel again with
+  what is on disk. Three more faults of a first installation are fixed
+  beside it: the unit file of the service was copied from `$SRC`, which
+  does not exist when the script is piped from the network, so the install
+  died right after the code was in place; the login file the installer
+  wrote as root was left owned by root, which the service's user cannot
+  read; and the tool was not told which directory the installation keeps
+  its files in, so its own default decided where the password went. `tests/installer-check.sh` runs the installer the way the
+  one line runs it — piped, with no checkout, as an ordinary user — and
+  asks for a fresh install, an upgrade and the password of both; the CI
+  runs it with the installation check.
 - **The limiter counts the real address, and nothing reads for ever**
   (the security review's S2): `X-Forwarded-For` is only believed from a
   proxy on this machine — and then the last address is taken, the one the
