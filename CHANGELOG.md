@@ -32,7 +32,10 @@ only adds something.
   died right after the code was in place; the login file the installer
   wrote as root was left owned by root, which the service's user cannot
   read; and the tool was not told which directory the installation keeps
-  its files in, so its own default decided where the password went. `tests/installer-check.sh` runs the installer the way the
+  its files in, so its own default decided where the password went. The
+  release the installer fetches is removed as soon as the code is staged,
+  because the last thing the script can do is exec the menu — an exec
+  never runs the trap that would remove it. `tests/installer-check.sh` runs the installer the way the
   one line runs it — piped, with no checkout, as an ordinary user — and
   asks for a fresh install, an upgrade and the password of both; the CI
   runs it with the installation check.

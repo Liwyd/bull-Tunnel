@@ -174,6 +174,11 @@ put_dir "$STAGE/bin" "$DEST/bin"
 put_dir "$STAGE/static" "$DEST/static"
 rmdir "$STAGE" 2>/dev/null || rm -rf "$STAGE"
 STAGE=""
+# The fetched release is of no use now, and the last thing the script can do
+# is `exec` the menu — an exec never runs the EXIT trap, so the temporary
+# folder is removed here, where it is certain to be removed.
+rm -rf "$TMP"
+TMP=""
 
 say "the management command"
 # The command is put where every shell finds it: the

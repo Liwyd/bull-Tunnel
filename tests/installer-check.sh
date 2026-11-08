@@ -159,14 +159,17 @@ DATA="$WORK/data"
 ENV_FILE="$WORK/etc/default/bull-tunnel"
 UNIT="$WORK/etc/systemd/bull-tunnel.service"
 BINDIR="$WORK/usr/local/bin"
+mkdir -p "$WORK/tmp"
 
 run_installer() { # run_installer LOG
   local log="$1"
   # The script is read from stdin, the way `curl | sudo bash` reads it: no
   # checkout beside it, so the unit file has to come from the script itself.
-  # The working directory is not the repository for the same reason.
+  # The working directory is not the repository for the same reason, and
+  # TMPDIR is this test's own folder so the release the installer fetches
+  # can be found in the trace afterwards.
   ( cd "$WORK" && env \
-      PATH="$STUB:$PATH" \
+      PATH="$STUB:$PATH" TMPDIR="$WORK/tmp" \
       BT_DEST="$DEST" BT_DATA="$DATA" BT_ENV_FILE="$ENV_FILE" \
       BT_UNIT="$UNIT" BT_BINDIR="$BINDIR" BT_PORT="$PORT" \
       bash < "$HERE/deploy/install.sh" ) > "$log" 2>&1
@@ -202,6 +205,15 @@ esac
 case "$removed" in
   *"$DEST/static"*) show "the trace" "$TRACE"; die "the installer removed the directory the service reads its web interface from" ;;
 esac
+# The release that was fetched is removed before the service is started: the
+# last thing the installer can do is exec the menu, and an exec never runs
+# the trap that would remove it — a removal in the trap alone would leave
+# the release behind on every installation run from a terminal.
+fetched="$(grep -n "^rm -rf $WORK/tmp/" "$TRACE" | head -n1 | cut -d: -f1)"
+started="$(grep -n '^systemctl restart bull-tunnel$' "$TRACE" | head -n1 | cut -d: -f1)"
+[ -n "$fetched" ] || die "the installer did not remove the release it fetched"
+[ -n "$started" ] || die "the service was never started again"
+[ "$fetched" -lt "$started" ] || die "the release was removed after the service was started: run from a terminal, the installer would leave it behind"
 
 # 5. the unit of the service: there is no checkout to copy it from, so it
 #    came out of the script — and put back to the default paths it must be
