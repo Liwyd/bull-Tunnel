@@ -581,10 +581,27 @@ func (o *Orchestrator) ScanAll(servers []*model.Server) int {
 			continue
 		}
 		found[server.ID] = items
+		// A server that runs tunnels has the engine, whoever put it there:
+		// the panel keeps what it finds (the actions that run the engine are
+		// only offered on a server that has it).
+		version, transports := "", []string(nil)
+		if work := o.copyServer(server); work != nil && work.EngineVersion == "" && len(items) > 0 {
+			if there, speaks, err := o.driver.EngineInfo(work); err == nil && there != "" && there != "MISSING" {
+				version, transports = there, speaks
+			}
+		}
 		// the server in the panel, under the lock of the state: the one that
 		// was given may be that very server, and the cycle reads it
 		scanned := model.Now()
-		o.writeServer(server, func(current *model.Server) { current.LastScan = scanned })
+		o.writeServer(server, func(current *model.Server) {
+			current.LastScan = scanned
+			if version != "" && current.EngineVersion == "" {
+				current.EngineVersion = version
+				if len(transports) > 0 && len(current.EngineTransports) == 0 {
+					current.EngineTransports = append([]string{}, transports...)
+				}
+			}
+		})
 	}
 	o.setLastScan(model.Now())
 

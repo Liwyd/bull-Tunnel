@@ -37,6 +37,9 @@ type Opts struct {
 	// Demo says that the panel is the demo. It is not something the
 	// operator picks on the page: the server sets it from its own options.
 	Demo bool `json:"-"`
+	// Bot is what the Telegram bot says about itself; the server fills it
+	// in from what the bot already knows.
+	Bot BotStatus `json:"-"`
 }
 
 // The icons of the buttons, as the stylesheet draws them.

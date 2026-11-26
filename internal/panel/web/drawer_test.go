@@ -107,7 +107,8 @@ func TestTheDrawerOfATunnelIsWorkedByGo(t *testing.T) {
 // of the other side, the command channel (only on the side the panel dials
 // out to) and the tunnels it takes part in.
 func TestTheDrawerOfAServerIsWorkedByGo(t *testing.T) {
-	body := drawer(t, world(t), "server:k1")
+	state := withEngines(world(t))
+	body := drawer(t, state, "server:k1")
 
 	hasAll(t, body,
 		`<h2>frankfurt</h2>`,
@@ -118,7 +119,7 @@ func TestTheDrawerOfAServerIsWorkedByGo(t *testing.T) {
 		`data-act="POST /api/probe"`,
 		`<input type="hidden" data-field="server" value="k1">`,
 		`<select data-field="peer">`,
-		`<option value="i1">tehran — 198.51.100.4</option>`,
+		`<option value="i1" selected>tehran — 198.51.100.4</option>`,
 		`data-done="Best: {best}"`,
 		// the command channel answers into a box, as text
 		`data-act-into="#cmd-out"`,
@@ -129,7 +130,7 @@ func TestTheDrawerOfAServerIsWorkedByGo(t *testing.T) {
 
 	// the Iran server is the one the traffic comes to: it has no command
 	// channel (the panel does not dial out to it)
-	iran := drawer(t, world(t), "server:i1")
+	iran := drawer(t, state, "server:i1")
 	hasAll(t, iran, `<h2>tehran</h2>`, `<h4>Connection test ⚡</h4>`)
 	hasNone(t, iran, "cmd-out", "Command channel")
 }
@@ -267,4 +268,154 @@ func TestTheFailbackCountdownIsWorkedByGo(t *testing.T) {
 	if strings.Contains(ready, `data-at=`) {
 		t.Errorf("the countdown carries a moment it has already passed:\n%s", ready)
 	}
+}
+
+// withEngines gives the servers of the world the tunnel engine, as they have
+// it once it was installed (or found) on them.
+func withEngines(state *store.Store) *store.Store {
+	for _, server := range state.Servers.List() {
+		server.EngineVersion = "1.5.0"
+	}
+	return state
+}
+
+// pressable tells whether the button that makes a call is there and can be
+// pressed: a disabled one is there, and says why elsewhere.
+func pressable(body string, call string) (there bool, enabled bool) {
+	for _, button := range regexp.MustCompile(`<button[^>]*data-act="`+regexp.QuoteMeta(call)+`"[^>]*>`).FindAllString(body, -1) {
+		there = true
+		if !strings.Contains(button, " disabled") {
+			enabled = true
+		}
+	}
+	return there, enabled
+}
+
+// The connection test runs the engine on both ends, so it is only offered
+// where both have it. A server without the engine shows the button disabled,
+// says to install the engine on it first, and has the button that does.
+func TestTheConnectionTestNeedsTheEngineHere(t *testing.T) {
+	state := world(t)
+	state.Servers.Get("i1").EngineVersion = "1.5.0"
+	body := drawer(t, state, "server:k1")
+
+	there, enabled := pressable(body, "POST /api/probe")
+	if !there || enabled {
+		t.Errorf("the measure button of a server with no engine is there=%v enabled=%v, it must be there and disabled:\n%s", there, enabled, body)
+	}
+	hasAll(t, body, "Install the tunnel engine on this server first",
+		`data-act="POST /api/servers/k1/install"`)
+	hasNone(t, body, "not reachable over SSH")
+
+	// the install button is in the box of the test too, next to the reason
+	box := body[strings.Index(body, "Connection test"):]
+	box = box[:strings.Index(box, "Command channel")]
+	hasAll(t, box, `data-act="POST /api/servers/k1/install"`)
+
+	// the same server with the engine, and the peer with it: the button is live
+	state.Servers.Get("k1").EngineVersion = "1.5.0"
+	if there, enabled := pressable(drawer(t, state, "server:k1"), "POST /api/probe"); !there || !enabled {
+		t.Errorf("the measure button of two servers that have the engine is there=%v enabled=%v", there, enabled)
+	}
+	hasNone(t, drawer(t, state, "server:k1"), "Install the tunnel engine on this server first", "data-engine-gate")
+}
+
+// A server that does not answer cannot take part either, and the page does
+// not offer to install on it: nothing can be done until it is reachable.
+func TestTheConnectionTestNeedsTheServerToAnswer(t *testing.T) {
+	state := withEngines(world(t))
+	state.Servers.Get("k1").Status = model.Offline
+	body := drawer(t, state, "server:k1")
+
+	if there, enabled := pressable(body, "POST /api/probe"); !there || enabled {
+		t.Errorf("the measure button of an offline server is there=%v enabled=%v", there, enabled)
+	}
+	hasAll(t, body, "This server is not reachable over SSH")
+	box := body[strings.Index(body, "Connection test"):]
+	box = box[:strings.Index(box, "Command channel")]
+	hasNone(t, box, "Install the tunnel engine on this server first", `data-act="POST /api/servers/k1/install"`)
+
+	// a server whose state is not known yet is not treated as offline
+	state.Servers.Get("k1").Status = model.Unknown
+	if there, enabled := pressable(drawer(t, state, "server:k1"), "POST /api/probe"); !there || !enabled {
+		t.Errorf("the measure button of a server that was not checked yet is there=%v enabled=%v", there, enabled)
+	}
+}
+
+// The peers that have no engine are in the list, marked, and cannot be
+// picked; the first one that can is the one that is picked. When none can,
+// the page says so and offers the installation on each of them.
+func TestThePeersWithoutTheEngineCannotBePicked(t *testing.T) {
+	state := withEngines(world(t))
+	state.Servers.Put("i2", &model.Server{ID: "i2", Name: "shiraz", Role: "iran", IP: "198.51.100.9",
+		Priority: 2, Enabled: true, Status: "online"})
+	state.Servers.Put("i3", &model.Server{ID: "i3", Name: "mashhad", Role: "iran", IP: "198.51.100.10",
+		Priority: 3, Enabled: true, Status: "offline", EngineVersion: "1.5.0"})
+	body := drawer(t, state, "server:k1")
+
+	hasAll(t, body,
+		`<option value="i1" selected>tehran — 198.51.100.4</option>`,
+		`<option value="i2" disabled>shiraz — 198.51.100.9 (engine not installed)</option>`,
+		`<option value="i3" disabled>mashhad — 198.51.100.10 (not reachable over SSH)</option>`)
+	if there, enabled := pressable(body, "POST /api/probe"); !there || !enabled {
+		t.Errorf("a server with one peer that can take part has the measure button there=%v enabled=%v", there, enabled)
+	}
+
+	// no peer has the engine
+	state.Servers.Get("i1").EngineVersion = ""
+	body = drawer(t, state, "server:k1")
+	if there, enabled := pressable(body, "POST /api/probe"); !there || enabled {
+		t.Errorf("with no peer that has the engine the measure button is there=%v enabled=%v", there, enabled)
+	}
+	hasAll(t, body, "None of the servers on the other side has the tunnel engine yet",
+		`data-act="POST /api/servers/i1/install"`, `data-act="POST /api/servers/i2/install"`)
+	hasNone(t, body, `data-act="POST /api/servers/i3/install"`)
+	hasAll(t, body, `<option value="i1" disabled>tehran — 198.51.100.4 (engine not installed)</option>`)
+}
+
+// What runs the engine on a tunnel (testing the protocols, changing one) is
+// not offered while one of its servers has none: the buttons are disabled and
+// the page says on which server to install it first.
+func TestAProtocolIsNotTestedWhereTheEngineIsMissing(t *testing.T) {
+	state := world(t)
+	state.Servers.Get("i1").EngineVersion = "1.5.0"
+	body := drawer(t, state, "link:l1")
+
+	for _, call := range []string{"POST /api/links/l1/retest", "POST /api/links/l1/transport"} {
+		if there, enabled := pressable(body, call); !there || enabled {
+			t.Errorf("%s is there=%v enabled=%v on a tunnel whose foreign server has no engine", call, there, enabled)
+		}
+	}
+	hasAll(t, body, "Install the tunnel engine on «frankfurt» first",
+		`data-act="POST /api/servers/k1/install"`)
+	hasNone(t, body, "on «tehran» first")
+
+	withEngines(state)
+	body = drawer(t, state, "link:l1")
+	for _, call := range []string{"POST /api/links/l1/retest", "POST /api/links/l1/transport"} {
+		if there, enabled := pressable(body, call); !there || !enabled {
+			t.Errorf("%s is there=%v enabled=%v on a tunnel whose servers have the engine", call, there, enabled)
+		}
+	}
+	hasNone(t, body, "data-engine-gate")
+
+	// the same for the command channel, which is run by the engine
+	state.Servers.Get("k1").EngineVersion = ""
+	if there, enabled := pressable(drawer(t, state, "server:k1"), "POST /api/servers/k1/agent"); !there || enabled {
+		t.Errorf("the command channel of a server with no engine is there=%v enabled=%v", there, enabled)
+	}
+}
+
+// The error a server or a tunnel kept is said in the words of the operator,
+// whatever words it was kept in.
+func TestTheDrawersSayErrorsPlainly(t *testing.T) {
+	state := withEngines(world(t))
+	state.Servers.Get("k1").Error = "SSH 203.0.113.7:22: ssh: handshake failed: ssh: unable to authenticate, attempted methods [none password], no supported methods remain"
+	state.Links.Get("l1").Error = "bash: line 1: /usr/local/bin/bull-tunnel-engine: No such file or directory"
+	server := drawer(t, state, "server:k1")
+	hasAll(t, server, "SSH login to «frankfurt» was refused")
+	hasNone(t, server, "unable to authenticate")
+	link := drawer(t, state, "link:l1")
+	hasAll(t, link, "The tunnel engine is not installed on")
+	hasNone(t, link, "No such file or directory")
 }

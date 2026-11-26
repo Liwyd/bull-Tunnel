@@ -14,6 +14,7 @@ import (
 	"github.com/Liwyd/bull-Tunnel/internal/panel/backup"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/cmdchannel"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/dns"
+	"github.com/Liwyd/bull-Tunnel/internal/panel/friendly"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/model"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/orch"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/probe"
@@ -54,7 +55,16 @@ func (s *Server) probe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// The measurement runs the engine on the foreign server, against the
+	// tunnel of the Iran server: both need it. Without it the shell of the
+	// server would answer with a file that is not there, so the panel says
+	// what to do instead, and never connects.
+	if names := s.withoutEngine(iran, kharej); len(names) > 0 {
+		writeError(w, http.StatusConflict, friendly.NoEngine(names...))
+		return
+	}
 	out := probe.Measure(s.store, s.driver, iran, kharej, body.Transports)
+	explainProbe(out, iran, kharej)
 	// the drawer of both servers shows the last measurement until a new
 	// one is taken; it is kept in memory only, never in the state file
 	s.store.SetProbe(probeResult(out, iran, kharej))
@@ -69,6 +79,32 @@ func (s *Server) probe(w http.ResponseWriter, r *http.Request) {
 	s.orch.Emit("info", "probe", fmt.Sprintf("Connection test %s ⇄ %s: best protocol %s",
 		iran.Name, kharej.Name, best), false, map[string]string{"server": iran.ID})
 	writeJSON(w, http.StatusOK, out)
+}
+
+// explainProbe puts what the measurement said into plain words: the failure
+// of the whole measurement is about the foreign server (it is the one the
+// panel connects to), and the failure of one carrier is about the way from
+// the foreign server to the tunnel port of the Iran server.
+func explainProbe(out map[string]any, iran, kharej *model.Server) {
+	if text, _ := out["error"].(string); text != "" {
+		out["error"] = friendly.Text(text, friendly.Context{Server: kharej.Name, Port: kharej.SSHPort})
+	}
+	port := 0
+	if addr, _ := out["remote_addr"].(string); addr != "" {
+		port = friendly.TunnelPortOf(addr)
+	}
+	rows, _ := out["results"].([]any)
+	for _, row := range rows {
+		entry, ok := row.(map[string]any)
+		if !ok {
+			continue
+		}
+		if text, _ := entry["error"].(string); text != "" {
+			transport, _ := entry["transport"].(string)
+			entry["error"] = friendly.Text(text, friendly.Context{Server: kharej.Name, Port: kharej.SSHPort,
+				Iran: iran.Name, Kharej: kharej.Name, TunnelPort: port, Carrier: transport})
+		}
+	}
 }
 
 // probeSides works out which end of the measurement is which. The drawer
@@ -180,6 +216,12 @@ func (s *Server) installAgent(w http.ResponseWriter, r *http.Request, server *mo
 		writeError(w, http.StatusBadRequest, "the command channel is only for the servers the panel dials out to")
 		return
 	}
+	// the agent is the engine's own program: a server without the engine has
+	// nothing to run it with
+	if names := s.withoutEngine(server); len(names) > 0 {
+		writeError(w, http.StatusConflict, friendly.NoEngine(names...))
+		return
+	}
 	// the key is written to the server the monitor reads too, so it is
 	// written under the lock of the state (and read back under it, because
 	// the agent's file is written with it a moment later)
@@ -193,19 +235,20 @@ func (s *Server) installAgent(w http.ResponseWriter, r *http.Request, server *mo
 		writeError(w, http.StatusBadGateway, "the panel has no way to reach the servers")
 		return
 	}
+	where := friendly.Context{Server: server.Name, Port: server.SSHPort}
 	if err := s.driver.PutFile(server, "/etc/bull-tunnel/agent.toml", []byte(agentConfig(server, provider)), 0o600); err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeError(w, http.StatusBadGateway, friendly.Explain(err, where))
 		return
 	}
 	if err := s.driver.PutFile(server, "/etc/systemd/system/bull-tunnel-agent.service", []byte(theAgentUnit), 0o644); err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeError(w, http.StatusBadGateway, friendly.Explain(err, where))
 		return
 	}
 	code, out, errOut, err := s.driver.Run(server,
 		"systemctl daemon-reload && systemctl enable bull-tunnel-agent >/dev/null 2>&1; systemctl restart bull-tunnel-agent",
 		40*time.Second)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeError(w, http.StatusBadGateway, friendly.Explain(err, where))
 		return
 	}
 	if code != 0 {

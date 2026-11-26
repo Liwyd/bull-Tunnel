@@ -74,8 +74,14 @@ func TestThePagesAreWorkedByGo(t *testing.T) {
 			t.Errorf("the settings do not have %q in %s", field, settings)
 		}
 	}
-	if buttons := strings.Count(parts["set-index"], "<button"); buttons != 5 {
-		t.Errorf("the index of the settings has %d sections, want 5: %s", buttons, parts["set-index"])
+	if buttons := strings.Count(parts["set-index"], "<button"); buttons != 6 {
+		t.Errorf("the index of the settings has %d sections, want 6: %s", buttons, parts["set-index"])
+	}
+	// every section of the index is on the page, with the id it points at
+	for _, id := range []string{"set-01", "set-02", "set-03", "set-04", "set-05", "set-06"} {
+		if !strings.Contains(settings, `id="`+id+`"`) || !strings.Contains(parts["set-index"], `data-goto="`+id+`"`) {
+			t.Errorf("the section %s is not both on the page and in the index", id)
+		}
 	}
 
 	// the numbers at the top of the sidebar
@@ -119,7 +125,8 @@ func TestTheSettingsOfThePageHoldTheFieldsOfTheForm(t *testing.T) {
 		"observe_only", "check_interval", "fail_threshold", "failback_after", "test_timeout",
 		"flap_count", "flap_window", "auto_repair", "candidate_transports", "auto_adopt",
 		"auto_mesh", "scan_interval", "engine_release", "engine_source", "tunnel_port_base",
-		"probe_port_base", "install_engine", "telegram.enabled", "backup_enabled",
+		"probe_port_base", "install_engine", "telegram.enabled", "telegram.bot_token",
+		"telegram.chat_ids", "telegram.api_base", "telegram.proxy", "backup_enabled",
 		"backup_time", "backup_tz",
 	}
 	known := map[string]bool{}
@@ -471,5 +478,33 @@ func TestTheDomainPageSaysWhatItCoversAndWhenItComesBack(t *testing.T) {
 	}
 	if strings.Index(fallback, ">primary<") > strings.Index(fallback, ">current<") {
 		t.Errorf("the failover list is not in the order the panel tries the servers:\n%s", fallback)
+	}
+}
+
+// Only an Iran server has a priority: its card and its drawer say it, and a
+// foreign server's do not (it is ordered by name, whatever the file kept).
+func TestOnlyAnIranServerShowsAPriority(t *testing.T) {
+	state := world(t)
+	state.Servers.Get("k1").Priority = 3
+	state.Servers.Get("i1").Priority = 4
+	parts := New(state, 1000, 990, nil, nil, Opts{}).Parts
+
+	if strings.Contains(parts["inf-kharej"], `class="label">P`) {
+		t.Errorf("the card of a foreign server shows a priority: %s", parts["inf-kharej"])
+	}
+	if !strings.Contains(parts["inf-iran"], `<span class="label">P4</span>`) {
+		t.Errorf("the card of an Iran server does not show its priority: %s", parts["inf-iran"])
+	}
+	if body := drawer(t, state, "server:k1"); strings.Contains(body, "Priority") {
+		t.Errorf("the drawer of a foreign server shows a priority: %s", body)
+	}
+	if body := drawer(t, state, "server:i1"); !strings.Contains(body, "<dt>Priority</dt><dd>4") {
+		t.Errorf("the drawer of an Iran server does not show its priority: %s", body)
+	}
+
+	// a foreign server that is switched off still says so
+	state.Servers.Get("k1").Enabled = false
+	if body := drawer(t, state, "server:k1"); !strings.Contains(body, "disabled") || strings.Contains(body, "Priority") {
+		t.Errorf("the drawer of a foreign server that is off is %s", body)
 	}
 }

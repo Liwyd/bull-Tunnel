@@ -69,10 +69,14 @@ func TestAFormIsWorkedByThePanel(t *testing.T) {
 	}
 	for _, want := range []string{`data-field="name"`, `data-field="ip"`, `data-field="ssh_user"`,
 		`data-field="ssh_port"`, `data-field="ssh_password"`, `data-field="probe_target"`,
-		`data-field="priority"`, `data-field="enabled"`, `value="22"`, `value="root"`, "Health probe target"} {
+		`data-field="enabled"`, `value="22"`, `value="root"`, "Health probe target"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("the form of a foreign server does not have %q in it", html)
 		}
+	}
+	// a foreign server has no priority, adding one or editing one
+	if strings.Contains(html, `data-field="priority"`) || strings.Contains(html, "Priority") {
+		t.Errorf("the form of a foreign server asks for a priority: %s", html)
 	}
 
 	// an Iran server has no health probe: it is on the other side of the
@@ -81,6 +85,10 @@ func TestAFormIsWorkedByThePanel(t *testing.T) {
 	html, _, _ = formParts(t, answer)
 	if strings.Contains(html, "Health probe target") {
 		t.Error("the form of an Iran server asks for a health probe target")
+	}
+	// ...but it has a priority
+	if !strings.Contains(html, `data-field="priority"`) || !strings.Contains(html, "Priority") {
+		t.Errorf("the form of an Iran server has no priority: %s", html)
 	}
 
 	// a domain needs a DNS account first: the form of the account is the
@@ -138,10 +146,14 @@ func TestAFormKeepsWhatItDoesNotShow(t *testing.T) {
 		t.Errorf("the form is sent with %s to %s, want PUT to /api/servers/k1", method, endpoint)
 	}
 	for _, want := range []string{`data-field="role" value="kharej"`, `data-field="command_key" value="cmd-1"`,
-		`data-field="ssh_password" type="password" autocomplete="off" value="••••"`} {
+		`data-field="ssh_password" type="password" autocomplete="new-password" value="••••"`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("the form of a server does not keep %q: %s", want, html)
 		}
+	}
+
+	if strings.Contains(html, `data-field="priority"`) {
+		t.Errorf("the form that edits a foreign server asks for a priority: %s", html)
 	}
 
 	// the domain: the servers the record is on, which the form does not

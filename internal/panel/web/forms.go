@@ -144,14 +144,17 @@ func pick(label, key, value string, options [][2]string) string {
 }
 
 // secret is a password: the panel shows the mask of the one it holds, and
-// the API keeps it when the mask is sent back.
+// the API keeps it when the mask is sent back. A field that is saved as soon
+// as it is changed must never be filled in by the password manager of the
+// browser (it would save the password of the panel as the token), and
+// "new-password" is the one value that keeps it from doing so.
 func secret(label, key, value, placeholder string) string {
 	shown := ""
 	if value != "" {
 		shown = secretMask
 	}
 	return one(escape(label), fmt.Sprintf(
-		`<input data-field="%s" type="password" autocomplete="off" value="%s" placeholder="%s">`,
+		`<input data-field="%s" type="password" autocomplete="new-password" value="%s" placeholder="%s">`,
 		escape(key), escape(shown), escape(placeholder)))
 }
 
@@ -267,12 +270,14 @@ func (f *Facts) serverForm(o FormOpts) FormAnswer {
 	} else {
 		body.WriteString(hidden("probe_target", ""))
 	}
-	body.WriteString(`<div class="grid2">` +
-		num("Priority (lower comes first)", "priority", priority, 100, 0, 1) +
-		checkEnd("enabled", enabled, "Enabled") + `</div>`)
+	// only an Iran server has a priority: which foreign server takes the ports
+	// of another one that fails is not something the operator ranks
 	if kharej {
-		body.WriteString(hint("When a foreign server fails completely, its ports move to a foreign server with a lower number. If they are all equal, the order is the alphabetical order of the names. The “primary” server of a domain is a separate thing and does not follow the priority."))
+		body.WriteString(check("enabled", enabled, "Enabled"))
 	} else {
+		body.WriteString(`<div class="grid2">` +
+			num("Priority (lower comes first)", "priority", priority, 100, 0, 1) +
+			checkEnd("enabled", enabled, "Enabled") + `</div>`)
 		body.WriteString(hint("On a failure, the domain moves to an Iran server with a lower number. If they are all equal, the order is the alphabetical order of the names. The “primary” server of a domain is a separate thing and does not follow the priority."))
 	}
 	if !edit {
@@ -489,6 +494,25 @@ func withWhy(answer FormAnswer, text string) FormAnswer {
 	return answer
 }
 
+// telegramFields are the fields of the Telegram bot: the switch, the token,
+// the chats, the address and the proxy, and the button that tries them. The
+// settings page and the settings form show the same fields, so both are
+// drawn from here. The button saves what is written first: on the form that
+// is the submit of the form, on the page it is the autosave.
+func telegramFields(tg model.Telegram) string {
+	return check("telegram.enabled", tg.Enabled, "Send every event to Telegram") +
+		secret("Bot token", "telegram.bot_token", tg.BotToken, "123456:ABC...") +
+		mono("Chat IDs (comma separated)", "telegram.chat_ids", strings.Join(tg.ChatIDs, ", "),
+			"123456789, -100987654321", " data-lines") +
+		hint(`Don't know your Chat ID? Send <span class="mono">/start</span> to the bot.`) +
+		`<div class="grid2">` +
+		mono("API URL (reverse proxy)", "telegram.api_base", tg.APIBase, "",
+			` data-else="https://api.telegram.org"`) +
+		mono("Proxy", "telegram.proxy", tg.Proxy, "socks5://127.0.0.1:1080", "") + `</div>` +
+		`<div class="btns"><button type="button" class="btn sm" data-act="POST /api/telegram/test" data-act-first ` +
+		`data-act-refresh data-done="The test message was sent">Send a test message</button></div>`
+}
+
 // settingsForm is the whole settings of the panel.
 func (f *Facts) settingsForm() FormAnswer {
 	s := f.State.Settings
@@ -553,16 +577,7 @@ func (f *Facts) settingsForm() FormAnswer {
 	body.WriteString(`</fieldset>`)
 
 	body.WriteString(`<fieldset><legend>Telegram bot</legend>`)
-	body.WriteString(check("telegram.enabled", tg.Enabled, "Send every event to Telegram"))
-	body.WriteString(secret("Bot token", "telegram.bot_token", tg.BotToken, "123456:ABC..."))
-	body.WriteString(mono("Chat IDs (comma separated)", "telegram.chat_ids", strings.Join(tg.ChatIDs, ", "),
-		"123456789, -100987654321", " data-lines"))
-	body.WriteString(hint(`Do not know the Chat ID? Send <span class="mono">/start</span> to the bot.`))
-	body.WriteString(`<div class="grid2">` +
-		mono("API URL (reverse proxy)", "telegram.api_base", tg.APIBase, "",
-			` data-else="https://api.telegram.org"`) +
-		mono("Proxy", "telegram.proxy", tg.Proxy, "socks5://127.0.0.1:1080", "") + `</div>`)
-	body.WriteString(`<div class="btns"><button type="button" class="btn sm" data-act="POST /api/telegram/test" data-act-first data-done="The test message was sent">Send a test message</button></div>`)
+	body.WriteString(telegramFields(tg))
 	body.WriteString(`</fieldset>`)
 
 	body.WriteString(`<fieldset><legend>Backups</legend>`)

@@ -38,6 +38,10 @@ let selNode = null;        // the node picked in the flow graph
 let selLink = null;        // the tunnel picked in the flow graph
 let signedInAs = "admin";  // the name of the account, from the session
 let settingsTimer = null;   // the pending save of the settings page, so a burst of changes sends one request
+let settingsBusy = 0;       // the saves of the settings page that are on their way
+let settingsSaving = Promise.resolve(true);  // the last of them, for what must come after it
+// the page of the settings is not redrawn while what he changed is still on its way
+const settingsPending = () => settingsTimer !== null || settingsBusy > 0;
 let lastSubmit = Promise.resolve();  // the last form submit, for what follows it
 
 /* ------------------------------------------------------------------ api */
@@ -78,7 +82,9 @@ const quiet = (promise) => promise.catch(() => null);
 /* --------------------------------------------------------------- helpers */
 const srv = (id) => S.servers.find((s) => s.id === id);
 const linkById = (id) => S.links.find((l) => l.id === id);
-const byRole = (role) => S.servers.filter((s) => s.role === role).sort((a, b) => a.priority - b.priority || a.name.localeCompare(b.name));
+// the Iran servers go by their priority; a foreign server has none, so it goes by name
+const byRole = (role) => S.servers.filter((s) => s.role === role)
+  .sort((a, b) => (role === "kharej" ? 0 : a.priority - b.priority) || a.name.localeCompare(b.name));
 const nm = (id) => (srv(id) || {}).name || "—";
 const isBusy = (l) => S.busy.includes(l.id);
 const lstatus = (l) => (isBusy(l) ? "testing" : l.status);
@@ -234,6 +240,9 @@ function applyParts() {
     // the pages hold buttons that open other parts).
     const at = document.activeElement;
     if (at && el.contains(at) && at.matches("input,textarea,select")) continue;
+    // what he changed on the settings page and has not been saved yet is
+    // still in its fields: drawing the old settings over it would lose it
+    if (id === "set-body" && settingsPending()) continue;
     if (shown.get(id) === html) continue;
     el.innerHTML = html;
     shown.set(id, html);
@@ -307,6 +316,7 @@ function route() {
   $("#crumb-page").textContent = VIEWS[view].title;
   document.title = `bull-Tunnel · ${VIEWS[view].title}`;
   setSide(false); // a page was picked: the sidebar of a narrow screen has done its job
+  setGraphActive(false); // the wheel scrolls the page again until the graph is clicked
   // The wires are measured from the cards, which have no size while the page
   // is hidden, so they are drawn again once it is shown. The camera is left
   // where the operator put it: it is only set when there is nothing saved to
@@ -361,12 +371,30 @@ async function scanNow() {
   if (!r) return;
   toast(r.added ? `${r.added} existing tunnels were found and added` : "No new tunnel was found", "success");
 }
+/* Building a tunnel runs the engine on both of its servers, so it is only
+   started for the tunnels whose servers have it. The ones that wait for an
+   engine are said once, by name, with what to do — the panel says the same
+   when it is asked directly (it answers 409), this only spares the question. */
+const noEngineSentence = (names) =>
+  `The tunnel engine is not installed on ${names.map((n) => `«${n}»`).join(" and ")}. Open the server and press “Install the tunnel engine”.`;
+const lacksEngine = (l) => [l.kharej_id, l.iran_id].map(srv).filter((s) => s && !s.engine_version).map((s) => s.name);
+async function startBuild(ids, leftOut = []) {
+  const r = await quiet(act(() => api("POST", "/api/discover", { link_ids: ids }), "Building the tunnels has started"));
+  // some were left out (here, or by the panel): say which servers lack the engine
+  if (r && (r.message || leftOut.length)) toast(r.message || noEngineSentence(leftOut), "error");
+  return r;
+}
 function discoverNow() {
   if (!S) return;
-  const n = S.links.filter((l) => l.status === "pending" || l.status === "down").length;
-  if (!n) return toast("There is no tunnel that is not built or that is down; the healthy tunnels are left alone");
-  if (!confirm(`${n} tunnels that are not built or that are down will be built/rebuilt by testing every protocol. The healthy tunnels are left alone. Continue?`)) return;
-  return quiet(act(() => api("POST", "/api/discover", {}), "Building the tunnels has started"));
+  const todo = S.links.filter((l) => l.status === "pending" || l.status === "down");
+  if (!todo.length) return toast("There is no tunnel that is not built or that is down; the healthy tunnels are left alone");
+  const ready = todo.filter((l) => !lacksEngine(l).length);
+  const waiting = [...new Set(todo.flatMap(lacksEngine))];
+  if (!ready.length) return toast(noEngineSentence(waiting), "error");
+  const left = todo.length - ready.length
+    ? ` ${todo.length - ready.length} more wait for the tunnel engine on ${waiting.map((n) => `«${n}»`).join(" and ")} and are left out.` : "";
+  if (!confirm(`${ready.length} tunnels that are not built or that are down will be built/rebuilt by testing every protocol. The healthy tunnels are left alone.${left} Continue?`)) return;
+  return startBuild(ready.map((l) => l.id), waiting);
 }
 
 /* ================================================================ the flow */
@@ -774,7 +802,36 @@ const endPointer = (e) => {
 };
 stage.addEventListener("pointerup", endPointer);
 stage.addEventListener("pointercancel", endPointer);
+/* The wheel scrolls the page until the graph is picked: the graph is active
+   from a click inside it (a card, a wire, the empty canvas and the zoom tools
+   all count) until a click anywhere else, Escape, or another page. While it
+   is not active the wheel is left alone, so the page scrolls over the graph
+   like anywhere else — and a line says how to make the wheel zoom it. A
+   pinch of a trackpad arrives as a wheel with Ctrl held and always zooms. */
+let graphActive = false;
+function setGraphActive(on) {
+  graphActive = on;
+  stage.classList.toggle("active", on);
+}
+// the capture phase: a card stops its pointerdown, and still counts as a click on the graph
+document.addEventListener("pointerdown", (e) => setGraphActive(!!(e.target.closest && e.target.closest("#stage"))), true);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") setGraphActive(false); });
+const wheelHint = document.createElement("div");
+wheelHint.className = "flow-hint";
+wheelHint.setAttribute("aria-hidden", "true");
+wheelHint.textContent = "Click the graph to zoom with the wheel";
+stage.appendChild(wheelHint);
+let hintShownAt = 0;
+function showWheelHint() {
+  const t = Date.now();
+  if (t - hintShownAt < 3000) return;  // once in 3 seconds, not on every notch
+  hintShownAt = t;
+  wheelHint.classList.add("show");
+  clearTimeout(showWheelHint.t);
+  showWheelHint.t = setTimeout(() => wheelHint.classList.remove("show"), 1500);
+}
 stage.addEventListener("wheel", (e) => {
+  if (!graphActive && !e.ctrlKey) { showWheelHint(); return; }
   e.preventDefault();
   zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)));
 }, { passive: false });
@@ -880,16 +937,16 @@ function linkTip(l) {
    out per burst of changes, so the fields he ticks together are saved
    together. */
 async function saveSetBody() {
-  if (!S) return;
+  if (!S) return false;
   const f = $("#set-body");
   const body = await collectBody(f);
-  // The Telegram settings are saved as one block, and the API replaces the
-  // block it is given: the page holds only the switch, so the rest of what
-  // the panel knows about the bot travels with it.
+  // The Telegram settings are saved as one block. The page holds every field
+  // of the block, so what he wrote is what goes; the rest of what the panel
+  // knows about the bot (a key the page does not show) travels with it.
   body.telegram = { ...(S.settings.telegram || {}), ...body.telegram };
-  if (!body.candidate_transports || !body.candidate_transports.length) return toast("Pick at least one protocol", "error");
+  if (!body.candidate_transports || !body.candidate_transports.length) { toast("Pick at least one protocol", "error"); return false; }
   try {
-    await api("PUT", "/api/settings", body);
+    const answer = await api("PUT", "/api/settings", body);
     toast("Settings saved", "success");
     // What was saved is what the page now starts from. A switch that asks
     // before it is turned off asks when it goes from its starting value to
@@ -897,10 +954,51 @@ async function saveSetBody() {
     // the starting value would stay the old one and every later change on
     // the page would ask the same question again.
     for (const el of f.querySelectorAll("input[type=checkbox][data-confirm]")) el.defaultChecked = el.checked;
+    // A secret he typed is not kept on the page: it shows the mask of what
+    // the panel now holds (nothing, when he cleared it), as it does after
+    // a reload. Only a field that still holds what was sent is touched.
+    for (const el of f.querySelectorAll("input[type=password][data-field]")) {
+      const kept = dig(answer, el.dataset.field);
+      if (typeof kept === "string" && el.value.trim() === dig(body, el.dataset.field)) el.value = kept;
+    }
+    return true;
   } catch (e) {
     toast(e.message, "error");
+    return false;
   }
 }
+
+/* The save of the settings page goes out through here, and one at a time:
+   the one that is asked for while another is on its way waits for it. The
+   promise says whether it worked. */
+function flushSetBody() {
+  clearTimeout(settingsTimer);
+  settingsTimer = null;
+  settingsBusy++;
+  const run = settingsSaving.then(() => saveSetBody()).catch(() => false).finally(() => {
+    settingsBusy--;
+    // the page is drawn again from what the panel now holds (the status of
+    // the bot, the mask of the token) once nothing else is waiting to go out
+    if (!settingsPending()) loadViewThenRender();
+  });
+  settingsSaving = run;
+  return run;
+}
+
+/* A secret he is about to replace shows the mask of the old one: the mask is
+   selected when he clicks into it, so what he types takes its place, and
+   whatever of the mask is left in the field is taken out (a field that is
+   emptied is empty, and the panel clears the secret). The mask is dots; no
+   token or password has one. */
+const SECRET_MASK = "••••";
+document.addEventListener("focusin", (e) => {
+  const el = e.target;
+  if (el.matches && el.matches("input[type=password][data-field]") && el.value === SECRET_MASK) el.select();
+});
+document.addEventListener("input", (e) => {
+  const el = e.target;
+  if (el.matches && el.matches("input[type=password][data-field]") && el.value.includes("•")) el.value = el.value.replace(/•/g, "");
+});
 
 /* ------------------------------------------------------------ onboarding */
 /* ----------------------------------------------------------------- modals */
@@ -1098,8 +1196,17 @@ document.addEventListener("click", async (e) => {
   b.disabled = true; // what he is waiting for is the button itself
   try {
     if (b.hasAttribute("data-act-first")) {
-      if (form) form.requestSubmit();
-      await lastSubmit.catch(() => {});  // the settings go out first
+      if (form) {
+        form.requestSubmit();
+        await lastSubmit.catch(() => {});  // the settings go out first
+      } else if (b.closest("#set-body")) {
+        // the settings page has no form: its fields are saved as he leaves
+        // them, and a save that is waiting for its turn goes out now. The
+        // call is made once the save has finished — and not at all when it
+        // failed (the page has said why), because it would try the old settings
+        const saved = settingsTimer !== null ? await flushSetBody() : settingsBusy > 0 ? await settingsSaving : true;
+        if (!saved) return;
+      }
     }
     const body = form ? await collectBody(form) : {};
     // the browser refuses a body on a GET (the answer of the command
@@ -1122,7 +1229,12 @@ document.addEventListener("click", async (e) => {
       toast(b.dataset.done.replace(/\{(\w+(?:\.\w+)*)\}/g, (_, p) => dig(answer, p) ?? dig(body, p) ?? ""), "success");
     }
   } catch (err) { toast(err.message, "error"); }
-  finally { b.disabled = was; }
+  finally {
+    b.disabled = was;
+    // a button that changes what the page says (the status of the bot) asks
+    // for the page again when it is done, whatever the result was
+    if (b.hasAttribute("data-act-refresh")) loadViewThenRender();
+  }
 });
 
 /* Everything the drawer used to say in JavaScript is now written by Go into
@@ -1163,7 +1275,14 @@ document.addEventListener("click", async (e) => {
     return;
   }
   if (d.newLink) return openForm("link", { preset: d.newLink });
-  if (d.discoverLinks) return quiet(act(() => api("POST", "/api/discover", { link_ids: d.discoverLinks.split(",") }), "Building the tunnels has started"));
+  if (d.discoverLinks) {
+    const ids = d.discoverLinks.split(",");
+    const links = ids.map(linkById).filter(Boolean);
+    const ready = links.filter((l) => !lacksEngine(l).length);
+    const waiting = [...new Set(links.flatMap(lacksEngine))];
+    if (links.length && !ready.length) return toast(noEngineSentence(waiting), "error");
+    return startBuild(links.length ? ready.map((l) => l.id) : ids, waiting);
+  }
   if (d.editDomain) return openForm("domain", { edit: d.editDomain });
   if (d.delDomain) {
     if (!confirm("Remove the domain from the panel? (the DNS record is left alone)")) return;
@@ -1336,7 +1455,7 @@ $("#set-body").addEventListener("change", (e) => {
     return;
   }
   clearTimeout(settingsTimer);
-  settingsTimer = setTimeout(() => saveSetBody().catch((err) => toast(err.message, "error")), 400);
+  settingsTimer = setTimeout(flushSetBody, 400);
 });
 
 paintThemeButton();

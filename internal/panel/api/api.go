@@ -102,7 +102,7 @@ func New(options Options) *Server {
 	if limiter == nil {
 		limiter = auth.NewLimiter(8, 300, 900)
 	}
-	return &Server{
+	server := &Server{
 		store:        options.Store,
 		orch:         options.Orchestrator,
 		auth:         options.Auth,
@@ -118,6 +118,12 @@ func New(options Options) *Server {
 		backupsStore: options.Backups,
 		driver:       options.Driver,
 	}
+	// the open pages are told when the bot learns its name or has an error
+	// to show, so the status line of the settings does not stay "checking"
+	if server.bot != nil {
+		server.bot.SetOnStatus(func() { server.Broadcast(nil) })
+	}
+	return server
 }
 
 // Handler is the HTTP handler of the panel.
@@ -383,8 +389,21 @@ func (s *Server) view(w http.ResponseWriter, r *http.Request) {
 		Ev:       query.Get("ev"),
 		Open:     query.Get("open"),
 		Demo:     s.demo, // the panel's own fact, not the operator's choice
+		Bot:      s.botStatus(),
 	}
 	writeJSON(w, http.StatusOK, web.New(s.store, now(), s.orch.LastCheck(), s.busy(), s.flapping(), opts))
+}
+
+// botStatus is what the Telegram bot knows about itself, for the settings
+// page. The bot answers from what it wrote down (it never waits for the
+// network), and the caller holds the lock of the state for reading.
+func (s *Server) botStatus() web.BotStatus {
+	if s.bot == nil {
+		return web.BotStatus{}
+	}
+	status := s.bot.Status(s.store.Settings.TG())
+	return web.BotStatus{Username: status.Username, Error: status.Error,
+		ErrorAt: status.ErrorAt, Checking: status.Checking}
 }
 
 // form is one form of the dashboard, worked out by the panel: what the

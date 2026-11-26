@@ -6,12 +6,24 @@ import (
 	"strings"
 
 	"github.com/Liwyd/bull-Tunnel/internal/panel/engine"
+	"github.com/Liwyd/bull-Tunnel/internal/panel/friendly"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/model"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/store"
 )
 
 // The work the decisions lead to: building a tunnel, repairing one, moving
 // the traffic of a domain and adopting the tunnels that already run.
+
+// said is a failure in the words of the operator: what the server is called,
+// what to look at. The server is the one the failure is about, or nil when the
+// text says (an address, a name) and the caller does not know.
+func said(err error, server *model.Server) string {
+	c := friendly.Context{}
+	if server != nil {
+		c.Server, c.Port = server.Name, server.SSHPort
+	}
+	return friendly.Explain(err, c)
+}
 
 // install makes sure the engine is on a server, and that the panel knows
 // which carriers it speaks.
@@ -67,7 +79,7 @@ func (o *Orchestrator) Install(server *model.Server) {
 	}
 	version, err := o.driver.EnsureInstalled(work, o.settings().InstallEngine)
 	if err != nil {
-		o.Emit("error", "install", fmt.Sprintf("installing the tunnel engine on %s failed: %v", work.Name, err), true,
+		o.Emit("error", "install", fmt.Sprintf("installing the tunnel engine on %s failed: %s", work.Name, said(err, work)), true,
 			map[string]string{"server": server.ID})
 		return
 	}
@@ -204,11 +216,11 @@ func (o *Orchestrator) try(link *model.Link, transport string, ports []string) *
 	probe := &engine.Probe{OK: false, Error: "the panel has no way to reach the servers"}
 	if o.driver != nil {
 		if err := o.driver.Deploy(work, iran, kharej, transport, ports); err != nil {
-			probe = &engine.Probe{OK: false, Error: err.Error()}
+			probe = &engine.Probe{OK: false, Error: said(err, nil)}
 		} else {
 			probe, err = o.driver.WaitUp(work, iran, o.settings().TestTimeout)
 			if err != nil {
-				probe = &engine.Probe{OK: false, Error: err.Error()}
+				probe = &engine.Probe{OK: false, Error: said(err, iran)}
 			}
 		}
 	}
@@ -315,21 +327,15 @@ func (o *Orchestrator) discover(link *model.Link, transports []string) bool {
 		o.Changed()
 	}()
 
-	if err := o.install(iran); err != nil {
-		o.write(link, func(current *model.Link) {
-			current.Status, current.Error = model.StatusDown, "install: "+err.Error()
-		})
-		o.Emit("error", "install", fmt.Sprintf("installing the tunnel engine on %s failed: %v", o.LinkLabel(work), err), true,
-			map[string]string{"link": link.ID})
-		return false
-	}
-	if err := o.install(kharej); err != nil {
-		o.write(link, func(current *model.Link) {
-			current.Status, current.Error = model.StatusDown, "install: "+err.Error()
-		})
-		o.Emit("error", "install", fmt.Sprintf("installing the tunnel engine on %s failed: %v", o.LinkLabel(work), err), true,
-			map[string]string{"link": link.ID})
-		return false
+	for _, side := range []*model.Server{iran, kharej} {
+		if err := o.install(side); err != nil {
+			o.write(link, func(current *model.Link) {
+				current.Status, current.Error = model.StatusDown, "install: "+said(err, side)
+			})
+			o.Emit("error", "install", fmt.Sprintf("installing the tunnel engine for %s failed: %s", o.LinkLabel(work), said(err, side)), true,
+				map[string]string{"link": link.ID})
+			return false
+		}
 	}
 	if taken := o.portsTaken(work); taken != "" {
 		changed := false
@@ -475,21 +481,15 @@ func (o *Orchestrator) SetTransport(link *model.Link, transport string, pin bool
 	o.Changed()
 	defer o.Changed()
 
-	if err := o.install(iran); err != nil {
-		o.write(link, func(current *model.Link) {
-			current.Status, current.Error = model.StatusDown, err.Error()
-		})
-		o.Emit("error", "transport", fmt.Sprintf("changing the protocol of %s failed: %v", o.LinkLabel(work), err), true,
-			map[string]string{"link": link.ID})
-		return false
-	}
-	if err := o.install(kharej); err != nil {
-		o.write(link, func(current *model.Link) {
-			current.Status, current.Error = model.StatusDown, err.Error()
-		})
-		o.Emit("error", "transport", fmt.Sprintf("changing the protocol of %s failed: %v", o.LinkLabel(work), err), true,
-			map[string]string{"link": link.ID})
-		return false
+	for _, side := range []*model.Server{iran, kharej} {
+		if err := o.install(side); err != nil {
+			o.write(link, func(current *model.Link) {
+				current.Status, current.Error = model.StatusDown, said(err, side)
+			})
+			o.Emit("error", "transport", fmt.Sprintf("changing the protocol of %s failed: %s", o.LinkLabel(work), said(err, side)), true,
+				map[string]string{"link": link.ID})
+			return false
+		}
 	}
 	if taken := o.portsTaken(work); taken != "" {
 		o.write(link, func(current *model.Link) {
@@ -672,7 +672,7 @@ func (o *Orchestrator) redeployIranSide(link *model.Link) bool {
 	ports := []string{}
 	o.read(func() { ports = o.store.LinkPorts(work) })
 	if err := o.driver.DeployIran(work, iran, kharej, ports); err != nil {
-		o.Emit("error", "deploy", fmt.Sprintf("updating the ports of %s failed: %v", o.LinkLabel(work), err), true,
+		o.Emit("error", "deploy", fmt.Sprintf("updating the ports of %s failed: %s", o.LinkLabel(work), said(err, nil)), true,
 			map[string]string{"link": work.ID})
 		return false
 	}
@@ -729,7 +729,7 @@ func (o *Orchestrator) SettingsChanged(link *model.Link) bool {
 	ports := []string{}
 	o.read(func() { ports = o.store.LinkPorts(work) })
 	if err := o.driver.Deploy(work, iran, kharej, work.Transport, ports); err != nil {
-		o.Emit("error", "deploy", fmt.Sprintf("applying the settings of %s failed: %v", o.LinkLabel(work), err), true,
+		o.Emit("error", "deploy", fmt.Sprintf("applying the settings of %s failed: %s", o.LinkLabel(work), said(err, nil)), true,
 			map[string]string{"link": work.ID})
 		return false
 	}

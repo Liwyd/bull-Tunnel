@@ -421,6 +421,16 @@ legend { color: var(--muted); font-size: 12px; padding: 0 6px; }
   background-size: 26px 26px;
 }
 .flow-stage.panning { cursor: grabbing; }
+/* the wheel zooms the graph only while it is active (it was clicked) */
+.flow-stage.active { outline: 1px solid color-mix(in srgb, var(--brand) 60%, transparent); outline-offset: -1px; }
+.flow-hint {
+  position: absolute; left: 50%; bottom: 14px; transform: translate(-50%, 6px);
+  padding: 6px 12px; font-size: 12px; color: var(--text); white-space: nowrap;
+  background: var(--surface-2); border: 1px solid var(--line);
+  opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s;
+}
+.flow-hint.show { opacity: .94; transform: translate(-50%, 0); }
+@media (prefers-reduced-motion: reduce) { .flow-hint { transition: none; } }
 .flow-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
 .flow-wires { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
 .flow-cols { position: absolute; inset: 0; pointer-events: none; }
@@ -449,6 +459,9 @@ legend { color: var(--muted); font-size: 12px; padding: 0 6px; }
 .fnode .ip { font-family: var(--mono); font-size: 12px; color: var(--muted); display: flex; align-items: baseline; gap: 10px; }
 .fnode .ip .pname { font-family: var(--font); font-size: 11.5px; margin-left: auto; }
 .fnode .r3 { display: flex; align-items: center; gap: 8px; margin-top: 5px; flex-wrap: wrap; }
+/* the quiet line under the role (ssh latency, forwarded ports) sits 3px
+   higher, so it stays inside the card instead of touching its bottom edge */
+.fnode .r3 + .r3 { margin-top: 2px; }
 .fnode .routes { display: grid; gap: 3px; margin-top: 6px; }
 .fnode .route { font-family: var(--mono); font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* the route the traffic really uses is in the text colour */

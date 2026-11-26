@@ -21,6 +21,7 @@ type Facts struct {
 	Now        float64
 	LastCheck  float64
 	Demo       bool
+	Bot        BotStatus // what the Telegram bot says about itself
 	Version    string
 	Observe    bool
 	Busy       map[string]bool
@@ -33,7 +34,7 @@ type Facts struct {
 	Events     []*model.Event // the log of the panel, the oldest first
 
 	// What the pages say about the state, worked out once.
-	Kharej   []*model.Server // the exit servers, the preferred first
+	Kharej   []*model.Server // the exit servers, by name
 	Iran     []*model.Server // the ingress servers, the preferred first
 	Ordered  []*model.Domain // the domains, under the server they point at
 	ByID     map[string]*model.Server
@@ -89,16 +90,15 @@ func ReadFacts(state *store.Store, now, lastCheck float64, busy, flapping []stri
 			f.Iran = append(f.Iran, server)
 		}
 	}
-	byPriority := func(list []*model.Server) {
-		sort.SliceStable(list, func(i, j int) bool {
-			if list[i].Priority != list[j].Priority {
-				return list[i].Priority < list[j].Priority
-			}
-			return list[i].Name < list[j].Name
-		})
-	}
-	byPriority(f.Kharej)
-	byPriority(f.Iran)
+	// the Iran servers are in the order of their priority; a foreign
+	// server has none and is in the order of its name
+	sort.SliceStable(f.Kharej, func(i, j int) bool { return f.Kharej[i].Name < f.Kharej[j].Name })
+	sort.SliceStable(f.Iran, func(i, j int) bool {
+		if f.Iran[i].Priority != f.Iran[j].Priority {
+			return f.Iran[i].Priority < f.Iran[j].Priority
+		}
+		return f.Iran[i].Name < f.Iran[j].Name
+	})
 
 	// The domains stand under the Iran server they point at: the column of
 	// the canvas reads as one path from the exit servers to the records.
@@ -229,6 +229,7 @@ type Answer struct {
 func New(state *store.Store, now, lastCheck float64, busy, flapping []string, o Opts) *Answer {
 	f := ReadFacts(state, now, lastCheck, busy, flapping)
 	f.Demo = o.Demo
+	f.Bot = o.Bot
 	return &Answer{Parts: f.Parts(o), Network: network(f)}
 }
 

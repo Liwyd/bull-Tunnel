@@ -149,7 +149,7 @@ type Server struct {
 	SSHUser          string                    `json:"ssh_user"`
 	SSHPassword      string                    `json:"ssh_password"`
 	SSHKey           string                    `json:"ssh_key"`  // the private key, as text
-	Priority         int                       `json:"priority"` // the lower, the more preferred
+	Priority         int                       `json:"priority"` // Iran servers only: the lower, the more preferred; a foreign server is always 100 and is ordered by name
 	Enabled          bool                      `json:"enabled"`
 	ProbeTarget      string                    `json:"probe_target"`
 	HostKey          string                    `json:"host_key"`

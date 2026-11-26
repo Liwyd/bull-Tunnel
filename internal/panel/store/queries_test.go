@@ -412,3 +412,54 @@ func TestTheStateCanBeSavedWhileItIsWritten(t *testing.T) {
 		t.Error("the tunnel is missing from the state that was saved")
 	}
 }
+
+// A foreign server has no priority: the order of the exit servers is the
+// order of their names, whatever priority an older state file kept for them,
+// while the Iran servers still go by their priority.
+func TestForeignServersAreOrderedByNameNotByPriority(t *testing.T) {
+	s := New("")
+	s.Settings.AutoMesh = false
+	for _, server := range []*model.Server{
+		{ID: "ka", Name: "Alpha", Role: model.Kharej, IP: "10.0.1.1", Priority: 9},
+		{ID: "kb", Name: "Beta", Role: model.Kharej, IP: "10.0.1.2", Priority: 1},
+		{ID: "kc", Name: "Charlie", Role: model.Kharej, IP: "10.0.1.3", Priority: 5},
+		{ID: "ia", Name: "Tehran", Role: model.Iran, IP: "10.0.2.1", Priority: 7},
+		{ID: "ib", Name: "Shiraz", Role: model.Iran, IP: "10.0.2.2", Priority: 3},
+	} {
+		s.Servers.Put(server.ID, server)
+	}
+	names := func(list []*model.Server) []string {
+		out := []string{}
+		for _, server := range list {
+			out = append(out, server.Name)
+		}
+		return out
+	}
+	if got := names(s.Kharejs()); !reflect.DeepEqual(got, []string{"Alpha", "Beta", "Charlie"}) {
+		t.Errorf("the foreign servers are %v, they must be by name", got)
+	}
+	if got := names(s.Irans()); !reflect.DeepEqual(got, []string{"Shiraz", "Tehran"}) {
+		t.Errorf("the Iran servers are %v, they must still be by priority", got)
+	}
+
+	// when the foreign server of a domain is gone, the tunnels of the others
+	// stand in, in the order of the names of their foreign servers (and then
+	// of the priority of their Iran servers)
+	for _, link := range []*model.Link{
+		{ID: "lc", IranID: "ib", KharejID: "kc", Status: model.StatusUp, Ports: []string{"9000"}},
+		{ID: "lb", IranID: "ib", KharejID: "kb", Status: model.StatusUp, Ports: []string{"9001"}},
+		{ID: "la-tehran", IranID: "ia", KharejID: "ka", Status: model.StatusUp, Ports: []string{"9002"}},
+		{ID: "la-shiraz", IranID: "ib", KharejID: "ka", Status: model.StatusUp, Ports: []string{"9003"}},
+	} {
+		link.Normalize()
+		s.Links.Put(link.ID, link)
+	}
+	domain := &model.Domain{ID: "d1", FQDN: "a.example.ir", Ports: []string{"443"}}
+	order := []string{}
+	for _, link := range s.GroupOf(domain) {
+		order = append(order, link.ID)
+	}
+	if want := []string{"la-shiraz", "la-tehran", "lb", "lc"}; !reflect.DeepEqual(order, want) {
+		t.Errorf("the tunnels that stand in are %v, want %v (by foreign server name, then Iran priority)", order, want)
+	}
+}

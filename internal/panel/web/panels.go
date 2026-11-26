@@ -393,6 +393,11 @@ func (f *Facts) serverCard(server *model.Server) string {
 	if !server.Enabled {
 		disabled = chip("warn", "disabled")
 	}
+	// the rank of an Iran server (a foreign server has none)
+	rank := ""
+	if server.Role == model.Iran {
+		rank = fmt.Sprintf(`<span class="label">P%d</span>`, server.Priority)
+	}
 	rebuild := ""
 	if broken > 0 {
 		rebuild = fmt.Sprintf(`<button type="button" class="btn sm" data-discover-links="%s">Rebuild the broken ones</button>`,
@@ -403,7 +408,7 @@ func (f *Facts) serverCard(server *model.Server) string {
         %s
         <span class="nm">%s</span>
         <div class="right">
-          <span class="label">P%d</span>
+          %s
           %s
         </div>
       </header>
@@ -425,10 +430,10 @@ func (f *Facts) serverCard(server *model.Server) string {
         %s
       </div>
     </div>`,
-		dot(server.Status), escape(server.Name), server.Priority, disabled,
+		dot(server.Status), escape(server.Name), rank, disabled,
 		escape(server.IP), escape(server.SSHUser), escape(server.IP), server.SSHPort,
 		milliseconds(server.SSHLatencyMS), escape(f.ago(server.LastSeen)),
 		escape(orDash(server.EngineVersion)), built, total-built,
-		errorLine(server.Error), exitsBlock,
+		errorLine(serverSaid(server)), exitsBlock,
 		escape(server.ID), escape(server.ID), iconEdit, escape(server.ID), rebuild)
 }

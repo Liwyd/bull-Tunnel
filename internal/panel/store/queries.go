@@ -17,7 +17,11 @@ import (
 // and of the tunnels is the order of the file, and the group of a domain is
 // the order of the preference.
 
-// ByRole are the servers of a role, the preferred one first.
+// ByRole are the servers of a role, the preferred one first. The Iran
+// servers are in the order of their priority, and by name when it is the
+// same. A foreign server has no priority: which of them takes the ports of
+// another is not a preference of the operator's, so they are in the order of
+// their names, whatever priority an older state file kept for them.
 func (s *Store) ByRole(role string) []*model.Server {
 	out := []*model.Server{}
 	for _, server := range s.Servers.List() {
@@ -26,7 +30,7 @@ func (s *Store) ByRole(role string) []*model.Server {
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Priority != out[j].Priority {
+		if role != model.Kharej && out[i].Priority != out[j].Priority {
 			return out[i].Priority < out[j].Priority
 		}
 		return out[i].Name < out[j].Name
@@ -494,19 +498,15 @@ func (s *Store) GroupOf(domain *model.Domain) []*model.Link {
 	}
 	sort.SliceStable(others, func(i, j int) bool {
 		a, b := others[i], others[j]
-		ap, aok := prio[a.KharejID]
-		bp, bok := prio[b.KharejID]
-		if !aok {
-			ap = serverOrder{priority: 999}
+		// the foreign servers are told apart by their names alone (a
+		// server that is gone comes last)
+		ak, aok := prio[a.KharejID]
+		bk, bok := prio[b.KharejID]
+		if aok != bok {
+			return aok
 		}
-		if !bok {
-			bp = serverOrder{priority: 999}
-		}
-		if ap.priority != bp.priority {
-			return ap.priority < bp.priority
-		}
-		if ap.name != bp.name {
-			return ap.name < bp.name
+		if ak.name != bk.name {
+			return ak.name < bk.name
 		}
 		ai, aok := prio[a.IranID]
 		bi, bok := prio[b.IranID]

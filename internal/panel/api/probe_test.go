@@ -10,15 +10,16 @@ import (
 )
 
 // twoSides puts a foreign server and an Iran server in the panel (and a
-// second foreign one, for the pairs that must be refused).
+// second foreign one, for the pairs that must be refused). They have the
+// tunnel engine, as the servers the panel works with have it.
 func twoSides(t *testing.T, panel *Server) {
 	t.Helper()
 	panel.store.Servers.Put("k1", &model.Server{ID: "k1", Name: "frankfurt", Role: model.Kharej,
-		IP: "203.0.113.7", Priority: 1, Enabled: true, Status: "online"})
+		IP: "203.0.113.7", Priority: 1, Enabled: true, Status: "online", EngineVersion: "1.5.0"})
 	panel.store.Servers.Put("k2", &model.Server{ID: "k2", Name: "dubai", Role: model.Kharej,
-		IP: "203.0.113.9", Priority: 2, Enabled: true, Status: "online"})
+		IP: "203.0.113.9", Priority: 2, Enabled: true, Status: "online", EngineVersion: "1.5.0"})
 	panel.store.Servers.Put("i1", &model.Server{ID: "i1", Name: "tehran", Role: model.Iran,
-		IP: "198.51.100.4", Priority: 1, Enabled: true, Status: "online"})
+		IP: "198.51.100.4", Priority: 1, Enabled: true, Status: "online", EngineVersion: "1.5.0"})
 }
 
 // The connection test of the drawer sends the two servers by name — the

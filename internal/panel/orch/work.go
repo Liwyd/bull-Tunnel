@@ -253,11 +253,13 @@ func (o *Orchestrator) checkServers() {
 		// never be able to stop the cycle — the cycle is what checks every
 		// tunnel and moves every domain.
 		server.FailCount++
-		server.Error = r.err.Error()
+		// the failure is kept in words the operator can act on (the server
+		// that is shown with it is named in them)
+		server.Error = said(r.err, server)
 		server.SSHLatencyMS = nil
 		if server.FailCount >= o.settings().FailThreshold && server.Status != model.Offline {
 			server.Status = model.Offline
-			says = append(says, fmt.Sprintf("%s server %s (%s) ran into trouble and went offline: %v", kind, server.Name, server.IP, r.err))
+			says = append(says, fmt.Sprintf("%s server %s (%s) ran into trouble and went offline: %s", kind, server.Name, server.IP, server.Error))
 		} else if server.Status == model.Unknown {
 			server.Status = model.Offline
 		}

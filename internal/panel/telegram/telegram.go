@@ -7,12 +7,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -55,15 +57,49 @@ type Bot struct {
 	proxyKey  string
 	stopped   chan struct{}
 	once      sync.Once
+
+	// How long the bot waits. They are fields so that a test does not have
+	// to wait for them: idle is the wait of a bot that is off or has no
+	// token, retry the wait after a poll that failed, pace the pause between
+	// two messages (Telegram's rate limit), and backoff the wait before
+	// attempt n+1 of a message that failed.
+	idle    time.Duration
+	retry   time.Duration
+	pace    time.Duration
+	backoff func(attempt int) time.Duration
+
+	// The poll that is under way, so that a change of the settings can drop
+	// it instead of waiting for it (it is a long poll: up to 25 seconds).
+	// base ends with the bot, wake ends the wait of a poller that sleeps.
+	base       context.Context
+	stopBase   context.CancelFunc
+	wake       chan struct{}
+	pollMu     sync.Mutex
+	pollCancel context.CancelFunc
+	loaded     string // the settings the poller was last told about
+
+	// What the bot knows about its own health, kept in the memory: Status
+	// reads it without asking the network.
+	healthMu sync.Mutex
+	health   health
+	onStatus func()
 }
 
 // New returns a bot.
 func New(getConfig func() model.Telegram, handler Handler) *Bot {
+	base, stop := context.WithCancel(context.Background())
 	return &Bot{
 		GetConfig: getConfig,
 		Handler:   handler,
 		queue:     make(chan string, 500),
 		stopped:   make(chan struct{}),
+		idle:      5 * time.Second,
+		retry:     10 * time.Second,
+		pace:      400 * time.Millisecond,
+		backoff:   func(attempt int) time.Duration { return time.Duration(3*(attempt+1)) * time.Second },
+		base:      base,
+		stopBase:  stop,
+		wake:      make(chan struct{}, 1),
 	}
 }
 
@@ -145,30 +181,69 @@ func (b *Bot) httpClient(cfg model.Telegram, timeout time.Duration) (*http.Clien
 	return &http.Client{Timeout: timeout, Transport: b.transport}, nil
 }
 
+// defaultAPI is the address of Telegram's own API.
+const defaultAPI = "https://api.telegram.org"
+
 // url is the address of a method of the Telegram API.
 func (b *Bot) url(cfg model.Telegram, method string) string {
-	return fmt.Sprintf("%s/bot%s/%s", strings.TrimRight(cfg.APIBase, "/"), cfg.BotToken, method)
+	base := strings.TrimRight(strings.TrimSpace(cfg.APIBase), "/")
+	if base == "" {
+		base = defaultAPI
+	}
+	return fmt.Sprintf("%s/bot%s/%s", base, cfg.BotToken, method)
+}
+
+// reach is the error of a call that did not get an answer, as the operator
+// reads it. The error of the HTTP client holds the whole address of the call,
+// and the address holds the token of the bot: it must not end up on a page,
+// in a log or in a message.
+func reach(err error, cfg model.Telegram) error {
+	message := err.Error()
+	var failed *url.Error
+	if errors.As(err, &failed) {
+		message = failed.Err.Error()
+	}
+	if token := strings.TrimSpace(cfg.BotToken); token != "" {
+		message = strings.ReplaceAll(message, token, "…")
+	}
+	return &Error{Message: "cannot reach Telegram: " + message}
 }
 
 // Call asks the Telegram API something.
 func (b *Bot) Call(method string, cfg *model.Telegram, params map[string]any) (any, error) {
+	return b.callContext(context.Background(), method, cfg, params)
+}
+
+// callContext is Call that can be dropped: the context ends the request.
+// What came of it (the name of the bot, or why it failed) is written down
+// for Status, except when the call was dropped on purpose.
+func (b *Bot) callContext(ctx context.Context, method string, cfg *model.Telegram, params map[string]any) (any, error) {
 	if cfg == nil {
 		current := b.GetConfig()
 		cfg = &current
 	}
+	result, err := b.request(ctx, method, *cfg, params)
+	if ctx.Err() == nil {
+		b.note(*cfg, method, result, err)
+	}
+	return result, err
+}
+
+// request is one call, and nothing else.
+func (b *Bot) request(ctx context.Context, method string, cfg model.Telegram, params map[string]any) (any, error) {
 	body, _ := json.Marshal(params)
-	request, err := http.NewRequest(http.MethodPost, b.url(*cfg, method), bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, b.url(cfg, method), bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, reach(err, cfg)
 	}
 	request.Header.Set("Content-Type", "application/json")
-	client, err := b.httpClient(*cfg, 40*time.Second)
+	client, err := b.httpClient(cfg, 40*time.Second)
 	if err != nil {
 		return nil, err
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, err
+		return nil, reach(err, cfg)
 	}
 	defer response.Body.Close()
 	raw, _ := io.ReadAll(response.Body)
@@ -236,7 +311,9 @@ func (b *Bot) SendFile(name string, blob []byte, caption string, cfg *model.Tele
 				break
 			}
 			last = err
-			time.Sleep(time.Duration(3*(attempt+1)) * time.Second)
+			if attempt < 2 {
+				time.Sleep(b.backoff(attempt))
+			}
 		}
 	}
 	if sent == 0 && last != nil {
@@ -245,8 +322,15 @@ func (b *Bot) SendFile(name string, blob []byte, caption string, cfg *model.Tele
 	return sent, nil
 }
 
-// sendDocument sends one file to one chat.
+// sendDocument sends one file to one chat, and writes down how it went.
 func (b *Bot) sendDocument(cfg model.Telegram, chatID string, name string, blob []byte, caption string) error {
+	err := b.postDocument(cfg, chatID, name, blob, caption)
+	b.note(cfg, "sendDocument", nil, err)
+	return err
+}
+
+// postDocument is the request that sends a file.
+func (b *Bot) postDocument(cfg model.Telegram, chatID string, name string, blob []byte, caption string) error {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	fields := map[string]string{"chat_id": chatID, "caption": caption, "parse_mode": "HTML"}
@@ -267,7 +351,7 @@ func (b *Bot) sendDocument(cfg model.Telegram, chatID string, name string, blob 
 	}
 	request, err := http.NewRequest(http.MethodPost, b.url(cfg, "sendDocument"), &body)
 	if err != nil {
-		return err
+		return reach(err, cfg)
 	}
 	request.Header.Set("Content-Type", writer.FormDataContentType())
 	client, err := b.httpClient(cfg, 120*time.Second)
@@ -276,7 +360,7 @@ func (b *Bot) sendDocument(cfg model.Telegram, chatID string, name string, blob 
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return err
+		return reach(err, cfg)
 	}
 	defer response.Body.Close()
 	raw, _ := io.ReadAll(response.Body)
@@ -297,32 +381,95 @@ func (b *Bot) sendDocument(cfg model.Telegram, chatID string, name string, blob 
 	return nil
 }
 
-// Test asks the bot who it is and says so in every chat.
+// Test asks the bot who it is and says so in every chat. It fails with the
+// reason when it cannot: the token Telegram does not know, a chat the bot
+// is not in, or no chat to say it in at all.
 func (b *Bot) Test(cfg *model.Telegram) error {
+	if cfg == nil {
+		current := b.GetConfig()
+		cfg = &current
+	}
+	if strings.TrimSpace(cfg.BotToken) == "" {
+		return &Error{Message: "the bot token is not set"}
+	}
 	answer, err := b.Call("getMe", cfg, map[string]any{})
 	if err != nil {
 		return err
 	}
 	me, _ := answer.(map[string]any)
 	username, _ := me["username"].(string)
+	if len(cfg.ChatIDs) == 0 {
+		return &Error{Message: fmt.Sprintf("the bot @%s answers, but no Chat ID is set: send /start to it and enter the number it replies with", username)}
+	}
+	failed := []string{}
 	for _, chat := range cfg.ChatIDs {
 		text := fmt.Sprintf("🔌 The bull-Tunnel panel is connected to the bot <b>@%s</b>.", Escape(username))
 		if err := b.SendTo(chat, text, cfg); err != nil {
-			return err
+			failed = append(failed, fmt.Sprintf("chat %s: %v", chat, err))
 		}
+	}
+	if len(failed) > 0 {
+		return &Error{Message: strings.Join(failed, "; ")}
 	}
 	return nil
 }
 
 // Start begins the work of the bot: the sender and the poller.
 func (b *Bot) Start() {
+	b.Reload()
 	go b.sender()
 	go b.poller()
 }
 
 // Stop ends the work of the bot.
 func (b *Bot) Stop() {
-	b.once.Do(func() { close(b.stopped) })
+	b.once.Do(func() {
+		close(b.stopped)
+		b.stopBase()
+	})
+}
+
+// Reload tells the bot that the settings may have changed. The bot reads
+// them again at every turn of its work anyway; this makes it do so now: a
+// long poll that is under way with the old token (or proxy, or address) is
+// dropped, so the new settings are in use at once and not after the poll
+// ends, and the name of the bot is asked once for the new token.
+func (b *Bot) Reload() {
+	cfg := b.GetConfig()
+	key := keyOf(cfg) + fmt.Sprint(cfg.Enabled) + strings.Join(cfg.ChatIDs, ",")
+	b.pollMu.Lock()
+	changed := key != b.loaded
+	b.loaded = key
+	if changed && b.pollCancel != nil {
+		b.pollCancel()
+	}
+	b.pollMu.Unlock()
+	if !changed {
+		return
+	}
+	// a chat that could not be written to may be the one that was fixed
+	b.healthMu.Lock()
+	b.current(cfg).sendErr = ""
+	b.healthMu.Unlock()
+	b.Status(cfg) // asks for the name of the bot when the token is new
+	select {
+	case b.wake <- struct{}{}:
+	default:
+	}
+}
+
+// pause waits, and ends early when the bot is stopped (it returns false) or
+// when the settings change (the wait is over, the poller looks again).
+func (b *Bot) pause(wait time.Duration) bool {
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-b.stopped:
+		return false
+	case <-b.wake:
+	case <-timer.C:
+	}
+	return true
 }
 
 // sender sends the messages of the queue.
@@ -338,10 +485,13 @@ func (b *Bot) sender() {
 					if err := b.SendTo(chat, text, &cfg); err == nil {
 						break
 					}
+					if attempt == 2 {
+						break
+					}
 					select {
 					case <-b.stopped:
 						return
-					case <-time.After(time.Duration(3*(attempt+1)) * time.Second):
+					case <-time.After(b.backoff(attempt)):
 					}
 				}
 			}
@@ -349,38 +499,62 @@ func (b *Bot) sender() {
 			select {
 			case <-b.stopped:
 				return
-			case <-time.After(400 * time.Millisecond):
+			case <-time.After(b.pace):
 			}
 		}
 	}
 }
 
-// poller asks Telegram for the messages of the chats.
+// pollContext is the context of one long poll, which a change of the
+// settings drops. It is made before the settings are read: a change that
+// comes after it ends the poll, and one that came before it is read.
+func (b *Bot) pollContext() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(b.base)
+	b.pollMu.Lock()
+	b.pollCancel = cancel
+	b.pollMu.Unlock()
+	return ctx, cancel
+}
+
+// poller asks Telegram for the messages of the chats. The settings are read
+// again at every turn: a token that is changed, a bot that is switched on
+// or off, or a proxy that is fixed is in use at the next turn, and a bot
+// that started without a token waits for one instead of giving up.
 func (b *Bot) poller() {
+	token := "" // the bot the offset belongs to
 	for {
 		select {
 		case <-b.stopped:
 			return
 		default:
 		}
+		ctx, cancel := b.pollContext()
 		cfg := b.GetConfig()
 		if !cfg.Enabled || cfg.BotToken == "" {
-			select {
-			case <-b.stopped:
+			cancel()
+			if !b.pause(b.idle) {
 				return
-			case <-time.After(5 * time.Second):
 			}
 			continue
 		}
-		answer, err := b.Call("getUpdates", &cfg, map[string]any{"offset": b.offset, "timeout": 25})
+		if cfg.BotToken != token {
+			// the numbers of the updates are the bot's own: the offset of
+			// another bot would hide every message of this one
+			token, b.offset = cfg.BotToken, 0
+		}
+		answer, err := b.callContext(ctx, "getUpdates", &cfg, map[string]any{"offset": b.offset, "timeout": 25})
+		dropped := ctx.Err() != nil
+		cancel()
+		if dropped {
+			continue // the settings changed or the bot stopped
+		}
 		if err != nil {
-			select {
-			case <-b.stopped:
+			if !b.pause(b.retry) {
 				return
-			case <-time.After(10 * time.Second):
 			}
 			continue
 		}
+		b.ensureName(cfg)
 		updates, _ := answer.([]any)
 		for _, item := range updates {
 			update, ok := item.(map[string]any)
@@ -393,10 +567,7 @@ func (b *Bot) poller() {
 			message, _ := update["message"].(map[string]any)
 			text := strings.TrimSpace(textOf(message["text"]))
 			chat, _ := message["chat"].(map[string]any)
-			chatID := fmt.Sprintf("%v", chat["id"])
-			if chatID == "<nil>" {
-				chatID = ""
-			}
+			chatID := idOf(chat["id"])
 			if !strings.HasPrefix(text, "/") || chatID == "" {
 				continue
 			}
@@ -405,7 +576,10 @@ func (b *Bot) poller() {
 	}
 }
 
-// handle answers one command of one chat.
+// handle answers one command of one chat. A chat that is not one of the
+// panel's gets one thing only: its own number, to /start — that is how the
+// operator learns the Chat ID to enter, so it works before any is set. Every
+// other command of such a chat is left unanswered.
 func (b *Bot) handle(cfg model.Telegram, chatID string, text string) {
 	words := strings.Fields(text)
 	if len(words) == 0 {
@@ -416,7 +590,7 @@ func (b *Bot) handle(cfg model.Telegram, chatID string, text string) {
 	if !contains(cfg.ChatIDs, chatID) {
 		if command == "/start" {
 			reply := fmt.Sprintf("This chat is not linked to the panel yet.\nChat ID: <code>%s</code>\n"+
-				"Enter this identifier in the Telegram settings of the panel.", Escape(chatID))
+				"Enter this number in Settings, Telegram bot, in the panel.", Escape(chatID))
 			b.SendTo(chatID, reply, &cfg)
 		}
 		return
@@ -431,6 +605,20 @@ func (b *Bot) handle(cfg model.Telegram, chatID string, text string) {
 		}
 	}
 	b.SendTo(chatID, reply, &cfg)
+}
+
+// idOf is the number of a chat as the operator writes it in the settings.
+// The answer of Telegram is read into numbers of floating point, and a
+// number like 123456789 printed as one comes out as 1.23456789e+08: the chat
+// would never be the one of the settings.
+func idOf(value any) string {
+	switch id := value.(type) {
+	case float64:
+		return strconv.FormatInt(int64(id), 10)
+	case string:
+		return id
+	}
+	return ""
 }
 
 // contains tells whether a list holds a value.

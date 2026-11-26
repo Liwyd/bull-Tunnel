@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Liwyd/bull-Tunnel/internal/panel/backup"
+	"github.com/Liwyd/bull-Tunnel/internal/panel/friendly"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/model"
 )
 
@@ -73,6 +75,7 @@ func (s *Server) discover(w http.ResponseWriter, r *http.Request) {
 		readBody(r, &body)
 	}
 	count := 0
+	lacking := []string{} // the servers a tunnel waits for the engine of
 	for _, link := range s.store.Links.List() {
 		if len(body.LinkIDs) > 0 && !contains(body.LinkIDs, link.ID) {
 			continue
@@ -80,10 +83,53 @@ func (s *Server) discover(w http.ResponseWriter, r *http.Request) {
 		if link.Status != model.StatusPending && link.Status != model.StatusDown {
 			continue
 		}
+		// a tunnel whose servers lack the engine is not started: that would
+		// be a connection to the servers that can only end in a message
+		// about a file that is not there
+		if names := s.linkWithoutEngine(link); len(names) > 0 {
+			for _, name := range names {
+				if !contains(lacking, name) {
+					lacking = append(lacking, name)
+				}
+			}
+			continue
+		}
 		go s.orch.Discover(link, nil)
 		count++
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": count})
+	if count == 0 && len(lacking) > 0 {
+		writeError(w, http.StatusConflict, friendly.NoEngine(lacking...))
+		return
+	}
+	answer := map[string]any{"ok": true, "count": count}
+	if len(lacking) > 0 {
+		// the others were started; what was left out is said
+		answer["skipped"] = lacking
+		answer["message"] = friendly.NoEngine(lacking...)
+	}
+	writeJSON(w, http.StatusOK, answer)
+}
+
+// withoutEngine are the names of the servers, of the ones given, that have no
+// tunnel engine (the panel has not found one on them, and has not put one
+// there). Every action that runs the engine on a server asks first: the
+// answer of a shell for a file that is not there says nothing the operator
+// can use.
+func (s *Server) withoutEngine(servers ...*model.Server) []string {
+	s.store.RLock()
+	defer s.store.RUnlock()
+	names := []string{}
+	for _, server := range servers {
+		if server != nil && server.EngineVersion == "" {
+			names = append(names, server.Name)
+		}
+	}
+	return names
+}
+
+// linkWithoutEngine are the servers of a tunnel that have no engine.
+func (s *Server) linkWithoutEngine(link *model.Link) []string {
+	return s.withoutEngine(s.store.Servers.Get(link.IranID), s.store.Servers.Get(link.KharejID))
 }
 
 // servers are the servers of the panel.
@@ -219,7 +265,13 @@ func (s *Server) editServer(id string, body map[string]any) (*model.Server, stri
 			updated.SSHUser = "root"
 		}
 	}
-	setIntDefault(body, "priority", &updated.Priority, 100)
+	// only an Iran server has a priority: a foreign one is always the
+	// default, whatever the body (or the file of an older panel) says
+	if updated.Role == model.Kharej {
+		updated.Priority = 100
+	} else {
+		setIntDefault(body, "priority", &updated.Priority, 100)
+	}
 	setBool(body, "enabled", &updated.Enabled)
 	setString(body, "probe_target", &updated.ProbeTarget)
 	setString(body, "host_key", &updated.HostKey)
@@ -283,7 +335,8 @@ func (b serverBody) model() *model.Server {
 	if server.SSHUser == "" {
 		server.SSHUser = "root"
 	}
-	if server.Priority == 0 {
+	// a foreign server has no priority: whatever the body says, it is the default
+	if server.Priority == 0 || server.Role == model.Kharej {
 		server.Priority = 100
 	}
 	if server.Status == "" {
@@ -456,9 +509,17 @@ func (s *Server) linkAction(w http.ResponseWriter, r *http.Request, link *model.
 			writeError(w, http.StatusBadRequest, "the request is not readable")
 			return
 		}
+		if names := s.linkWithoutEngine(link); len(names) > 0 {
+			writeError(w, http.StatusConflict, friendly.NoEngine(names...))
+			return
+		}
 		go s.orch.SetTransport(link, body.Transport, body.Pin)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case "retest":
+		if names := s.linkWithoutEngine(link); len(names) > 0 {
+			writeError(w, http.StatusConflict, friendly.NoEngine(names...))
+			return
+		}
 		go s.orch.Discover(link, nil)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case "release":
@@ -479,7 +540,7 @@ func (s *Server) serverAction(w http.ResponseWriter, r *http.Request, server *mo
 	case "test":
 		latency, err := s.orch.Ping(server)
 		if err != nil {
-			writeError(w, http.StatusBadGateway, err.Error())
+			writeError(w, http.StatusBadGateway, friendly.Explain(err, friendly.Context{Server: server.Name, Port: server.SSHPort}))
 			return
 		}
 		// "status" is the word the rest of the panel says for a server that
@@ -968,12 +1029,28 @@ func (s *Server) settings(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		// The address of the bot is the one thing of the Telegram block that
+		// can be wrong in a way the panel can tell now: an address that does
+		// not start with http:// or https:// would be dropped without a
+		// word, and the field would go on showing what he wrote.
+		if telegram, there := body["telegram"].(map[string]any); there {
+			if apiBase, there := telegram["api_base"].(string); there && strings.TrimSpace(apiBase) != "" && !validAPIBase(apiBase) {
+				writeError(w, http.StatusBadRequest, "the API URL of the bot must start with http:// or https://")
+				return
+			}
+		}
 		// The settings are written under the lock of the state and nothing
 		// else is: Changed saves the state file, and the save takes the
 		// lock itself, so it is called with the lock released.
 		s.store.Lock()
 		s.applySettings(body)
 		s.store.Unlock()
+		// the bot takes the new token, chats, proxy or switch now: the poll
+		// that is under way with the old ones is dropped, and the pages that
+		// are told of the change below already see the new status
+		if s.bot != nil {
+			s.bot.Reload()
+		}
 		s.orch.Changed()
 		s.store.RLock()
 		answer := s.settingsPublic()
@@ -1087,25 +1164,67 @@ func (s *Server) applySettings(body map[string]any) {
 		if settings.Telegram == nil {
 			settings.Telegram = map[string]any{}
 		}
-		if token, ok := telegram["bot_token"].(string); ok && token != "" && token != mask {
-			settings.Telegram["bot_token"] = token
-		} else if _, hasToken := telegram["bot_token"]; !hasToken {
-			// if bot_token is not present, don't touch it
-		} else if token == "" {
-			settings.Telegram["bot_token"] = ""
+		// the token: what he typed replaces it, the mask the page shows keeps
+		// it, an empty field clears it, and a body that does not say leaves it
+		if raw, there := telegram["bot_token"]; there {
+			if token, ok := raw.(string); ok {
+				switch token = strings.TrimSpace(token); {
+				case token == "":
+					settings.Telegram["bot_token"] = ""
+				case token != mask:
+					settings.Telegram["bot_token"] = token
+				}
+			}
 		}
 		for k, v := range telegram {
 			if k != "bot_token" {
 				if k == "api_base" {
-					if apiBase, ok := v.(string); ok && (strings.HasPrefix(apiBase, "https://") || strings.HasPrefix(apiBase, "http://")) {
-						settings.Telegram[k] = apiBase
+					if apiBase, ok := v.(string); ok && validAPIBase(apiBase) {
+						settings.Telegram[k] = strings.TrimSpace(apiBase)
 					}
+				} else if k == "chat_ids" {
+					settings.Telegram[k] = chatIDs(v)
 				} else {
 					settings.Telegram[k] = v
 				}
 			}
 		}
 	}
+}
+
+// chatIDs is the chats of the bot as the settings keep them: a list of
+// numbers written as text, without the blanks. A list is what the page sends;
+// a text of numbers separated by commas or lines is taken as one too.
+func chatIDs(value any) []any {
+	out := []any{}
+	add := func(text string) {
+		if text = strings.TrimSpace(text); text != "" {
+			out = append(out, text)
+		}
+	}
+	switch list := value.(type) {
+	case []any:
+		for _, item := range list {
+			switch one := item.(type) {
+			case string:
+				add(one)
+			case float64:
+				add(strconv.FormatInt(int64(one), 10))
+			}
+		}
+	case string:
+		for _, part := range strings.FieldsFunc(list, func(r rune) bool { return r == ',' || r == '\n' || r == ';' }) {
+			add(part)
+		}
+	}
+	return out
+}
+
+// validAPIBase tells whether a text is an address the bot can use for the
+// API of Telegram: an http or https address with a host.
+func validAPIBase(text string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(text))
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Hostname() != ""
 }
 
 // setBool writes a boolean of the body into a setting.

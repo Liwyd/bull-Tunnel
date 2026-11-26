@@ -25,16 +25,16 @@ func Seed(state *store.Store, net *SimNet, dns *SimDNS) {
 	settings.ObserveOnly = false // the demo is there to watch the failover happen
 	settings.AutoMesh = true
 
+	// the foreign servers have no priority: they are told apart by name
 	for _, s := range []struct {
 		name string
 		ip   string
-		prio int
 	}{
-		{"Hetzner-DE", "65.21.10.4", 1},
-		{"OVH-FR", "51.75.33.9", 2},
-		{"Contabo-NL", "185.2.4.77", 3},
+		{"Hetzner-DE", "65.21.10.4"},
+		{"OVH-FR", "51.75.33.9"},
+		{"Contabo-NL", "185.2.4.77"},
 	} {
-		server := &model.Server{ID: model.NewID("s"), Name: s.name, Role: model.Kharej, IP: s.ip, Priority: s.prio, Enabled: true}
+		server := &model.Server{ID: model.NewID("s"), Name: s.name, Role: model.Kharej, IP: s.ip, Priority: 100, Enabled: true}
 		state.Servers.Put(server.ID, server)
 	}
 	for _, s := range []struct {

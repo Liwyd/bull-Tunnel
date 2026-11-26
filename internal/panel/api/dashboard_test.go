@@ -176,8 +176,13 @@ func TestAServerIsEditedWithoutForgettingWhatWasMeasured(t *testing.T) {
 	}
 	got := panel.store.Servers.Get("k1")
 	if got.Name != "fra-2" || got.IP != "203.0.113.8" || got.SSHPort != 2222 || got.SSHUser != "ops" ||
-		got.Priority != 5 || got.Enabled || got.ProbeTarget != "127.0.0.1:2222" || got.HostKey != "SHA256:abc" {
+		got.Enabled || got.ProbeTarget != "127.0.0.1:2222" || got.HostKey != "SHA256:abc" {
 		t.Errorf("the fields of the form were not written: %+v", got)
+	}
+	// a foreign server has no priority: the 5 of the body is ignored, and
+	// so is the 3 an older state file kept
+	if got.Priority != 100 {
+		t.Errorf("a foreign server has the priority %d, it must be the default 100", got.Priority)
 	}
 	if got.SSHPassword != "hunter2" || got.SSHKey != "KEY" || got.CommandKey != "cmd-1" {
 		t.Errorf("a secret sent back as its mask was replaced: %q %q %q", got.SSHPassword, got.SSHKey, got.CommandKey)
@@ -193,7 +198,7 @@ func TestAServerIsEditedWithoutForgettingWhatWasMeasured(t *testing.T) {
 		t.Fatalf("the edit of one field is %d, it must be 200", status)
 	}
 	got = panel.store.Servers.Get("k1")
-	if got.Priority != 9 || got.Name != "fra-2" || got.Enabled || got.SSHPassword != "hunter2" {
+	if got.Priority != 100 || got.Name != "fra-2" || got.Enabled || got.SSHPassword != "hunter2" {
 		t.Errorf("one field changed more than itself: %+v", got)
 	}
 
@@ -207,6 +212,48 @@ func TestAServerIsEditedWithoutForgettingWhatWasMeasured(t *testing.T) {
 	}
 	if status, _ := aGet(t, server, http.MethodPut, "/api/servers/nobody", `{"priority": 1}`, cookie); status != http.StatusNotFound {
 		t.Errorf("a server that is not there is %d, it must be 404", status)
+	}
+}
+
+// Only an Iran server has a priority. A foreign server is stored with the
+// default 100 whatever the body says — when it is added, when it is edited and
+// when an older state file kept another number for it — and an Iran server
+// keeps the priority it is given.
+func TestOnlyAnIranServerHasAPriority(t *testing.T) {
+	panel, server := aServer(t)
+	cookie := aLogin(t, server)
+
+	post := func(id, role string) *model.Server {
+		body := `{"id": "` + id + `", "name": "` + id + `", "role": "` + role + `", "ip": "203.0.113.1", "priority": 5}`
+		if status, answer := aGet(t, server, http.MethodPost, "/api/servers", body, cookie); status != http.StatusOK {
+			t.Fatalf("adding the %s server is %d (%v), it must be 200", role, status, answer["detail"])
+		}
+		return panel.store.Servers.Get(id)
+	}
+	if got := post("kh", "kharej").Priority; got != 100 {
+		t.Errorf("a foreign server added with the priority 5 is stored with %d, it must be 100", got)
+	}
+	if got := post("ir", "iran").Priority; got != 5 {
+		t.Errorf("an Iran server added with the priority 5 is stored with %d, it must keep it", got)
+	}
+
+	put := func(id, body string) {
+		if status, answer := aGet(t, server, http.MethodPut, "/api/servers/"+id, body, cookie); status != http.StatusOK {
+			t.Fatalf("the edit of %s is %d (%v), it must be 200", id, status, answer["detail"])
+		}
+	}
+	put("kh", `{"priority": 5}`)
+	if got := panel.store.Servers.Get("kh").Priority; got != 100 {
+		t.Errorf("a foreign server edited with the priority 5 is stored with %d, it must be 100", got)
+	}
+	put("ir", `{"priority": 7}`)
+	if got := panel.store.Servers.Get("ir").Priority; got != 7 {
+		t.Errorf("an Iran server edited with the priority 7 is stored with %d, it must keep it", got)
+	}
+	// a server that changes side takes the rule of the side it is on
+	put("ir", `{"role": "kharej", "priority": 7}`)
+	if got := panel.store.Servers.Get("ir").Priority; got != 100 {
+		t.Errorf("an Iran server turned into a foreign one has the priority %d, it must be 100", got)
 	}
 }
 

@@ -3,6 +3,8 @@ package web
 import (
 	"fmt"
 	"strings"
+
+	"github.com/Liwyd/bull-Tunnel/internal/panel/model"
 )
 
 /* The page of the settings. The fields are the fields of the settings form
@@ -10,11 +12,49 @@ import (
    he wrote with one collector and saves it through the API already. This is
    the shape of the form, and the panel decides what is in it. */
 
-// settings is the page of the settings: five sections, and the index of
+// BotStatus is what the Telegram bot says about itself, as the page shows
+// it. The panel hands it over already worked out and never asks the network
+// while a page is drawn: a status that is not known yet is "checking".
+type BotStatus struct {
+	Username string  // the name of the bot, when Telegram has said it
+	Error    string  // why the last call failed, when it did
+	ErrorAt  float64 // when, in seconds since 1970
+	Checking bool    // the name of the bot is being asked for
+}
+
+// botLine is the line that says how the bot is doing: not set up, off, the
+// last error, or the name it is connected as.
+func (f *Facts) botLine(tg model.Telegram) string {
+	dot, words := "unknown", ""
+	switch {
+	case strings.TrimSpace(tg.BotToken) == "":
+		words = `<b>Not set up</b> — enter the bot token to start`
+	case !tg.Enabled:
+		words = `<b>Off</b>`
+	case f.Bot.Error != "":
+		dot = "down"
+		words = `<b>Last error:</b> ` + escape(f.Bot.Error)
+		if f.Bot.ErrorAt > 0 {
+			words += ` <span class="muted">(` + escape(f.ago(f.Bot.ErrorAt)) + `)</span>`
+		}
+	case f.Bot.Username != "":
+		dot = "ok"
+		words = `<b>Connected</b> as <span class="mono">@` + escape(f.Bot.Username) + `</span>`
+		if len(tg.ChatIDs) == 0 {
+			words += ` — no Chat ID yet: send <span class="mono">/start</span> to the bot`
+		}
+	default:
+		dot = "testing"
+		words = `<b>Checking…</b>`
+	}
+	return `<p class="note" id="tg-status"><span class="dot ` + dot + `"></span> ` + words + `</p>`
+}
+
+// settings is the page of the settings: six sections, and the index of
 // them on the left.
 func (f *Facts) settings(parts Parts) {
 	s := f.State.Settings
-	tgOn := s.TG().Enabled
+	tg := s.TG()
 
 	section := func(number, title, kicker, body string) string {
 		return fmt.Sprintf(`<div class="section" id="set-%s">
@@ -97,9 +137,11 @@ func (f *Facts) settings(parts Parts) {
 		`<div class="opt-list">`+accountsBody+`</div>`+
 			`<div class="btns"><button type="button" class="btn sm" data-add="provider">`+iconAdd+` Add a DNS account</button></div>`)
 
-	body += section("05", "Reporting and backups", "TELEGRAM / BACKUP",
-		check("telegram.enabled", tgOn, "Send every event to Telegram")+
-			check("backup_enabled", s.BackupEnabled, "Send a full backup to Telegram every night")+
+	body += section("05", "Telegram bot", "TELEGRAM / BOT",
+		f.botLine(tg)+telegramFields(tg))
+
+	body += section("06", "Backups", "BACKUP / SCHEDULE",
+		check("backup_enabled", s.BackupEnabled, "Send a full backup to Telegram every night")+
 			`<div class="grid2">`+
 			mono("Backup time", "backup_time", s.BackupTime, "03:00", "")+
 			mono("Backup time zone", "backup_tz", s.BackupTZ, "Asia/Tehran", ` data-else="Asia/Tehran"`)+
@@ -112,7 +154,8 @@ func (f *Facts) settings(parts Parts) {
 		{"02", "Monitor and recover", "How often, and when to give up."},
 		{"03", "Discovery and engine", "Find the tunnels, push the engine."},
 		{"04", "DNS accounts", "ArvanCloud and Cloudflare."},
-		{"05", "Reporting and backups", "Telegram and the nightly copy."},
+		{"05", "Telegram bot", "Token, chats, a test message."},
+		{"06", "Backups", "The nightly copy, sent to Telegram."},
 	}
 	buttons := []string{}
 	for i, one := range index {

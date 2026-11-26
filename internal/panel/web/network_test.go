@@ -97,8 +97,11 @@ func TestTheNetworkViewIsWorkedByGo(t *testing.T) {
 // a column are stacked one under the other, with the height of the card.
 func TestTheCanvasIsLaidOutByGo(t *testing.T) {
 	state := world(t)
-	state.Servers.Put("k2", &model.Server{ID: "k2", Name: "dubai", Role: "kharej", IP: "203.0.113.9",
-		Priority: 2, Enabled: true, Status: "online"})
+	// a foreign server has no priority: the cards are in the order of the
+	// names (frankfurt, then zurich) whatever priority the file kept for them
+	state.Servers.Put("k2", &model.Server{ID: "k2", Name: "zurich", Role: "kharej", IP: "203.0.113.9",
+		Priority: 1, Enabled: true, Status: "online"})
+	state.Servers.Get("k1").Priority = 50
 	view := Network(state, 1000, 990, nil, nil)
 
 	byID := map[string]Node{}

@@ -56,6 +56,20 @@ everything it found that stopped bull-Tunnel from being used for real.
   itself (a card stays where it is, new cards are placed once and remembered,
   resizing does not re-zoom) and a "Re-arrange" button lays it out on demand;
   each page's Add menu offers only what belongs to that page.
+- The Telegram bot is managed on the Settings page: token, chat IDs, API URL
+  and proxy save as you type, "Send a test message" saves first, and a
+  status line says "Connected as @bot" or the last error. A new token or
+  chat applies without a restart, and /start tells you your Chat ID.
+- The mouse wheel zooms the graph only after the graph is clicked; until
+  then it scrolls the page (Ctrl+wheel and pinch always zoom).
+- Foreign servers have no priority any more (they are ordered by name);
+  the Iran servers and the tunnels keep theirs.
+- "Measure the connection", "Apply", "Test every protocol" and "Test &
+  connect" are locked until the tunnel engine is on both servers, with an
+  install button where it is missing; the API refuses them with a clear
+  sentence before any SSH. Errors are said in plain words (SSH refused,
+  timeout, host key changed, port in use, tunnel port unreachable).
+- The SSH line of a server card sits inside the card.
 - Observe-mode pill and demo/production footer are shown; settings have
   padding and their index sits on the left; the mobile sidebar closes;
   signing out stops the websocket reconnect loop.

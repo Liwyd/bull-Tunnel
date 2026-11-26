@@ -122,7 +122,7 @@ func (f *Facts) linkDrawer(l *model.Link) string {
     %s
   </dl>%s</div>`,
 		escape(orDash(l.Transport)), pin, escape(milliseconds(l.LatencyMS)), stability,
-		l.TunnelPort, probe, domLine, errorLine(l.Error), spark(l.History, 430, 40)))
+		l.TunnelPort, probe, domLine, errorLine(f.linkSaid(l)), spark(l.History, 430, 40)))
 
 	out.WriteString(f.handoverBox(l))
 	out.WriteString(f.portsBox(l))
@@ -235,18 +235,24 @@ func (f *Facts) protocolBox(l *model.Link) string {
 			`<span class="n">%s</span><span class="r">%s</span></label>`,
 			class, title, escape(transport), boolAttr(transport == selected), escape(name), escape(said)))
 	}
+	// both ends run the engine: a tunnel whose server has none, or does not
+	// answer, is not tested or changed from here
+	notes, buttons := engineBlock(nil, f.ByID[l.IranID], f.ByID[l.KharejID])
+	blocked := off(len(notes) > 0)
 	return fmt.Sprintf(`<div class="box"><h4>Connection protocol</h4>
     <form>
     <div class="tgrid">%s</div>
     %s
+    %s
     <div class="btns">
-      <button type="button" class="btn primary sm" data-act="POST /api/links/%s/transport" data-done="Switching to {transport} has started">Apply</button>
-      <button type="button" class="btn sm" data-act="POST /api/links/%s/retest" data-done="Testing every protocol has started">Test every protocol</button>
+      <button type="button" class="btn primary sm" data-act="POST /api/links/%s/transport"%s data-done="Switching to {transport} has started">Apply</button>
+      <button type="button" class="btn sm" data-act="POST /api/links/%s/retest"%s data-done="Testing every protocol has started">Test every protocol</button>
     </div>
     </form></div>`,
 		strings.Join(tiles, ""),
 		check("pin", l.Pinned, "Pin this protocol (do not switch it on a failure)"),
-		escape(l.ID), escape(l.ID))
+		blockNote(notes, buttons),
+		escape(l.ID), blocked, escape(l.ID), blocked)
 }
 
 // settingsBox is the name, the place among the tunnels of the pair, the
@@ -362,6 +368,15 @@ func (f *Facts) serverDrawer(s *model.Server) string {
 	if !s.Enabled {
 		disabled = " " + chip("warn", "disabled")
 	}
+	// only an Iran server has a priority; a foreign one that is switched
+	// off still says so
+	rank := ""
+	switch {
+	case s.Role == model.Iran:
+		rank = fmt.Sprintf(`<dt>Priority</dt><dd>%d%s</dd>`, s.Priority, disabled)
+	case disabled != "":
+		rank = `<dt>State</dt><dd>` + disabled + `</dd>`
+	}
 	out.WriteString(fmt.Sprintf(`<div class="box"><h4>Details</h4><dl class="kv">
     <dt>SSH</dt><dd class="mono">%s@%s:%d</dd>
     <dt>Host key</dt><dd class="mono">%s</dd>
@@ -369,7 +384,7 @@ func (f *Facts) serverDrawer(s *model.Server) string {
     <dt>Last seen</dt><dd>%s</dd>
     <dt>Tunnel engine</dt><dd class="mono">%s</dd>
     <dt>Last tunnel scan</dt><dd>%s</dd>
-    <dt>Priority</dt><dd>%d%s</dd>
+    %s
     %s
   </dl>
   <div class="btns"><button type="button" class="btn sm" data-edit-server="%s">%s Edit</button><button type="button" class="btn sm" data-test-server="%s">Test SSH</button>
@@ -378,7 +393,7 @@ func (f *Facts) serverDrawer(s *model.Server) string {
 		escape(orDash(s.HostKey)),
 		milliseconds(s.SSHLatencyMS), escape(f.ago(s.LastSeen)),
 		escape(orDash(s.EngineVersion)), escape(f.ago(s.LastScan)),
-		s.Priority, disabled, errorLine(s.Error),
+		rank, errorLine(serverSaid(s)),
 		escape(s.ID), iconEdit, escape(s.ID), iconScan, escape(s.ID), escape(s.ID), iconTrash))
 
 	out.WriteString(f.probeBox(s))
@@ -420,6 +435,11 @@ func (f *Facts) serverDrawer(s *model.Server) string {
 
 // probeBox is the connection test: pick a server on the other side, measure
 // the path, and read the last measurement the panel took.
+//
+// The measurement runs the engine on both ends: it needs the engine on this
+// server and on the peer, and both of them to answer. A server that cannot
+// take part says so and offers its installation; a peer that cannot is in the
+// list and cannot be picked.
 func (f *Facts) probeBox(s *model.Server) string {
 	peers := f.probePeers(s)
 	hint := `<p class="hint">The path between this server and one on the other side is measured on every protocol: the time to connect, the handshake time and the real round trip. The best protocol can be applied right here.</p>`
@@ -430,19 +450,54 @@ func (f *Facts) probeBox(s *model.Server) string {
 	if s.Role == model.Kharej {
 		label = "Iran server"
 	}
-	options := []string{}
+	notes, buttons := engineBlock(s, s)
+
+	// the peers that can take part come first, and the first of them is the
+	// one that is picked; the others are named, with what they lack
+	options, usable, lacking, silent := []string{}, 0, []string{}, 0
 	for _, peer := range peers {
-		options = append(options, fmt.Sprintf(`<option value="%s">%s — %s</option>`,
-			escape(peer.ID), escape(peer.Name), escape(peer.IP)))
+		if peer.Status != model.Offline && peer.EngineVersion != "" {
+			picked := ""
+			if usable == 0 {
+				picked = " selected"
+			}
+			options = append(options, fmt.Sprintf(`<option value="%s"%s>%s — %s</option>`,
+				escape(peer.ID), picked, escape(peer.Name), escape(peer.IP)))
+			usable++
+		}
 	}
+	for _, peer := range peers {
+		switch {
+		case peer.Status == model.Offline:
+			silent++
+			options = append(options, fmt.Sprintf(`<option value="%s" disabled>%s — %s (not reachable over SSH)</option>`,
+				escape(peer.ID), escape(peer.Name), escape(peer.IP)))
+		case peer.EngineVersion == "":
+			lacking = append(lacking, installButton(peer, false))
+			options = append(options, fmt.Sprintf(`<option value="%s" disabled>%s — %s (engine not installed)</option>`,
+				escape(peer.ID), escape(peer.Name), escape(peer.IP)))
+		}
+	}
+	if usable == 0 && len(notes) == 0 {
+		// this server is fine and the other side has nobody to measure to
+		if len(lacking) > 0 {
+			notes = append(notes, "None of the servers on the other side has the tunnel engine yet: install it on one of them first.")
+			buttons = append(buttons, lacking...)
+		} else if silent > 0 {
+			notes = append(notes, "None of the servers on the other side is reachable over SSH.")
+		}
+	}
+	blocked := len(notes) > 0
 	return fmt.Sprintf(`<div class="box"><h4>Connection test ⚡</h4>%s
     <form>
     <input type="hidden" data-field="server" value="%s">
-    <div class="grid2"><label>%s<select data-field="peer">%s</select></label>
-    <div class="btns"><button type="button" class="btn sm primary" data-act="POST /api/probe" data-done="Best: {best}" data-act-error="error" data-act-error-text="The measurement failed:">⚡ Measure the connection</button></div></div>
+    <div class="grid2"><label>%s<select data-field="peer"%s>%s</select></label>
+    <div class="btns"><button type="button" class="btn sm primary" data-act="POST /api/probe"%s data-done="Best: {best}" data-act-error="error" data-act-error-text="The measurement failed:">⚡ Measure the connection</button></div></div>
     </form>
+    %s
     %s</div>`,
-		hint, escape(s.ID), escape(label), strings.Join(options, ""), f.probeTable(s))
+		hint, escape(s.ID), escape(label), off(usable == 0), strings.Join(options, ""), off(blocked),
+		blockNote(notes, buttons), f.probeTable(s))
 }
 
 // probePeers are the servers the path can be measured to: the ones on the
@@ -507,17 +562,22 @@ func (f *Facts) probeTable(s *model.Server) string {
 
 // commandBox is the channel that talks over DNS, for the servers the panel
 // cannot reach: install it, send a command, read the answer.
+//
+// The agent is the engine's own program: the channel is put on a server that
+// has the engine, and on one that answers.
 func (f *Facts) commandBox(s *model.Server) string {
+	notes, buttons := engineBlock(s, s)
 	return fmt.Sprintf(`<div class="box"><h4>Command channel (DNS)</h4>
     <p class="hint">When not even TCP is possible, the panel writes the command into a TXT record and the agent on the server reads and runs it.</p>
+    %s
     <form>
     <input type="hidden" data-field="action" value="status">
-    <div class="btns"><button type="button" class="btn sm" data-act="POST /api/servers/%s/agent" data-done="The command channel is ready ({command_record})">Install the command channel</button>
+    <div class="btns"><button type="button" class="btn sm" data-act="POST /api/servers/%s/agent"%s data-done="The command channel is ready ({command_record})">Install the command channel</button>
       <button type="button" class="btn sm" data-act="POST /api/servers/%s/command" data-done="The command was sent ({id}); read the answer with “Read the answer”">Send the “status” command</button>
       <button type="button" class="btn sm" data-act="GET /api/servers/%s/command" data-act-into="#cmd-out" data-act-key="result,error" data-act-else="No answer yet">Read the answer</button></div>
     </form>
     <div id="cmd-out" class="sub mono"></div></div>`,
-		escape(s.ID), escape(s.ID), escape(s.ID))
+		blockNote(notes, buttons), escape(s.ID), off(len(notes) > 0), escape(s.ID), escape(s.ID))
 }
 
 /* -------------------------------------------------------------- a domain */
