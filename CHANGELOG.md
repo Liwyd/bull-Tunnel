@@ -34,6 +34,7 @@ everything it found that stopped bull-Tunnel from being used for real.
   again"); targets of `port=host:port` mappings are shown.
 - SOCKS5 proxies work for DNS and for Telegram; long Telegram messages are
   cut on a character boundary.
+- `/api/state` answers the 200 newest events (it answered the oldest).
 - Nightly backups are scheduled (time, zone and number of copies from the
   settings) and sent to Telegram; `/backup` works in the bot; pruning no
   longer panics.

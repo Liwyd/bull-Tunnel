@@ -132,11 +132,15 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 // state is what the dashboard is shown.
 func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 	full := s.fullState()
+	// The 200 newest events, in the order they happened: the log keeps up to
+	// a thousand, and the first 200 of them are the oldest — a panel that has
+	// run for a while answered with events weeks old and none of today's.
+	recent := s.store.Events
+	if len(recent) > 200 {
+		recent = recent[len(recent)-200:]
+	}
 	events := []any{}
-	for _, event := range s.store.Events {
-		if len(events) >= 200 {
-			break
-		}
+	for _, event := range recent {
 		events = append(events, map[string]any{
 			"level":   event.Level,
 			"kind":    event.Kind,

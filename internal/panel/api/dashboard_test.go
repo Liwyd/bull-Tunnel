@@ -587,3 +587,22 @@ func TestTheLayoutIsWrittenAndResetWithoutHoldingTheLockWhileItSaves(t *testing.
 		t.Errorf("the layout is %v (ghost %v), it must be one place for k1", place, ghost)
 	}
 }
+
+// The state answers the newest events, not the oldest: the log holds up to a
+// thousand and the answer only 200.
+func TestTheStateAnswersTheNewestEvents(t *testing.T) {
+	panel, server := aServer(t)
+	cookie := aLogin(t, server)
+	for i := 0; i < 300; i++ {
+		panel.store.AddEvent(&model.Event{ID: fmt.Sprintf("e%d", i), Level: "info", Message: fmt.Sprintf("event %d", i), TS: float64(i)})
+	}
+	_, answer := aGet(t, server, http.MethodGet, "/api/state", "", cookie)
+	events, _ := answer["events"].([]any)
+	if len(events) != 200 {
+		t.Fatalf("the state holds %d events, it must hold 200", len(events))
+	}
+	last, _ := events[len(events)-1].(map[string]any)
+	if last["message"] != "event 299" {
+		t.Errorf("the last event of the state is %v, it must be the newest (event 299)", last["message"])
+	}
+}
