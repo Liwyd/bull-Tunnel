@@ -1,18 +1,23 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Liwyd/bull-Tunnel/internal/panel/backup"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/model"
 )
 
 // The rest of the endpoints: the layout, the actions and the collections.
 
 // layout moves the nodes of the dashboard's canvas.
+//
+// The lock of the state is held for the write of the map and for nothing
+// else: Changed saves the state file, and the save takes the lock itself.
 func (s *Server) layout(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPut:
@@ -23,6 +28,7 @@ func (s *Server) layout(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "the request is not readable")
 			return
 		}
+		s.store.Lock()
 		for key, place := range body.Positions {
 			if len(place) != 2 {
 				continue
@@ -32,10 +38,13 @@ func (s *Server) layout(w http.ResponseWriter, r *http.Request) {
 			}
 			s.store.Layout[key] = []float64{round1(place[0]), round1(place[1])}
 		}
+		s.store.Unlock()
 		s.orch.Changed()
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case http.MethodDelete:
+		s.store.Lock()
 		s.store.Layout = map[string][]float64{}
+		s.store.Unlock()
 		s.orch.Changed()
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:
@@ -141,25 +150,20 @@ func (s *Server) serverByID(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{"server": s.serverBody(server)})
 	case http.MethodPut:
-		var body serverBody
+		var body map[string]any
 		if err := readBody(r, &body); err != nil {
 			writeError(w, http.StatusBadRequest, "the request is not readable")
 			return
 		}
-		updated := body.model()
-		updated.ID = server.ID
-		// the secret of the server is kept when the panel is not given a
-		// new one: the field holds the mask of the stored secret
-		if body.SSHPassword == "" || body.SSHPassword == mask {
-			updated.SSHPassword = server.SSHPassword
+		updated, problem := s.editServer(id, body)
+		if problem != "" {
+			writeError(w, http.StatusBadRequest, problem)
+			return
 		}
-		if body.SSHKey == "" || body.SSHKey == mask {
-			updated.SSHKey = server.SSHKey
+		if updated == nil {
+			writeError(w, http.StatusNotFound, "not found")
+			return
 		}
-		if body.CommandKey == "" || body.CommandKey == mask {
-			updated.CommandKey = server.CommandKey
-		}
-		s.store.Servers.Put(server.ID, updated)
 		s.orch.Changed()
 		writeJSON(w, http.StatusOK, map[string]any{"server": s.serverBody(updated)})
 	case http.MethodDelete:
@@ -173,6 +177,66 @@ func (s *Server) serverByID(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// editServer writes what the panel is given over the server that is there,
+// key by key, the way the edit of a tunnel or a domain does. The server is
+// more than the form that edits it: its status, when it was last seen, the
+// latency, the version of the engine on it, the carriers it speaks, the
+// ports it forwards and the time of the last scan are what the monitor has
+// measured, and a form that rebuilt the whole server from the fields it
+// holds would throw all of that away (and show the server as unknown until
+// the next check). Only the fields of the form are written, and only the
+// ones the body names.
+//
+// The server is copied, edited and put back under the lock of the state, so
+// the monitor never sees it half-written. It answers the edited server, or a
+// reason why the body is refused.
+func (s *Server) editServer(id string, body map[string]any) (*model.Server, string) {
+	s.store.Lock()
+	defer s.store.Unlock()
+	current := s.store.Servers.Get(id)
+	if current == nil {
+		return nil, ""
+	}
+	updated := *current
+	setString(body, "name", &updated.Name)
+	setString(body, "ip", &updated.IP)
+	if updated.Name == "" || updated.IP == "" {
+		return nil, "the name and the address are needed"
+	}
+	if role, there := body["role"].(string); there && role != "" && role != updated.Role {
+		if role != model.Iran && role != model.Kharej {
+			return nil, "the role must be iran or kharej"
+		}
+		updated.Role = role
+	}
+	setIntDefault(body, "ssh_port", &updated.SSHPort, 22)
+	if user, there := body["ssh_user"].(string); there {
+		updated.SSHUser = user
+		if user == "" {
+			updated.SSHUser = "root"
+		}
+	}
+	setIntDefault(body, "priority", &updated.Priority, 100)
+	setBool(body, "enabled", &updated.Enabled)
+	setString(body, "probe_target", &updated.ProbeTarget)
+	setString(body, "host_key", &updated.HostKey)
+	// a secret is kept when the panel is not given a new one: the field
+	// holds the mask of the stored secret, or nothing at all
+	setSecret(body, "ssh_password", &updated.SSHPassword)
+	setSecret(body, "ssh_key", &updated.SSHKey)
+	setSecret(body, "command_key", &updated.CommandKey)
+	s.store.Servers.Put(id, &updated)
+	return &updated, ""
+}
+
+// setSecret writes a secret of the body into a field, unless the body holds
+// nothing or the mask the panel showed in its place.
+func setSecret(body map[string]any, key string, target *string) {
+	if value, there := body[key].(string); there && value != "" && value != mask {
+		*target = value
 	}
 }
 
@@ -323,20 +387,39 @@ func (s *Server) linkByID(w http.ResponseWriter, r *http.Request) {
 		// state, the tests and the history of the tunnel stay as they
 		// are. Only the ports and the UDP switch are the business of
 		// the Iran server, so only they are applied to it.
-		updated := link.Clone()
+		//
+		// The tunnel is copied, edited and put back under the lock of the
+		// state: the monitor writes the same tunnel while it measures it.
+		s.store.Lock()
+		current := s.store.Links.Get(link.ID)
+		if current == nil { // forgotten while the body was read
+			s.store.Unlock()
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		updated := current.Clone()
 		portsBefore := strings.Join(updated.Ports, ",")
 		udpBefore := updated.AcceptUDP
 		mssBefore := updated.MSS
 		heartbeatBefore := updated.Heartbeat
 		setString(body, "label", &updated.Label)
 		setIntDefault(body, "priority", &updated.Priority, 100)
-		setStrings(body, "allowed", &updated.Allowed)
+		// "follow the global list" is a state of its own (no carriers of
+		// its own), and the form says it with allowed_mode: the boxes it
+		// shows then hold the global list, which must not become the
+		// tunnel's own
+		if mode, _ := body["allowed_mode"].(string); mode == "global" {
+			updated.Allowed = []string{}
+		} else {
+			setStrings(body, "allowed", &updated.Allowed)
+		}
 		setList(body, "ports", &updated.Ports)
 		setBool(body, "accept_udp", &updated.AcceptUDP)
 		setInt(body, "mss", &updated.MSS)
 		setInt(body, "heartbeat", &updated.Heartbeat)
 		setBool(body, "pinned", &updated.Pinned)
 		s.store.Links.Put(link.ID, updated)
+		s.store.Unlock()
 		switch {
 		case mssBefore != updated.MSS || heartbeatBefore != updated.Heartbeat:
 			// the engine reads the MSS and the heartbeat when it starts:
@@ -399,7 +482,10 @@ func (s *Server) serverAction(w http.ResponseWriter, r *http.Request, server *mo
 			writeError(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"latency_ms": latency})
+		// "status" is the word the rest of the panel says for a server that
+		// answers; a server that does not is an error (502), with the
+		// reason, and the page keys on that
+		writeJSON(w, http.StatusOK, map[string]any{"status": model.Online, "latency_ms": latency})
 	case "agent":
 		s.installAgent(w, r, server)
 	case "command":
@@ -451,22 +537,69 @@ func validHeartbeat(seconds int) bool {
 
 // linkBody is a tunnel as the panel sends and receives it.
 type linkBody struct {
-	ID         string   `json:"id"`
-	IranID     string   `json:"iran_id"`
-	KharejID   string   `json:"kharej_id"`
-	TunnelPort int      `json:"tunnel_port"`
-	ProbePort  int      `json:"probe_port"`
-	Token      string   `json:"token"`
-	Transport  string   `json:"transport"`
-	Ports      []string `json:"ports"`
-	AcceptUDP  bool     `json:"accept_udp"`
-	MSS        int      `json:"mss"`
-	Heartbeat  int      `json:"heartbeat"`
-	Label      string   `json:"label"`
-	Priority   int      `json:"priority"`
-	Managed    bool     `json:"managed"`
-	Pinned     bool     `json:"pinned"`
-	Allowed    []string `json:"allowed"`
+	ID         string     `json:"id"`
+	IranID     string     `json:"iran_id"`
+	KharejID   string     `json:"kharej_id"`
+	TunnelPort int        `json:"tunnel_port"`
+	ProbePort  int        `json:"probe_port"`
+	Token      string     `json:"token"`
+	Transport  string     `json:"transport"`
+	Ports      stringList `json:"ports"`
+	AcceptUDP  bool       `json:"accept_udp"`
+	MSS        int        `json:"mss"`
+	Heartbeat  int        `json:"heartbeat"`
+	Label      string     `json:"label"`
+	Priority   int        `json:"priority"`
+	Managed    bool       `json:"managed"`
+	Pinned     bool       `json:"pinned"`
+	Allowed    []string   `json:"allowed"`
+}
+
+// stringList is a list a form may send either way: as a list, or as the one
+// string of lines or commas a field of several lines holds ("443, 2053").
+// It is read the way setList reads the same field of an edit, so adding and
+// editing say the same thing.
+type stringList []string
+
+// UnmarshalJSON reads a list, a string of lines, or nothing at all.
+func (l *stringList) UnmarshalJSON(data []byte) error {
+	var value any
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	switch value := value.(type) {
+	case nil:
+		*l = nil
+	case string:
+		*l = splitLines(value)
+	case []any:
+		out := []string{}
+		for _, item := range value {
+			text, ok := item.(string)
+			if !ok {
+				return fmt.Errorf("a list of texts is expected")
+			}
+			if text = strings.TrimSpace(text); text != "" {
+				out = append(out, text)
+			}
+		}
+		*l = out
+	default:
+		return fmt.Errorf("a list of texts is expected")
+	}
+	return nil
+}
+
+// splitLines is the lines of a field of several lines: one per line or per
+// comma, without the empty ones.
+func splitLines(value string) []string {
+	out := []string{}
+	for _, line := range strings.FieldsFunc(value, func(r rune) bool { return r == '\n' || r == ',' }) {
+		if text := strings.TrimSpace(line); text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
 }
 
 // model is the tunnel of the body.
@@ -479,7 +612,7 @@ func (b linkBody) model() *model.Link {
 		ProbePort:  b.ProbePort,
 		Token:      b.Token,
 		Transport:  b.Transport,
-		Ports:      b.Ports,
+		Ports:      []string(b.Ports),
 		AcceptUDP:  b.AcceptUDP,
 		MSS:        b.MSS,
 		Heartbeat:  b.Heartbeat,
@@ -586,7 +719,14 @@ func (s *Server) domainByID(w http.ResponseWriter, r *http.Request) {
 		// over the domain that is there, key by key, the way the Python
 		// panel's edit does. The servers the record points at are not
 		// changed by an edit — the record moves with the switch action.
-		updated := *domain
+		s.store.Lock()
+		current := s.store.Domains.Get(domain.ID)
+		if current == nil { // forgotten while the body was read
+			s.store.Unlock()
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		updated := *current
 		setString(body, "fqdn", &updated.FQDN)
 		setString(body, "provider_id", &updated.ProviderID)
 		setString(body, "kharej_id", &updated.KharejID)
@@ -595,6 +735,7 @@ func (s *Server) domainByID(w http.ResponseWriter, r *http.Request) {
 		setList(body, "ports", &updated.Ports)
 		setList(body, "group", &updated.Group)
 		s.store.Domains.Put(domain.ID, &updated)
+		s.store.Unlock()
 		s.orch.Changed()
 		writeJSON(w, http.StatusOK, map[string]any{"domain": s.domainBody(&updated)})
 	case http.MethodDelete:
@@ -618,7 +759,9 @@ func (s *Server) domainAction(w http.ResponseWriter, r *http.Request, domain *mo
 			return
 		}
 		if action == "primary" {
+			s.store.Lock()
 			domain.PrimaryIran = body.IranID
+			s.store.Unlock()
 			s.orch.Changed()
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 			return
@@ -635,16 +778,16 @@ func (s *Server) domainAction(w http.ResponseWriter, r *http.Request, domain *mo
 
 // domainBody is a domain as the panel sends and receives it.
 type domainBody struct {
-	ID           string   `json:"id"`
-	FQDN         string   `json:"fqdn"`
-	ProviderID   string   `json:"provider_id"`
-	KharejID     string   `json:"kharej_id"`
-	IranID       string   `json:"iran_id"`
-	PrimaryIran  string   `json:"primary_iran"`
-	Group        []string `json:"group"`
-	Ports        []string `json:"ports"`
-	TTL          int      `json:"ttl"`
-	AutoFailover bool     `json:"auto_failover"`
+	ID           string     `json:"id"`
+	FQDN         string     `json:"fqdn"`
+	ProviderID   string     `json:"provider_id"`
+	KharejID     string     `json:"kharej_id"`
+	IranID       string     `json:"iran_id"`
+	PrimaryIran  string     `json:"primary_iran"`
+	Group        stringList `json:"group"`
+	Ports        stringList `json:"ports"`
+	TTL          int        `json:"ttl"`
+	AutoFailover bool       `json:"auto_failover"`
 }
 
 // model is the domain of the body.
@@ -656,8 +799,8 @@ func (b domainBody) model() *model.Domain {
 		KharejID:     b.KharejID,
 		IranID:       b.IranID,
 		PrimaryIran:  b.PrimaryIran,
-		Group:        b.Group,
-		Ports:        b.Ports,
+		Group:        []string(b.Group),
+		Ports:        []string(b.Ports),
 		TTL:          b.TTL,
 		AutoFailover: b.AutoFailover,
 	}
@@ -802,8 +945,6 @@ func (s *Server) settings(w http.ResponseWriter, r *http.Request) {
 		defer s.store.RUnlock()
 		writeJSON(w, http.StatusOK, s.settingsPublic())
 	case http.MethodPut:
-		s.store.Lock()
-		defer s.store.Unlock()
 		var body map[string]any
 		if err := readBody(r, &body); err != nil {
 			writeError(w, http.StatusBadRequest, "the request is not readable")
@@ -827,32 +968,85 @@ func (s *Server) settings(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		// The settings are written under the lock of the state and nothing
+		// else is: Changed saves the state file, and the save takes the
+		// lock itself, so it is called with the lock released.
+		s.store.Lock()
 		s.applySettings(body)
+		s.store.Unlock()
 		s.orch.Changed()
-		writeJSON(w, http.StatusOK, s.settingsPublic())
+		s.store.RLock()
+		answer := s.settingsPublic()
+		s.store.RUnlock()
+		writeJSON(w, http.StatusOK, answer)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
+// The least and the most the panel takes for the settings that are numbers.
+// The page already refuses a number below its minimum, but the page is not
+// the only way to write a setting: a check every 0 seconds would spin the
+// monitor, and 0 failures in a row would call every tunnel down. A number
+// outside these is brought to the nearest edge, not refused — the page
+// autosaves, and the field then shows what was kept. The unit is the one
+// the settings are stored in (seconds, not the minutes the page shows).
+var settingBounds = map[string][2]int{
+	"check_interval":   {10, 86400},
+	"fail_threshold":   {1, 100},
+	"flap_window":      {60, 86400},
+	"flap_count":       {2, 100},
+	"failback_after":   {60, 7 * 86400},
+	"test_timeout":     {5, 600},
+	"scan_interval":    {60, 7 * 86400},
+	"tunnel_port_base": {1, 65000},
+	"probe_port_base":  {1, 65000},
+	"backup_keep":      {1, 1000},
+}
+
+// setBounded writes a number of the body into a setting, kept within the
+// bounds of that setting.
+func setBounded(body map[string]any, key string, target *int) {
+	setInt(body, key, target)
+	if bounds, there := settingBounds[key]; there {
+		if *target < bounds[0] {
+			*target = bounds[0]
+		} else if *target > bounds[1] {
+			*target = bounds[1]
+		}
+	}
+}
+
 // applySettings writes what the panel is given into the settings. The
 // secrets keep their value when the panel is given the mask of them.
+//
+// The caller holds the lock of the state for writing: the settings (and the
+// map of the Telegram settings inside them) are read by the monitor and by
+// every page, and a map that is written while it is read stops the panel.
+// The caller must not save the state or tell the pages from inside the
+// lock; that is done after it is released.
 func (s *Server) applySettings(body map[string]any) {
 	settings := s.store.Settings
 	setBool(body, "observe_only", &settings.ObserveOnly)
-	setInt(body, "check_interval", &settings.CheckInterval)
-	setInt(body, "fail_threshold", &settings.FailThreshold)
-	setInt(body, "flap_window", &settings.FlapWindow)
-	setInt(body, "flap_count", &settings.FlapCount)
-	setInt(body, "failback_after", &settings.FailbackAfter)
-	setStrings(body, "candidate_transports", &settings.CandidateTransports)
-	setInt(body, "tunnel_port_base", &settings.TunnelPortBase)
-	setInt(body, "probe_port_base", &settings.ProbePortBase)
-	setInt(body, "test_timeout", &settings.TestTimeout)
+	setBounded(body, "check_interval", &settings.CheckInterval)
+	setBounded(body, "fail_threshold", &settings.FailThreshold)
+	setBounded(body, "flap_window", &settings.FlapWindow)
+	setBounded(body, "flap_count", &settings.FlapCount)
+	setBounded(body, "failback_after", &settings.FailbackAfter)
+	// no carrier at all would leave nothing to test and nothing to repair
+	// with: an empty list is not taken
+	carriers := []string{}
+	setStrings(body, "candidate_transports", &carriers)
+	if len(carriers) > 0 {
+		settings.CandidateTransports = carriers
+	}
+	setBounded(body, "tunnel_port_base", &settings.TunnelPortBase)
+	setBounded(body, "probe_port_base", &settings.ProbePortBase)
+	setBounded(body, "test_timeout", &settings.TestTimeout)
 	setBool(body, "auto_repair", &settings.AutoRepair)
 	setBool(body, "auto_adopt", &settings.AutoAdopt)
 	setBool(body, "auto_mesh", &settings.AutoMesh)
-	setInt(body, "scan_interval", &settings.ScanInterval)
+	setBounded(body, "scan_interval", &settings.ScanInterval)
 	setBool(body, "command_enabled", &settings.CommandEnabled)
 	setString(body, "command_provider_id", &settings.CommandProviderID)
 	setBool(body, "install_engine", &settings.InstallEngine)
@@ -870,9 +1064,19 @@ func (s *Server) applySettings(body map[string]any) {
 		settings.DohResolvers = validResolvers
 	}
 	setBool(body, "backup_enabled", &settings.BackupEnabled)
-	setString(body, "backup_time", &settings.BackupTime)
-	setString(body, "backup_tz", &settings.BackupTZ)
-	setInt(body, "backup_keep", &settings.BackupKeep)
+	// the time of the night and its zone are only taken when they are ones
+	// the scheduler can read: a time that is not HH:MM would never come
+	if at, there := body["backup_time"].(string); there {
+		if _, _, ok := backup.ParseClock(at); ok {
+			settings.BackupTime = strings.TrimSpace(at)
+		}
+	}
+	if zone, there := body["backup_tz"].(string); there {
+		if zone = strings.TrimSpace(zone); zone != "" && backup.KnownZone(zone) {
+			settings.BackupTZ = zone
+		}
+	}
+	setBounded(body, "backup_keep", &settings.BackupKeep)
 	if secret, there := body["engine_token"].(string); there && secret != "" && secret != mask {
 		settings.EngineToken = secret
 	}
@@ -880,6 +1084,9 @@ func (s *Server) applySettings(body map[string]any) {
 		settings.BackupPassword = secret
 	}
 	if telegram, there := body["telegram"].(map[string]any); there {
+		if settings.Telegram == nil {
+			settings.Telegram = map[string]any{}
+		}
 		if token, ok := telegram["bot_token"].(string); ok && token != "" && token != mask {
 			settings.Telegram["bot_token"] = token
 		} else if _, hasToken := telegram["bot_token"]; !hasToken {
@@ -951,13 +1158,7 @@ func setList(body map[string]any, key string, target *[]string) {
 		}
 		*target = out
 	case string:
-		out := []string{}
-		for _, line := range strings.FieldsFunc(value, func(r rune) bool { return r == '\n' || r == ',' }) {
-			if text := strings.TrimSpace(line); text != "" {
-				out = append(out, text)
-			}
-		}
-		*target = out
+		*target = splitLines(value)
 	}
 }
 

@@ -70,6 +70,10 @@ async function act(fn, okMsg) {
   try { const r = await fn(); if (okMsg) toast(okMsg, "success"); return r; }
   catch (e) { toast(e.message, "error"); throw e; }
 }
+// act has already said what went wrong; a caller that has nothing more to do
+// about it takes the failure as an empty answer, so it is not an unhandled
+// rejection (the browser logs one for every click that ended in an error)
+const quiet = (promise) => promise.catch(() => null);
 
 /* --------------------------------------------------------------- helpers */
 const srv = (id) => S.servers.find((s) => s.id === id);
@@ -136,19 +140,36 @@ function startApp(sess) {
   route();
 }
 
+/* The socket comes back by itself when it drops, with a longer wait each time
+   it fails to (2.5 s, then 5, 10, 20 and at most 30 seconds). It does not when
+   the operator is no longer signed in (he signed out, or the session ran out):
+   the panel refuses an unauthorised socket with a 401 before the upgrade, so
+   the browser only ever sees a plain close — never the close code 4401 — and
+   the way to know is to ask the panel who is signed in. */
+let wsDelay = 2500, wsTimer = null;
 function connectWS() {
-  if (ws) try { ws.close(); } catch (_) { /* ignore */ }
+  clearTimeout(wsTimer);
+  if (ws) { ws.onclose = null; try { ws.close(); } catch (_) { /* ignore */ } }
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(`${proto}://${location.host}/ws`);
-  ws.onopen = () => { wsAlive = true; $("#live").classList.add("on"); $("#live-text").textContent = "Live"; };
-  ws.onclose = (e) => {
+  const sock = new WebSocket(`${proto}://${location.host}/ws`);
+  ws = sock;
+  sock.onopen = () => { wsAlive = true; wsDelay = 2500; $("#live").classList.add("on"); $("#live-text").textContent = "Live"; };
+  sock.onclose = async (e) => {
+    if (ws !== sock) return; // a newer socket has taken its place
     wsAlive = false; $("#live").classList.remove("on");
     $("#live-text").textContent = "Reconnecting…";
     if (e.code === 4401) return showAuth();
-    setTimeout(connectWS, 2500);
+    try {
+      const who = await fetch("/api/session", { credentials: "same-origin" }).then((r) => r.json());
+      if (!who.logged_in) { $("#live-text").textContent = "Signed out"; return showAuth(who.configured); }
+    } catch (_) { /* the panel itself is away: try again like any other failure */ }
+    if (ws !== sock) return;
+    wsTimer = setTimeout(connectWS, wsDelay);
+    wsDelay = Math.min(30000, wsDelay * 2);
   };
-  ws.onmessage = (m) => {
-    const msg = JSON.parse(m.data);
+  sock.onmessage = (m) => {
+    let msg;
+    try { msg = JSON.parse(m.data); } catch (_) { return; }
     if (msg.type === "state") setState(msg.state);
     // the feed of events is worked out by the panel now: a new event means
     // the page asks for it again, and the rows come with the answer
@@ -169,6 +190,14 @@ setInterval(() => { if (wsAlive) try { ws.send("ping"); } catch (_) { /* ignore 
    other shape. */
 let VIEW = null;   // the canvas: the cards, the columns, the wires
 let PARTS = null;  // the pages: what an element holds, by its id
+// What each part held when it was last put in the page, as the panel wrote it.
+// The page cannot be asked: once the browser has parsed the markup, what
+// innerHTML gives back is the browser's own spelling of it (quotes, entities,
+// the order of the attributes), which is almost never the string that went
+// in. Comparing against that would redraw every part at every push — closing
+// the open menus, forgetting the protocol that was ticked, wiping the answer
+// of the command channel, and throwing away what he was writing in the drawer.
+const shown = new Map();
 let viewSeq = 0;
 async function loadView() {
   const mine = ++viewSeq;
@@ -204,7 +233,9 @@ function applyParts() {
     // the pages hold buttons that open other parts).
     const at = document.activeElement;
     if (at && el.contains(at) && at.matches("input,textarea,select")) continue;
-    if (el.innerHTML !== html) el.innerHTML = html;
+    if (shown.get(id) === html) continue;
+    el.innerHTML = html;
+    shown.set(id, html);
   }
   bindActions();
 }
@@ -248,6 +279,7 @@ function closeDrawer() {
   $("#scrim").classList.remove("open");
   const body = $("#drawer-body");
   if (body) body.innerHTML = "";
+  shown.delete("drawer-body"); // it is empty now: the next one is written in full
   if (was) loadViewThenRender(); // the panel holds nothing for it any more
 }
 
@@ -273,11 +305,23 @@ function route() {
   for (const a of $$("#nav a")) a.classList.toggle("on", a.dataset.view === view);
   $("#crumb-page").textContent = VIEWS[view].title;
   document.title = `bull-Tunnel · ${VIEWS[view].title}`;
-  if (view === "network") requestAnimationFrame(() => { drawWires(); fit(); });
+  setSide(false); // a page was picked: the sidebar of a narrow screen has done its job
+  // The wires are measured from the cards, which have no size while the page
+  // is hidden, so they are drawn again once it is shown. The camera is left
+  // where the operator put it: it is only set when there is nothing saved to
+  // restore, and only when there is a graph to look at (settleCamera).
+  if (view === "network") requestAnimationFrame(() => { drawWiresNow(); settleCamera(); });
 }
 window.addEventListener("hashchange", route);
 
 /* --------------------------------------------------------------- sidebar */
+/* On a narrow screen the sidebar is a sheet that slides over the page, with a
+   scrim behind it that closes it; on a wide one it is part of the page and
+   none of this is shown. */
+function setSide(open) {
+  $("#side").classList.toggle("open", open);
+  $("#side-scrim").classList.toggle("open", open);
+}
 /* the strip of counters under the page title */
 /* the buttons in the header of every page */
 /* The buttons of a page come with the parts; what they do is the script's:
@@ -285,9 +329,13 @@ window.addEventListener("hashchange", route);
 function bindActions() {
   const scan = $("#btn-scan"), check = $("#btn-check"), discover = $("#btn-discover");
   if (!scan) return;
-  scan.onclick = () => act(scanNow, "Scan started");
-  check.onclick = () => act(() => api("POST", "/api/check", {}), "Check started");
-  discover.onclick = () => act(discoverNow, "Test and connection started");
+  // each of these says what happened itself (and what went wrong, once), so
+  // none of them is wrapped in a message that says "started" whether or not
+  // anything was: a cancelled question and a tunnel list with nothing to do
+  // used to be announced as work begun.
+  scan.onclick = () => scanNow();
+  check.onclick = () => quiet(act(() => api("POST", "/api/check", {}), "Check started"));
+  discover.onclick = () => discoverNow();
   const scan2 = $("#btn-scan-2"), check2 = $("#btn-check-2"), discover2 = $("#btn-discover-2");
   if (scan2) scan2.onclick = scan.onclick;
   if (check2) check2.onclick = check.onclick;
@@ -308,14 +356,16 @@ function closeMenus() {
   $$(".menu-pop").forEach((p) => p.classList.remove("open"));
 }
 async function scanNow() {
-  const r = await act(() => api("POST", "/api/scan"));
+  const r = await quiet(act(() => api("POST", "/api/scan"))); // a failure is already on the screen
+  if (!r) return;
   toast(r.added ? `${r.added} existing tunnels were found and added` : "No new tunnel was found", "success");
 }
 function discoverNow() {
+  if (!S) return;
   const n = S.links.filter((l) => l.status === "pending" || l.status === "down").length;
   if (!n) return toast("There is no tunnel that is not built or that is down; the healthy tunnels are left alone");
   if (!confirm(`${n} tunnels that are not built or that are down will be built/rebuilt by testing every protocol. The healthy tunnels are left alone. Continue?`)) return;
-  act(() => api("POST", "/api/discover", {}), "Building the tunnels has started");
+  return quiet(act(() => api("POST", "/api/discover", {}), "Building the tunnels has started"));
 }
 
 /* ================================================================ the flow */
@@ -336,12 +386,20 @@ try {
   }
 } catch (_) { /* ignore */ }
 
-function applyView() {
+// paintView puts the camera on the screen and does nothing else; applyView
+// also remembers it. The camera that is on the screen before the first graph
+// is the default one, and remembering that would overwrite the view the
+// operator saved last time.
+function paintView() {
   world.style.transform = `translate(${cam.x}px,${cam.y}px) scale(${cam.z})`;
   $("#zoom-val").textContent = `${Math.round(cam.z * 100)}%`;
+}
+function applyView() {
+  paintView();
   clearTimeout(applyView.t);
   applyView.t = setTimeout(() => { try { localStorage.setItem("bt-view", JSON.stringify({ ...cam, cw: stage.clientWidth })); } catch (_) { /* ignore */ } }, 300);
 }
+paintView();
 function zoomAt(cx, cy, f) {
   const r = stage.getBoundingClientRect();
   const px = cx - r.left, py = cy - r.top;
@@ -353,7 +411,9 @@ function zoomAt(cx, cy, f) {
 }
 function fit() {
   const ids = Object.keys(els);
-  if (!ids.length) { Object.assign(cam, { x: 40, y: 58, z: 1 }); return applyView(); }
+  // nothing to show, or a stage that is hidden (it has no size on another
+  // page): there is nothing to fit, and the camera stays as it is
+  if (!ids.length || !stage.clientWidth) return;
   let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
   for (const id of ids) {
     const [x, y] = pos[id]; const el = els[id];
@@ -376,8 +436,22 @@ function fit() {
    panel (VIEW): the browser puts a card where the panel says, keeps the hand
    of the operator on the card he is dragging, and draws the wires between
    the cards it can measure. */
+let flowAdopted = false;
 function renderFlow() {
   if (!S || !VIEW) return;
+  // The page comes with the cards already in it (the panel draws them before
+  // the script runs). They are taken over, not drawn beside: a card the
+  // script did not know of would stay for good, a ghost of the one that was
+  // drawn over it.
+  if (!flowAdopted) {
+    flowAdopted = true;
+    for (const el of $$("[data-id]", nodesEl)) {
+      if (els[el.dataset.id]) { el.parentNode.removeChild(el); continue; }
+      els[el.dataset.id] = el;
+      pos[el.dataset.id] = [parseFloat(el.style.left) || 0, parseFloat(el.style.top) || 0];
+      bindDrag(el);
+    }
+  }
   const seen = new Set();
   for (const n of VIEW.nodes) {
     seen.add(n.id);
@@ -407,9 +481,13 @@ function renderFlow() {
   $("#flow-badge").innerHTML = `<i class="dot ok"></i><span>${esc(VIEW.badge)}</span>`;
   if (firstState) {
     firstState = false;
-    const sameScreen = cam.cw && Math.abs(cam.cw - stage.clientWidth) / stage.clientWidth < 0.3;
-    if (viewRestored && sameScreen) applyView(); else requestAnimationFrame(() => { drawWiresNow(); fit(); });
+    const sameScreen = cam.cw && stage.clientWidth && Math.abs(cam.cw - stage.clientWidth) / stage.clientWidth < 0.3;
+    // the saved camera is already on the screen; it is only given up when the
+    // screen is a different size, and then (or when none was saved) the graph
+    // is fitted once the stage can be measured
+    if (!(viewRestored && (sameScreen || !stage.clientWidth))) needFit = true;
   }
+  if (needFit) requestAnimationFrame(() => { drawWiresNow(); settleCamera(); });
   drawWires();
 }
 
@@ -418,16 +496,16 @@ function renderFlow() {
    may have dragged one. */
 function renderColumns() {
   const list = (VIEW && VIEW.columns) || [];
-  let titles = $$(".ct", colsEl);
-  if (!titles.length) {
-    for (const col of ["kharej", "iran", "domain"]) {
-      const t = document.createElement("div");
-      t.className = "ct"; t.dataset.col = col;
-      colsEl.appendChild(t);
-    }
-    titles = $$(".ct", colsEl);
+  // every column has a title of its own: the page may hold some of them
+  // already (only the columns that had a card when it was drawn), and the
+  // ones it lacks are made here
+  for (const col of ["kharej", "iran", "domain"]) {
+    if ($$(".ct", colsEl).some((t) => t.dataset.col === col)) continue;
+    const t = document.createElement("div");
+    t.className = "ct"; t.dataset.col = col;
+    colsEl.appendChild(t);
   }
-  for (const t of titles) {
+  for (const t of $$(".ct", colsEl)) {
     const col = list.find((c) => c.col === t.dataset.col);
     if (!col) { t.style.display = "none"; continue; }
     t.style.display = "";
@@ -461,6 +539,18 @@ function bezAt(p, t) {
     u * u * u * p[0] + 3 * u * u * t * p[2] + 3 * u * t * t * p[4] + t * t * t * p[6],
     u * u * u * p[1] + 3 * u * u * t * p[3] + 3 * u * t * t * p[5] + t * t * t * p[7],
   ];
+}
+
+/* The camera is set once, when the first graph is on the screen: the one the
+   operator saved is restored, and when there is none (or the screen is a
+   different size) the graph is fitted to the stage — as soon as the stage
+   can be measured, which is when the network page is the one that is shown
+   and there is something on it. */
+let needFit = false;
+function settleCamera() {
+  if (!needFit || view !== "network" || !Object.keys(els).length) return;
+  needFit = false;
+  fit();
 }
 
 let wiresQueued = false;
@@ -618,7 +708,7 @@ function bindDrag(el) {
 let pendingLayout = {};
 function saveLayout(p) {
   Object.assign(pendingLayout, p);
-  Object.assign(S.layout, p);
+  if (S) S.layout = Object.assign(S.layout || {}, p);
   clearTimeout(saveLayout.t);
   saveLayout.t = setTimeout(() => {
     const body = { positions: pendingLayout };
@@ -674,11 +764,11 @@ $("#tools").addEventListener("click", async (e) => {
   else if (z === "fit") fit();
   else if (z === "reset") {
     if (!confirm("Reset the server layout to the default?")) return;
-    await api("DELETE", "/api/layout");
+    if (!(await quiet(act(() => api("DELETE", "/api/layout"))))) return;
     for (const id of Object.keys(pos)) delete pos[id];
-    S.layout = {};
-    renderFlow();
-    requestAnimationFrame(fit);
+    if (S) S.layout = {};
+    needFit = true; // the cards are back where the panel puts them: the camera follows
+    loadViewThenRender();
   }
 });
 $("#show-standby").onchange = drawWires;
@@ -752,6 +842,7 @@ function linkTip(l) {
    out per burst of changes, so the fields he ticks together are saved
    together. */
 async function saveSetBody() {
+  if (!S) return;
   const f = $("#set-body");
   const body = await collectBody(f);
   // The Telegram settings are saved as one block, and the API replaces the
@@ -762,6 +853,12 @@ async function saveSetBody() {
   try {
     await api("PUT", "/api/settings", body);
     toast("Settings saved", "success");
+    // What was saved is what the page now starts from. A switch that asks
+    // before it is turned off asks when it goes from its starting value to
+    // off; while the field is in focus the page is not redrawn under him, so
+    // the starting value would stay the old one and every later change on
+    // the page would ask the same question again.
+    for (const el of f.querySelectorAll("input[type=checkbox][data-confirm]")) el.defaultChecked = el.checked;
   } catch (e) {
     toast(e.message, "error");
   }
@@ -829,15 +926,43 @@ async function collectBody(f) {
     // several lines as one string the API refuses, and the file input (which
     // has no key of its own) would be sent under a key that does not exist.
     // The mark of these four is looked for, not read.
-    if ("checks" in el.dataset) { if (el.checked) (body[key] = body[key] || []).push(el.value); continue; }
+    // A group of choices that is on the page is always sent, and it is an
+    // empty list when nothing in it is ticked: a group that is left out of
+    // the body means "keep what is stored", so "Save the ports" with every box
+    // unticked would never be able to clear them.
+    if ("checks" in el.dataset) {
+      const group = (body[key] = body[key] || []);
+      if (el.checked) group.push(el.value);
+      continue;
+    }
     let value;
     if (el.type === "checkbox") value = el.checked;
-    else if ("num" in el.dataset) value = (el.value === "" ? +(el.dataset.def || 0) : +el.value) * (+(el.dataset.scale || 1));
+    else if ("num" in el.dataset) value = numberOf(el);
     else if ("lines" in el.dataset) value = lines(el.value);
     else value = el.value.trim() || el.dataset.else || "";
     put(body, key, value);
   }
   return body;
+}
+
+// numberOf is the value of a field of numbers, in the unit the panel stores
+// it in. What he sees may be in minutes (data-scale is the seconds in one of
+// what he sees); what is stored is seconds. An empty field means "the
+// default", and data-def already is the default as the panel stores it — in
+// seconds — so it is not scaled again: a minutes field that was cleared used
+// to be saved as the default times sixty. A number below the minimum of the
+// field (which is in the unit he sees) is brought to it, and the field shows
+// what was kept: the settings of the page are saved as he types, with no form
+// around them to refuse a number the browser would have refused.
+function numberOf(el) {
+  const scale = +(el.dataset.scale || 1);
+  const def = +(el.dataset.def || 0);
+  if (el.value === "" || !Number.isFinite(+el.value)) return def;
+  let seen = +el.value;
+  const min = el.min === "" ? NaN : +el.min, max = el.max === "" ? NaN : +el.max;
+  if (Number.isFinite(min) && seen < min) { seen = min; el.value = String(min); }
+  if (Number.isFinite(max) && seen > max) { seen = max; el.value = String(max); }
+  return seen * scale;
 }
 
 // formBody is the fields of a modal form, read the same way as any other.
@@ -861,8 +986,8 @@ function formConfirm(f) {
   for (const el of f.querySelectorAll("[data-confirm]")) {
     if (el.type !== "checkbox" || !el.defaultChecked || el.checked) continue;
     let question = el.dataset.confirm;
-    const other = el.dataset.confirm2When && f.querySelector(`[data-field="${el.dataset.confirm2When}"]`);
-    if (other && other.checked && el.dataset.confirm2) question = el.dataset.confirm2;
+    const other = el.dataset.confirmWhen && f.querySelector(`[data-field="${el.dataset.confirmWhen}"]`);
+    if (other && other.checked && el.dataset.confirmStrong) question = el.dataset.confirmStrong;
     if (!confirm(question)) return false;
   }
   return true;
@@ -880,8 +1005,10 @@ $("#modal-form").onsubmit = async (e) => {
   lastSubmit = (async () => {
     try {
       const body = await formBody(f);
+      // a form that needs one of two things (a file he picked, or a copy
+      // that is on the server) says what to pick when he picked neither
       const missing = f.querySelector("[data-require]");
-      if (missing && !body.data && !body.bk_name) throw new Error(missing.dataset.require);
+      if (missing && !body.data && !body.name) throw new Error(missing.dataset.require);
       const answer = await api(f.dataset.method, f.dataset.endpoint, body);
       if (f.dataset.done) toast(f.dataset.done.replace(/\{(\w+(?:\.\w+)*)\}/g, (_, path) => dig(answer, path) ?? ""), "success");
       closeModal();
@@ -919,6 +1046,12 @@ $("#modal-form").onsubmit = async (e) => {
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("[data-act],[data-act-form]");
   if (!b) return;
+  // A button of a form submits the form, and the page loads again — with the
+  // call it was about to make, and with what he had written. The buttons are
+  // written type="button" by the panel; this is the other half of it, so a
+  // button that is not (or that comes from somewhere else) is held as well,
+  // and a question he answers "no" to leaves everything where it was.
+  e.preventDefault();
   if (b.dataset.actForm) return openForm(b.dataset.actForm, b.dataset.actEdit ? { edit: b.dataset.actEdit } : {});
   const [method, path] = b.dataset.act.split(" ");
   if (b.dataset.confirm && !confirm(b.dataset.confirm)) return;
@@ -957,7 +1090,7 @@ document.addEventListener("click", async (e) => {
 /* Everything the drawer used to say in JavaScript is now written by Go into
    the drawer part (web/drawer.go); what is left here is only the handful of
    attributes that decide *where* a click goes. */
-const CLICKABLE = "[data-add],[data-close],[data-close-modal],[data-link],[data-dom],[data-edit-server],[data-open-server],[data-test-server],[data-new-link],[data-discover-links],[data-sync],[data-edit-domain],[data-del-domain],[data-verify-provider],[data-edit-provider],[data-del-provider],[data-dom-ports],[data-open-settings],[data-goto]";
+const CLICKABLE = "[data-add],[data-close],[data-close-modal],[data-link],[data-dom],[data-edit-server],[data-open-server],[data-test-server],[data-new-link],[data-discover-links],[data-edit-domain],[data-del-domain],[data-verify-provider],[data-edit-provider],[data-del-provider],[data-dom-ports],[data-open-settings],[data-goto]";
 document.addEventListener("click", async (e) => {
   const t = e.target.closest(CLICKABLE);
   if (!t) {
@@ -982,18 +1115,52 @@ document.addEventListener("click", async (e) => {
   if (d.editServer) return openForm("server", { edit: d.editServer });
   if (d.openServer) return openDrawer("server", d.openServer);
   if (d.testServer) {
-    const r = await act(() => api("POST", `/api/servers/${d.testServer}/test`));
-    return toast(r.status === "online" ? `SSH is fine — ${ms(r.latency_ms)}` : `SSH failed: ${r.error}`, r.status === "online" ? "success" : "error");
+    // a server that answers is a 200 with its latency; one that does not is
+    // an error with the reason, and the page says which it was
+    try {
+      const r = await api("POST", `/api/servers/${d.testServer}/test`);
+      if (r && (r.status === "online" || r.latency_ms != null)) toast(`SSH is fine — ${ms(r.latency_ms)}`, "success");
+      else toast(`SSH failed: ${(r && r.error) || "no answer"}`, "error");
+    } catch (err) { toast(`SSH failed: ${err.message}`, "error"); }
+    return;
   }
   if (d.newLink) return openForm("link", { preset: d.newLink });
-  if (d.discoverLinks) return act(() => api("POST", "/api/discover", { link_ids: d.discoverLinks.split(",") }), "Building the tunnels has started");
+  if (d.discoverLinks) return quiet(act(() => api("POST", "/api/discover", { link_ids: d.discoverLinks.split(",") }), "Building the tunnels has started"));
   if (d.editDomain) return openForm("domain", { edit: d.editDomain });
-  if (d.delDomain) { if (!confirm("Remove the domain from the panel? (the DNS record is left alone)")) return; await act(() => api("DELETE", `/api/domains/${d.delDomain}`), "Deleted"); return closeDrawer(); }
-  if (d.verifyProvider) { const r = await act(() => api("POST", `/api/providers/${d.verifyProvider}/verify`)); return toast(`The connection is fine: ${r.detail}`, "success"); }
+  if (d.delDomain) {
+    if (!confirm("Remove the domain from the panel? (the DNS record is left alone)")) return;
+    if (await quiet(act(() => api("DELETE", `/api/domains/${d.delDomain}`), "Deleted"))) closeDrawer();
+    return;
+  }
+  if (d.verifyProvider) {
+    const r = await quiet(act(() => api("POST", `/api/providers/${d.verifyProvider}/verify`)));
+    if (r) toast(`The connection is fine: ${r.detail}`, "success");
+    return;
+  }
   if (d.editProvider) return openForm("provider", { edit: d.editProvider });
-  if (d.delProvider) { if (!confirm("Delete the DNS account?")) return; await act(() => api("DELETE", `/api/providers/${d.delProvider}`), "Deleted"); return openForm("settings"); }
+  if (d.delProvider) {
+    if (!confirm("Delete the DNS account?")) return;
+    if (!(await quiet(act(() => api("DELETE", `/api/providers/${d.delProvider}`), "Deleted")))) return;
+    // the list of accounts is on the page and in the settings form; only the
+    // form is a window of its own, and only if he deleted from it does it
+    // come back (with the account gone) — the page redraws by itself
+    if (t.closest("#modal-form")) return openForm("settings");
+    return loadViewThenRender();
+  }
   if (d.link) return openDrawer("link", d.link);
 });
+// A control that is a choice of its own can imply another: ticking a carrier
+// of a tunnel is choosing "only these", whatever was chosen before. The mark
+// names the control that is switched on (a selector, within the same form).
+document.addEventListener("change", (e) => {
+  const t = e.target;
+  if (!t.matches || !t.matches("[data-implies]")) return;
+  try {
+    const other = (t.closest("form") || document).querySelector(t.dataset.implies);
+    if (other) other.checked = true;
+  } catch (_) { /* a selector that is not one: nothing to switch on */ }
+});
+
 // wires & labels live inside the panned stage: open on a clean click only
 wiresEl.addEventListener("pointerdown", (e) => {
   const w = e.target.closest(".hit,.wlabel");
@@ -1026,7 +1193,7 @@ wiresEl.addEventListener("pointerdown", (e) => {
 /* hover: focus + tooltip */
 const tip = $("#tip");
 document.addEventListener("mouseover", (e) => {
-  if (pan || $(".fnode.dragging")) return;
+  if (!S || pan || $(".fnode.dragging")) return;
   const n = e.target.closest("#nodes .fnode");
   const w = e.target.closest(".hit,.wlabel");
   if (!n && !w) {
@@ -1067,7 +1234,10 @@ document.addEventListener("click", (e) => {
   if (e.target.closest("#observe-pill")) openForm("settings");
 });
 
-$("#btn-logout").onclick = async () => { await api("POST", "/api/logout"); location.reload(); };
+$("#btn-logout").onclick = async () => {
+  try { await api("POST", "/api/logout"); } catch (_) { /* the page is loaded again either way */ }
+  location.reload();
+};
 $("#btn-theme").onclick = () => {
   const cur = document.documentElement.dataset.theme === "light" ? "dark" : "light";
   document.documentElement.dataset.theme = cur;
@@ -1082,13 +1252,18 @@ function paintThemeButton() {
     ? `<path d="M20.5 14.3A8.5 8.5 0 0 1 9.7 3.5a8.5 8.5 0 1 0 10.8 10.8z"/>`
     : `<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/>`;
 }
-$("#btn-menu").onclick = () => $("#side").classList.toggle("open");
+$("#btn-menu").onclick = () => setSide(!$("#side").classList.contains("open"));
+$("#side-scrim").onclick = () => setSide(false);
+// the link of the page he is already on changes nothing in the address, so
+// the router never hears of it: the sidebar is closed by the click itself
+$("#nav").addEventListener("click", (e) => { if (e.target.closest("a")) setSide(false); });
 $("#scrim").onclick = closeDrawer;
 $("#modal").addEventListener("mousedown", (e) => { if (e.target.id === "modal") closeModal(); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeModal(); closeDrawer(); $("#side").classList.remove("open"); } });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeModal(); closeDrawer(); setSide(false); } });
 
 let lastStageW = 0;
 window.addEventListener("resize", () => {
+  if (window.innerWidth > 1080) setSide(false); // the sheet is a sidebar again
   const w = stage.clientWidth;
   if (lastStageW && Math.abs(w - lastStageW) / lastStageW > 0.3) fit();
   lastStageW = w;
@@ -1126,7 +1301,7 @@ $("#set-body").addEventListener("change", (e) => {
     return;
   }
   clearTimeout(settingsTimer);
-  settingsTimer = setTimeout(saveSetBody, 400);
+  settingsTimer = setTimeout(() => saveSetBody().catch((err) => toast(err.message, "error")), 400);
 });
 
 paintThemeButton();

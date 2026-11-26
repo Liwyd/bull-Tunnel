@@ -48,12 +48,16 @@ type Facts struct {
 	Unstable int // the tunnels that are degraded or flapping
 }
 
-// ReadFacts is one reading of the state, for one page.
+// ReadFacts is one reading of the state, for one page. Whether the panel is
+// in observe mode is the settings' to say and is read here; whether it is
+// the demo is the process's own fact (the state does not know it), so the
+// caller sets Demo on what it gets back.
 func ReadFacts(state *store.Store, now, lastCheck float64, busy, flapping []string) *Facts {
 	f := &Facts{
 		State:      state,
 		Now:        now,
 		LastCheck:  lastCheck,
+		Observe:    state.Settings != nil && state.Settings.ObserveOnly,
 		Busy:       map[string]bool{},
 		Flapping:   map[string]bool{},
 		Servers:    state.Servers.List(),
@@ -184,22 +188,30 @@ func (f *Facts) status(link *model.Link) string {
 // flapping is a tunnel that keeps dropping.
 func (f *Facts) flapping(link *model.Link) bool { return f.Flapping[link.ID] }
 
-// carriers is every protocol the engine speaks, the ones that are tested
-// first.
+// carriers is every protocol the engine speaks, in the order the engine
+// lists them. The order is the same whatever is ticked, so a box does not
+// move under the operator's hand when he ticks it, and a carrier he has
+// unticked is still there to tick again (wss and wssmux are off by default
+// and could never be turned on from a list of the ticked ones). A carrier
+// that is not the engine's but is in use or in the settings of an older
+// state file is added behind them, so that what is stored is never hidden.
 func (f *Facts) carriers() []string {
 	seen := map[string]bool{}
 	out := []string{}
-	for _, transport := range f.State.Settings.CandidateTransports {
-		if !seen[transport] {
+	add := func(transport string) {
+		if transport != "" && !seen[transport] {
 			seen[transport] = true
 			out = append(out, transport)
 		}
 	}
+	for _, transport := range f.Transports {
+		add(transport)
+	}
+	for _, transport := range f.State.Settings.CandidateTransports {
+		add(transport)
+	}
 	for _, link := range f.Links {
-		if link.Transport != "" && !seen[link.Transport] {
-			seen[link.Transport] = true
-			out = append(out, link.Transport)
-		}
+		add(link.Transport)
 	}
 	return out
 }
@@ -216,6 +228,7 @@ type Answer struct {
 // of the state.
 func New(state *store.Store, now, lastCheck float64, busy, flapping []string, o Opts) *Answer {
 	f := ReadFacts(state, now, lastCheck, busy, flapping)
+	f.Demo = o.Demo
 	return &Answer{Parts: f.Parts(o), Network: network(f)}
 }
 

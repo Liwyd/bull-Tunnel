@@ -55,8 +55,10 @@ func TestTheRestoreFormListsTheCopies(t *testing.T) {
 		t.Errorf("the form is %v and says %q, want the page loaded again and \"Restored: {summary}\"",
 			answer.Reload, answer.Done)
 	}
-	for _, want := range []string{`data-field="bk_name" value="panel-2026-10-20.tmbk"`,
-		`data-field="bk_name" value="nightly.tmbk.gz"`, "2.0 MB", "🔒", `data-file="data"`,
+	// the copy he picks is sent under the key the API reads ("name", the
+	// one the management tool uses too), not a key of the form's own
+	for _, want := range []string{`data-field="name" value="panel-2026-10-20.tmbk"`,
+		`data-field="name" value="nightly.tmbk.gz"`, `data-require="`, "2.0 MB", "🔒", `data-file="data"`,
 		`data-field="password"`, `data-field="observe"`, `data-field="restore_login"`} {
 		if !strings.Contains(answer.HTML, want) {
 			t.Errorf("the form of the restore does not have %q in it", answer.HTML)

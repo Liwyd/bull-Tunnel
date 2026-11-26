@@ -70,3 +70,54 @@ func TestTheScriptAsksForTheDrawerInsteadOfDrawingIt(t *testing.T) {
 		t.Errorf("the script writes %q into the page as markup", found)
 	}
 }
+
+// What a browser would show for the fixes of the script is not something a Go
+// test can see, so the script is read for the things that must be in it and
+// the things that must not come back: each of these was a bug that showed up
+// only in a browser.
+func TestTheScriptKeepsItsFixes(t *testing.T) {
+	raw, err := os.ReadFile("../../../static/app.js")
+	if err != nil {
+		t.Fatalf("the script of the panel: %v", err)
+	}
+	script := string(raw)
+
+	for _, kept := range []string{
+		// a part is compared with what the panel wrote, not with what the
+		// browser made of it
+		`shown.get(id) === html`,
+		// a button of a form does not submit it
+		"e.preventDefault();\n  if (b.dataset.actForm)",
+		// a group of choices on the page is always sent
+		`const group = (body[key] = body[key] || [])`,
+		// the default of an empty number is already in the unit it is stored in
+		"return def;",
+		// the strong question is read under the name Go writes
+		"el.dataset.confirmStrong", "el.dataset.confirmWhen",
+		// the restore needs a file or a copy, which is sent as "name"
+		"!body.name",
+		// the socket asks who is signed in before it comes back
+		`"/api/session"`,
+		// the camera is only set when there is a graph and nothing saved
+		"function settleCamera()", "paintView();",
+		// the sidebar closes
+		"function setSide(open)",
+	} {
+		if !strings.Contains(script, kept) {
+			t.Errorf("the script does not have %q in it any more", kept)
+		}
+	}
+	for _, gone := range []string{
+		"el.innerHTML !== html", "confirm2", "data-confirm-2", "bk_name", "[data-sync]",
+		`"Scan started"`, // the scan says what it found, once
+	} {
+		if strings.Contains(script, gone) {
+			t.Errorf("the script holds %q again", gone)
+		}
+	}
+	// the default of a number is never multiplied by the scale
+	if regexp.MustCompile(`el\.dataset\.def[^;\n]*\*\s*\(?\+?\(?el\.dataset\.scale`).MatchString(script) ||
+		regexp.MustCompile(`\(el\.value === ""[^)]*def[^)]*\)\s*\*`).MatchString(script) {
+		t.Error("the default of an empty field is scaled again: minutes fields were saved sixty times too large")
+	}
+}

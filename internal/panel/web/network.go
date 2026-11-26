@@ -103,7 +103,7 @@ func Network(state *store.Store, now, lastCheck float64, busy, flapping []string
 // network is the view of the canvas, from one reading of the state.
 func network(f *Facts) *NetworkView {
 	view := &NetworkView{Strip: []Cell{}, Nodes: []Node{}, Columns: []Column{}, Edges: []Edge{}}
-	state, links, working, statusOf := f.State, f.Links, f.Busy, f.Status
+	state, links, statusOf := f.State, f.Links, f.Status
 
 	view.Strip = strip(f)
 	view.Badge = badge(f)
@@ -175,7 +175,7 @@ func network(f *Facts) *NetworkView {
 	}
 
 	// ──────────────────────────────────────────────────────────────── wires
-	view.Edges = append(view.Edges, tunnelWires(links, statusOf, working, f.InUse, state)...)
+	view.Edges = append(view.Edges, tunnelWires(links, statusOf, f.InUse, f.Flapping, state)...)
 	view.Edges = append(view.Edges, domainWires(f.Domains, statusOf)...)
 	view.Edges = append(view.Edges, hopWires(f.Kharej, f.Exits)...)
 	return view
@@ -229,14 +229,30 @@ type forwarded struct {
 	Port    int
 	Method  string
 	Text    string
-	Bad     bool
+	Bad     bool // a target is known not to answer
+	Unknown bool // no target was ever measured: neither up nor down
 	Targets []hopTarget
 }
 
-// hopTarget is one server a forwarded port ends up at.
+// dot is the class of the dot of a forwarded port: red when a target is known
+// not to answer, grey when none of them was ever measured, green otherwise.
+func (e forwarded) dot() string {
+	switch {
+	case e.Bad:
+		return "down"
+	case e.Unknown:
+		return "unknown"
+	}
+	return "up"
+}
+
+// hopTarget is one server a forwarded port ends up at, and whether it was
+// found to answer: yes, no, or unknown. A target nobody has measured yet has
+// no "ok" in the state at all, and that is not the same as "does not answer"
+// — a hop that was never looked at must not be drawn as a broken one.
 type hopTarget struct {
 	ServerID string
-	OK       bool
+	Reach    flag
 }
 
 // exits collects what every foreign server forwards, from the tunnels it
@@ -256,19 +272,22 @@ func exits(state *store.Store, name map[string]string, serverOf map[string]*mode
 				}
 				entry := forwarded{Port: port, Method: exitString(exit, "method"), Targets: []hopTarget{}}
 				texts := []string{}
+				measured := false
 				for _, target := range exitTargets(exit) {
 					serverID := exitString(target, "server_id")
-					ok := exitBool(target, "ok")
-					entry.Targets = append(entry.Targets, hopTarget{ServerID: serverID, OK: ok})
+					reach := exitFlag(target, "ok")
+					entry.Targets = append(entry.Targets, hopTarget{ServerID: serverID, Reach: reach})
 					if serverID != "" {
 						texts = append(texts, name[serverID])
 					} else {
 						texts = append(texts, exitString(target, "addr"))
 					}
-					if !ok {
+					if reach == flagNo {
 						entry.Bad = true
 					}
+					measured = measured || reach != flagUnknown
 				}
+				entry.Unknown = !measured
 				entry.Text = strings.Join(texts, ", ")
 				out[link.KharejID] = append(out[link.KharejID], entry)
 			}
@@ -354,20 +373,24 @@ func exitText(list []forwarded) string {
 }
 
 // tunnelWires is one wire per tunnel.
-func tunnelWires(links []*model.Link, statusOf map[string]string, working, inUse map[string]bool,
+//
+// A tunnel that is not built yet gets its wire too, with the status
+// "pending": whether it is drawn is the operator's choice (the "Not built
+// yet" box of the canvas), and the script is the one that hides it. Leaving
+// it out here would make the box do nothing at all.
+func tunnelWires(links []*model.Link, statusOf map[string]string, inUse, flapping map[string]bool,
 	state *store.Store) []Edge {
 	out := []Edge{}
 	for _, link := range links {
 		status := statusOf[link.ID]
-		if status == "pending" && !working[link.ID] {
-			continue
-		}
 		moved := state.HandedOver(link.ID) && status == "up"
 		standby := status == "up" && !inUse[link.ID] && !moved
 		label := "—"
 		switch {
 		case status == "testing":
 			label = "testing…"
+		case status == "pending":
+			label = "not built"
 		case moved:
 			label = link.Transport + " · ports moved"
 		default:
@@ -380,7 +403,7 @@ func tunnelWires(links []*model.Link, statusOf map[string]string, working, inUse
 			} else if status == "down" {
 				label += " ✕"
 			}
-			if flapping(link, state) {
+			if flapping[link.ID] {
 				label += " ⚡"
 			}
 		}
@@ -436,7 +459,7 @@ func hopWires(kharej []*model.Server, exitsOf map[string][]forwarded) []Edge {
 				}
 				wire.ports = append(wire.ports, entry.Port)
 				wire.methods = append(wire.methods, entry.Method)
-				if !target.OK {
+				if target.Reach == flagNo {
 					wire.wire.Down = true
 				}
 			}
@@ -476,17 +499,6 @@ func hopWires(kharej []*model.Server, exitsOf map[string][]forwarded) []Edge {
 func contains(list []string, text string) bool {
 	for _, item := range list {
 		if item == text {
-			return true
-		}
-	}
-	return false
-}
-
-// flapping is a tunnel that keeps dropping.
-func flapping(link *model.Link, state *store.Store) bool {
-	list, _ := state.Meta["flapping"].([]string)
-	for _, id := range list {
-		if id == link.ID {
 			return true
 		}
 	}

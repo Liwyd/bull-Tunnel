@@ -35,7 +35,7 @@
         <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M0 0H6.86L9.14 8.8276H22.86L25.14 0H32L29.71 15.4483L24 19.8621V28.6897L17.14 32V20.9655H14.86V32L8 28.6897V19.8621L2.29 15.4483L0 0Z" fill="var(--brand)" fill-rule="evenodd"/></svg>
         <span class="word">Bull</span>
       </div>
-      <div class="env"><b>CONSOLE</b><span>PRODUCTION / 01</span></div>
+      <div class="env"><b>CONSOLE</b><span id="env-note">PRODUCTION / 01</span></div>
     </div>
 
     <nav class="side-nav" id="nav">
@@ -274,9 +274,9 @@
         </div>
         <div class="actions" id="set-actions"></div>
       </div>
-      <div class="two">
-        <div class="cols" id="set-body"></div>
+      <div class="two settings-grid">
         <div class="index-group" id="set-index"></div>
+        <div class="cols" id="set-body"></div>
       </div>
     </section>
 
@@ -290,6 +290,7 @@
 
 <aside class="drawer" id="drawer"><div class="drawer-inner" id="drawer-body"></div></aside>
 <div class="scrim" id="scrim"></div>
+<div class="scrim" id="side-scrim"></div>
 <div class="modal" id="modal"><form class="modal-card" id="modal-form"></form></div>
 <div class="tip" id="tip"></div>
 <div class="toasts" id="toasts"></div>

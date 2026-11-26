@@ -116,11 +116,14 @@ func checkRich(key string, on bool, labelHTML string) string {
 }
 
 // checkConfirm is a switch that asks him before it is turned off. The
-// second question is asked when the switch named by when is on.
-func checkConfirm(key string, on bool, labelHTML, confirm, confirm2, when string) string {
+// stronger question is asked instead when the switch named by when is on.
+// The names of the marks are the ones the script reads back from the
+// element's dataset (confirmStrong, confirmWhen): a digit in the middle of
+// a name does not survive the camel-casing of the dataset.
+func checkConfirm(key string, on bool, labelHTML, confirm, strong, when string) string {
 	return fmt.Sprintf(`<label class="check"><input data-field="%s" type="checkbox"%s`+
-		` data-confirm="%s" data-confirm-2="%s" data-confirm-2-when="%s"> <span>%s</span></label>`,
-		escape(key), boolAttr(on), escape(confirm), escape(confirm2), escape(when), labelHTML)
+		` data-confirm="%s" data-confirm-strong="%s" data-confirm-when="%s"> <span>%s</span></label>`,
+		escape(key), boolAttr(on), escape(confirm), escape(strong), escape(when), labelHTML)
 }
 
 // checkEnd is a switch that lines up with the field beside it.
@@ -163,12 +166,6 @@ func area(label, key, value, placeholder string) string {
 // the form does not send is lost.
 func hidden(key, value string) string {
 	return fmt.Sprintf(`<input type="hidden" data-field="%s" value="%s">`, escape(key), escape(value))
-}
-
-// hiddenLines is a hidden field of several lines: the group of a domain.
-func hiddenLines(key string, values []string) string {
-	return fmt.Sprintf(`<input type="hidden" data-field="%s" data-lines value="%s">`,
-		escape(key), escape(strings.Join(values, ", ")))
 }
 
 // hint is a line that explains what is above it; it holds markup.
@@ -409,10 +406,10 @@ func (f *Facts) domainForm(o FormOpts) FormAnswer {
 	}
 
 	fqdn, kharej, ports, ttl, autoFailover := "", "", "", 120, true
-	providerID, group := f.Providers[0].ID, []string{}
+	providerID := f.Providers[0].ID
 	if edit {
 		fqdn, kharej, ttl, autoFailover = domain.FQDN, domain.KharejID, domain.TTL, domain.AutoFailover
-		providerID, group = domain.ProviderID, domain.Group
+		providerID = domain.ProviderID
 		ports = strings.Join(domain.Ports, ", ")
 	}
 
@@ -430,21 +427,60 @@ func (f *Facts) domainForm(o FormOpts) FormAnswer {
 	if edit {
 		// the servers the record is on are not on the form, but the API
 		// writes the whole domain from the body: what is not sent is lost.
-		body.WriteString(hidden("iran_id", domain.IranID) + hidden("primary_iran", domain.PrimaryIran) +
-			hiddenLines("group", group))
+		body.WriteString(hidden("iran_id", domain.IranID) + hidden("primary_iran", domain.PrimaryIran))
 	}
 	body.WriteString(mono("Domain", "fqdn", fqdn, "sub.example.ir", " required"))
 	body.WriteString(`<div class="grid2">` +
 		pick("DNS account", "provider_id", providerID, accounts) +
 		pick("Foreign server (optional)", "kharej_id", kharej, offices) + `</div>`)
-	body.WriteString(mono("The ports of this domain (optional)", "ports", ports, "443, 2053", ""))
+	// the ports are a list for the API: the field of several lines sends
+	// the lines, whatever he separates them with (a comma or a new line)
+	body.WriteString(mono("The ports of this domain (optional)", "ports", ports, "443, 2053", " data-lines"))
 	body.WriteString(hint("The ports the users of this domain connect to. Every port can go to a different foreign server. Leave it empty and, once the record has been read, tick the ports in the domain panel from the tunnels of that Iran server (or, if you picked a foreign server, the ports of the tunnels of that foreign server are used)."))
 	body.WriteString(`<div class="grid2">` +
 		num("TTL (seconds)", "ttl", ttl, 120, 60, 1) +
 		checkEnd("auto_failover", autoFailover, "Automatic failover on a failure") + `</div>`)
+	if edit {
+		body.WriteString(f.groupField(domain))
+	}
 	body.WriteString(formActions(map[bool]string{true: "Save", false: "Add"}[edit]))
 	answer.HTML = body.String()
 	return answer
+}
+
+// groupField is the group of tunnels a domain may use, as the boxes of all
+// the tunnels: the ones of the group are ticked and come first, in the order
+// of the group (the order decides the order of the Iran servers). Nothing
+// ticked is the automatic group. The box group always goes out with the form,
+// so unticking all of them clears the group.
+func (f *Facts) groupField(domain *model.Domain) string {
+	if len(f.Links) == 0 {
+		return ""
+	}
+	ticked := map[string]bool{}
+	ordered := []*model.Link{}
+	for _, id := range domain.Group {
+		if link := f.State.Links.Get(id); link != nil && !ticked[id] {
+			ticked[id] = true
+			ordered = append(ordered, link)
+		}
+	}
+	for _, link := range f.Links {
+		if !ticked[link.ID] {
+			ordered = append(ordered, link)
+		}
+	}
+	boxes := []string{}
+	for _, link := range ordered {
+		name := f.label(link)
+		if link.Label != "" {
+			name += " (" + link.Label + ")"
+		}
+		boxes = append(boxes, fmt.Sprintf(`<label title="%s"><input type="checkbox" data-field="group" data-checks value="%s"%s>%s</label>`,
+			escape(ports(link)), escape(link.ID), boolAttr(ticked[link.ID]), escape(name)))
+	}
+	return `<label>The tunnels of this domain (the group)</label><div class="tchecks">` + strings.Join(boxes, "") + `</div>` +
+		hint("Leave all of them unticked and the panel uses every tunnel that has the ports of this domain, in the priority order of the Iran servers. Tick some and only those are used.")
 }
 
 // withWhy puts a line above a form that is standing in for another one.
@@ -539,7 +575,8 @@ func (f *Facts) settingsForm() FormAnswer {
 		num("How many copies to keep on this server", "backup_keep", s.BackupKeep, 14, 1, 1) + `</div>`)
 	body.WriteString(hint("A backup holds every server, the SSH passwords, the tokens, the domains, the settings and the panel login; always set a password and keep a copy of it somewhere else. Without that password the backup cannot be opened."))
 	body.WriteString(`<div class="btns">` +
-		`<button type="button" class="btn sm" data-act="POST /api/backups/run" data-act-error="error" data-done="The backup was sent to Telegram">Send a backup now</button>` +
+		`<button type="button" class="btn sm" data-act="POST /api/backups/run" data-act-error="telegram_error" ` +
+		`data-act-error-text="The backup was saved on this server, but Telegram did not get it:" data-done="{message}">Back up now</button>` +
 		`<a class="btn sm" href="/api/backups/download" download>Download the backup</a>` +
 		`<button type="button" class="btn sm" data-act-form="restore">Restore a backup…</button></div>`)
 	body.WriteString(`</fieldset>`)
@@ -570,7 +607,8 @@ func (f *Facts) restoreForm(copies []backup.File) FormAnswer {
 	body.WriteString(`<h2>Restore a backup</h2>`)
 	body.WriteString(`<p class="note">Every server, tunnel, domain, DNS account and panel setting is replaced by the content of the backup. Nothing is changed <b>on the servers themselves or in the DNS records</b>; after the restore the panel checks everything again. The current state is backed up separately first.</p>`)
 	body.WriteString(one("Backup file (from Telegram or downloaded)",
-		`<input type="file" data-file="data" accept=".tmbk,.gz,.json">`))
+		`<input type="file" data-file="data" accept=".tmbk,.gz,.json" `+
+			`data-require="Pick a backup file, or one of the copies on this server">`))
 	if len(copies) > 0 {
 		body.WriteString(`<label>Or one of the copies on this server</label><div class="opt-list">`)
 		for _, copy := range copies {
@@ -579,7 +617,7 @@ func (f *Facts) restoreForm(copies []backup.File) FormAnswer {
 			if copy.Encrypted {
 				lock = " · 🔒"
 			}
-			body.WriteString(fmt.Sprintf(`<label class="opt"><input type="radio" data-field="bk_name" value="%s">
+			body.WriteString(fmt.Sprintf(`<label class="opt"><input type="radio" data-field="name" value="%s">
       <span class="grow"><span class="mono">%s</span><span class="sub">%s · %s%s</span></span>
       <a class="btn sm ghost" href="%s" download>Download</a></label>`,
 				escape(copy.Name), escape(copy.Name), escape(clock(copy.Mtime)), escape(size(copy.Size)), lock, download))

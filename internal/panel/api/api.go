@@ -90,6 +90,10 @@ type Server struct {
 	bot          *telegram.Bot
 	backupsStore *backup.Store
 	driver       orch.Driver
+
+	// lastTry is when the backup of the night was last attempted; only the
+	// goroutine of RunBackups reads and writes it.
+	lastTry time.Time
 }
 
 // New returns the web interface of the panel.
@@ -126,7 +130,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/state", s.authed(s.read(s.state)))
 	mux.HandleFunc("/api/view", s.authed(s.read(s.view)))
 	mux.HandleFunc("/api/form", s.authed(s.read(s.form)))
-	mux.HandleFunc("/api/layout", s.authed(s.write(s.layout)))
+	mux.HandleFunc("/api/layout", s.authed(s.layout))
 	mux.HandleFunc("/api/check", s.authed(s.check))
 	mux.HandleFunc("/api/scan", s.authed(s.scan))
 	mux.HandleFunc("/api/discover", s.authed(s.discover))
@@ -171,20 +175,13 @@ func (s *Server) headers(next http.Handler) http.Handler {
 }
 
 // read is a handler that only looks at the state: the lock is taken for
-// reading, so the panel keeps answering while the monitor is writing.
+// reading, so the panel keeps answering while the monitor is writing. A
+// handler that changes the state does not use it: it takes the lock for the
+// write alone, because saving the state file (Changed) takes the lock too.
 func (s *Server) read(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s.store.RLock()
 		defer s.store.RUnlock()
-		next(w, r)
-	}
-}
-
-// write is a handler that changes the state: the lock is taken for writing.
-func (s *Server) write(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		s.store.Lock()
-		defer s.store.Unlock()
 		next(w, r)
 	}
 }
@@ -385,6 +382,7 @@ func (s *Server) view(w http.ResponseWriter, r *http.Request) {
 		Pending:  query.Get("pending") == "1" || query.Get("pending") == "true",
 		Ev:       query.Get("ev"),
 		Open:     query.Get("open"),
+		Demo:     s.demo, // the panel's own fact, not the operator's choice
 	}
 	writeJSON(w, http.StatusOK, web.New(s.store, now(), s.orch.LastCheck(), s.busy(), s.flapping(), opts))
 }
@@ -405,6 +403,7 @@ func (s *Server) form(w http.ResponseWriter, r *http.Request) {
 		copies = s.backupsStore.List()
 	}
 	facts := web.ReadFacts(s.store, now(), s.orch.LastCheck(), s.busy(), s.flapping())
+	facts.Demo = s.demo
 	answer, ok := facts.Form(web.FormOpts{
 		ID:     query.Get("id"),
 		Edit:   query.Get("edit"),

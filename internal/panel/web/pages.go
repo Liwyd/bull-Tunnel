@@ -33,6 +33,10 @@ type Opts struct {
 	Pending  bool   `json:"pending"`
 	Ev       string `json:"ev"`
 	Open     string `json:"open"`
+
+	// Demo says that the panel is the demo. It is not something the
+	// operator picks on the page: the server sets it from its own options.
+	Demo bool `json:"-"`
 }
 
 // The icons of the buttons, as the stylesheet draws them.
@@ -127,10 +131,11 @@ func (f *Facts) sidebar(parts Parts) {
 	parts["ss-on"] = strconv.Itoa(f.Online) + " / " + strconv.Itoa(len(f.Servers))
 	parts["ss-deg"] = strconv.Itoa(f.Unstable)
 	parts["ss-dom"] = strconv.Itoa(f.Healthy)
-	place := "production"
+	place, env := "production", "PRODUCTION / 01"
 	if f.Demo {
-		place = "demo environment"
+		place, env = "demo environment", "DEMO / 01"
 	}
+	parts["env-note"] = env
 	sync := "waiting for the first check"
 	if f.LastCheck > 0 {
 		sync = "last check " + f.ago(f.LastCheck)
@@ -139,7 +144,7 @@ func (f *Facts) sidebar(parts Parts) {
 		escape(strings.ToUpper(place)), escape(sync))
 	flags := []string{}
 	if f.Observe {
-		flags = append(flags, `<button class="flag observe" id="observe-pill" title="The panel only observes and reports; nothing is changed automatically">● Observe mode</button>`)
+		flags = append(flags, `<button type="button" class="flag observe" id="observe-pill" title="The panel only observes and reports; nothing is changed automatically">● Observe mode</button>`)
 	}
 	if len(f.Busy) > 0 {
 		flags = append(flags, fmt.Sprintf(`<span class="flag busy" title="Operations that are running right now">⚙ %d running</span>`,
@@ -149,27 +154,27 @@ func (f *Facts) sidebar(parts Parts) {
 }
 
 // the buttons in the header of every page.
-var addMenu = `<div class="menu"><button class="btn primary menu-btn">` + iconAdd + ` Add</button>
+var addMenu = `<div class="menu"><button type="button" class="btn primary menu-btn">` + iconAdd + ` Add</button>
     <div class="menu-pop">
-      <button data-add="server" data-role="kharej">Foreign server</button>
-      <button data-add="server" data-role="iran">Iran server</button>
-      <button data-add="link">New tunnel</button>
-      <button data-add="provider">DNS account</button>
-      <button data-add="domain">Domain</button>
+      <button type="button" data-add="server" data-role="kharej">Foreign server</button>
+      <button type="button" data-add="server" data-role="iran">Iran server</button>
+      <button type="button" data-add="link">New tunnel</button>
+      <button type="button" data-add="provider">DNS account</button>
+      <button type="button" data-add="domain">Domain</button>
     </div></div>`
 
 // actions is the row of buttons at the top right of a page.
 func (f *Facts) actions(parts Parts) {
-	find := `<button class="btn" id="btn-scan">` + iconScan + ` Find tunnels</button>`
-	check := `<button class="btn" id="btn-check">` + iconCheck + ` Check</button>`
-	test := `<button class="btn primary" id="btn-discover">` + iconZap + ` Test &amp; connect</button>`
+	find := `<button type="button" class="btn" id="btn-scan">` + iconScan + ` Find tunnels</button>`
+	check := `<button type="button" class="btn" id="btn-check">` + iconCheck + ` Check</button>`
+	test := `<button type="button" class="btn primary" id="btn-discover">` + iconZap + ` Test &amp; connect</button>`
 	parts["net-actions"] = find + check + test + addMenu
-	parts["tun-actions"] = `<button class="btn" id="btn-scan-2">` + iconScan + ` Find tunnels</button>` +
-		`<button class="btn" id="btn-check-2">` + iconCheck + ` Check</button>` +
-		`<button class="btn primary" id="btn-discover-2">` + iconZap + ` Test &amp; connect</button>` + addMenu
+	parts["tun-actions"] = `<button type="button" class="btn" id="btn-scan-2">` + iconScan + ` Find tunnels</button>` +
+		`<button type="button" class="btn" id="btn-check-2">` + iconCheck + ` Check</button>` +
+		`<button type="button" class="btn primary" id="btn-discover-2">` + iconZap + ` Test &amp; connect</button>` + addMenu
 	parts["dom-actions"] = addMenu
 	parts["inf-actions"] = addMenu
-	parts["set-actions"] = `<button class="btn" id="btn-settings">` + iconEdit + ` Edit the settings</button>`
+	parts["set-actions"] = `<button type="button" class="btn" id="btn-settings">` + iconEdit + ` Edit the settings</button>`
 }
 
 // strips is the row of numbers under the title of every page.
@@ -248,9 +253,9 @@ func (f *Facts) onboarding(parts Parts) {
 		lines = append(lines, fmt.Sprintf(`<li class="%s">%s%s</li>`, class, tick, step.text))
 	}
 	parts["empty-hint"] = `<div class="empty-card"><h3>Getting started</h3><ol>` + strings.Join(lines, "") + `</ol>` +
-		`<div class="btns"><button class="btn primary sm" data-add="server" data-role="kharej">` + iconAdd + ` Foreign server</button>` +
-		`<button class="btn sm" data-add="server" data-role="iran">` + iconAdd + ` Iran server</button>` +
-		`<button class="btn sm" data-add="domain">` + iconAdd + ` Domain</button></div></div>`
+		`<div class="btns"><button type="button" class="btn primary sm" data-add="server" data-role="kharej">` + iconAdd + ` Foreign server</button>` +
+		`<button type="button" class="btn sm" data-add="server" data-role="iran">` + iconAdd + ` Iran server</button>` +
+		`<button type="button" class="btn sm" data-add="domain">` + iconAdd + ` Domain</button></div></div>`
 }
 
 /* The feed of events is the log under the network page: the rows are

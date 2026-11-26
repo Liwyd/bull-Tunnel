@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/Liwyd/bull-Tunnel/internal/panel/orch"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/probe"
 	"github.com/Liwyd/bull-Tunnel/internal/panel/store"
+	"github.com/Liwyd/bull-Tunnel/internal/panel/telegram"
 )
 
 // The endpoints that talk to the outside: the measurement of the path, the
@@ -159,6 +161,14 @@ func agentConfig(server *model.Server, provider *model.DNSProvider) string {
 	}, "\n")
 }
 
+// copyOfServer is a server as it is now, for the work that goes on without the
+// lock (the files and the commands that are sent to it). The caller holds the
+// lock of the state.
+func (s *Server) copyOfServer(server *model.Server) *model.Server {
+	copied := *server
+	return &copied
+}
+
 // installAgent puts the command channel on a server and starts it.
 func (s *Server) installAgent(w http.ResponseWriter, r *http.Request, server *model.Server) {
 	provider, err := s.commandProvider()
@@ -170,9 +180,15 @@ func (s *Server) installAgent(w http.ResponseWriter, r *http.Request, server *mo
 		writeError(w, http.StatusBadRequest, "the command channel is only for the servers the panel dials out to")
 		return
 	}
+	// the key is written to the server the monitor reads too, so it is
+	// written under the lock of the state (and read back under it, because
+	// the agent's file is written with it a moment later)
+	s.store.Lock()
 	if server.CommandKey == "" {
 		server.CommandKey = model.NewToken()
 	}
+	server = s.copyOfServer(server)
+	s.store.Unlock()
 	if s.driver == nil {
 		writeError(w, http.StatusBadGateway, "the panel has no way to reach the servers")
 		return
@@ -290,7 +306,10 @@ func (s *Server) readAnswer(w http.ResponseWriter, r *http.Request, server *mode
 
 // commandProvider is the DNS account the command channel uses.
 func (s *Server) commandProvider() (*model.DNSProvider, error) {
-	provider := s.store.Providers.Get(s.store.Settings.CommandProviderID)
+	s.store.RLock()
+	id := s.store.Settings.CommandProviderID
+	s.store.RUnlock()
+	provider := s.store.Providers.Get(id)
 	if provider == nil {
 		return nil, fmt.Errorf("no DNS account is selected for the command channel (Settings → Command channel)")
 	}
@@ -305,13 +324,21 @@ func (s *Server) dnsClient(provider *model.DNSProvider) (dns.Client, error) {
 	return s.dnsFactory(provider)
 }
 
+// telegramConfig is the Telegram settings, read under the lock of the state:
+// the settings page writes the map they live in.
+func (s *Server) telegramConfig() model.Telegram {
+	s.store.RLock()
+	defer s.store.RUnlock()
+	return s.store.Settings.TG()
+}
+
 // telegramTest sends a test message to the operator.
 func (s *Server) telegramTest(w http.ResponseWriter, r *http.Request) {
 	if s.bot == nil {
 		writeError(w, http.StatusBadGateway, "the panel has no bot")
 		return
 	}
-	settings := s.store.Settings.TG()
+	settings := s.telegramConfig()
 	if err := s.bot.Test(&settings); err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -345,14 +372,58 @@ func (s *Server) backups(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// runBackup makes a backup right now.
+// runBackup makes a backup right now: it is written in the folder of the
+// backups, and sent to Telegram when Telegram is set up. The answer says
+// what really happened, in a sentence the page shows as it is: a backup that
+// is on this server but did not reach Telegram is not "sent to Telegram".
 func (s *Server) runBackup(w http.ResponseWriter, r *http.Request) {
-	name, err := s.makeBackup("manual")
+	path, blob, err := s.writeBackup("manual")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "name": name})
+	sent, configured, sendErr := s.sendBackup(filepath.Base(path), blob)
+	writeJSON(w, http.StatusOK, backupAnswer(path, sent, configured, sendErr))
+}
+
+// backupAnswer is what the panel says about a backup it has just written: it
+// is on this server in any case, and whether Telegram got it is said as it
+// was — sent, not set up, or failed with the reason. The "message" is a
+// sentence the page shows as it is; "telegram_error" is set only when the
+// operator has to know that the copy did not leave the server. "name" is the
+// path of the file, as it always was.
+func backupAnswer(path string, sent int, configured bool, sendErr error) map[string]any {
+	file := filepath.Base(path)
+	answer := map[string]any{"ok": true, "name": path, "file": file}
+	switch {
+	case !configured:
+		answer["telegram"] = "not_configured"
+		answer["message"] = "The backup was saved on this server (" + file + "); Telegram is not set up, so it was not sent"
+	case sendErr != nil:
+		answer["telegram"] = "failed"
+		answer["telegram_error"] = sendErr.Error()
+		answer["message"] = "The backup was saved on this server (" + file + "), but it was not sent to Telegram"
+	default:
+		answer["telegram"] = "sent"
+		answer["sent"] = sent
+		answer["message"] = fmt.Sprintf("The backup was saved on this server (%s) and sent to Telegram (%d %s)",
+			file, sent, map[bool]string{true: "chat", false: "chats"}[sent == 1])
+	}
+	return answer
+}
+
+// sendBackup sends a backup to the chats of the Telegram bot. It says how
+// many chats got it, and whether Telegram is set up at all: a panel with no
+// bot, a bot that is switched off, or no chat to send to has nothing to
+// fail, and is not an error.
+func (s *Server) sendBackup(name string, blob []byte) (sent int, configured bool, err error) {
+	settings := s.telegramConfig()
+	if s.bot == nil || !settings.Enabled || settings.BotToken == "" || len(settings.ChatIDs) == 0 {
+		return 0, false, nil
+	}
+	caption := "💾 bull-Tunnel backup\n<code>" + telegram.Escape(name) + "</code>"
+	sent, err = s.bot.SendFile(name, blob, caption, &settings)
+	return sent, true, err
 }
 
 // downloadBackup sends a backup to the browser.
@@ -361,6 +432,10 @@ func (s *Server) downloadBackup(w http.ResponseWriter, r *http.Request) {
 	var blob []byte
 	var err error
 	if name != "" {
+		if s.backupsStore == nil {
+			writeError(w, http.StatusBadGateway, "the panel has no backup folder")
+			return
+		}
 		blob, err = s.backupsStore.Read(name)
 	} else {
 		blob, err = s.packBackup()
@@ -391,6 +466,10 @@ func (s *Server) restoreBackup(w http.ResponseWriter, r *http.Request) {
 	var blob []byte
 	var err error
 	if body.Name != "" {
+		if s.backupsStore == nil {
+			writeError(w, http.StatusBadGateway, "the panel has no backup folder")
+			return
+		}
 		blob, err = s.backupsStore.Read(body.Name)
 	} else {
 		if len(body.Data) > 70000000 {
@@ -405,7 +484,7 @@ func (s *Server) restoreBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	password := body.Password
 	if password == "" {
-		password = s.store.Settings.BackupPassword
+		password = s.backupPassword()
 	}
 	data, err := backup.Unpack(blob, password)
 	if err != nil {
@@ -417,31 +496,55 @@ func (s *Server) restoreBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// the state being replaced is kept, in case this was a mistake
-	s.makeBackup("pre")
+	if s.backupsStore != nil {
+		if _, err := s.makeBackup("pre"); err != nil {
+			writeError(w, http.StatusInternalServerError, "the state that is there could not be kept first: "+err.Error())
+			return
+		}
+	}
 	raw, _ := jsonMarshal(data.State)
-	if err := s.store.Apply(raw); err != nil {
+	s.store.Lock()
+	err = s.store.Apply(raw)
+	if err == nil && body.Observe {
+		s.store.Settings.ObserveOnly = true
+	}
+	s.store.Unlock()
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if body.Observe {
-		s.store.Settings.ObserveOnly = true
-	}
-	if body.RestoreLogin && data.Auth != nil {
+	if body.RestoreLogin && data.Auth != nil && s.auth != nil {
 		if hash, there := data.Auth["hash"]; there && hash != "" {
 			s.auth.SetData(data.Auth)
 		}
 	}
 	s.orch.Reset()
 	s.store.Save()
+	s.store.RLock()
+	observing := s.store.Settings.ObserveOnly
+	s.store.RUnlock()
 	when := time.Unix(int64(data.Created), 0).Format("2006-01-02 15:04")
-	s.orch.Emit("warning", "backup", fmt.Sprintf("Backup from %s restored (%s)%s", when, backup.Summary(data),
-		map[bool]string{true: "; the panel is in observe mode", false: ""}[s.store.Settings.ObserveOnly]), true, nil)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	summary := backup.Summary(data)
+	s.orch.Emit("warning", "backup", fmt.Sprintf("Backup from %s restored (%s)%s", when, summary,
+		map[bool]string{true: "; the panel is in observe mode", false: ""}[observing]), true, nil)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "summary": summary, "created": data.Created})
 }
 
-// packBackup is the backup of the state, as it is sent to the browser.
+// backupPassword is the password the backups are written with.
+func (s *Server) backupPassword() string {
+	s.store.RLock()
+	defer s.store.RUnlock()
+	return s.store.Settings.BackupPassword
+}
+
+// packBackup is the backup of the state, as it is sent to the browser. The
+// state is read, and turned into the map the file holds, under the lock: the
+// maps of the state are written by the monitor and by the settings page.
 func (s *Server) packBackup() ([]byte, error) {
+	s.store.RLock()
 	state, err := jsonMarshal(s.store.Raw())
+	password := s.store.Settings.BackupPassword
+	s.store.RUnlock()
 	if err != nil {
 		return nil, err
 	}
@@ -449,28 +552,46 @@ func (s *Server) packBackup() ([]byte, error) {
 	if s.auth != nil {
 		auth = s.auth.Data()
 	}
-	data := backup.Make(state, auth, s.backupsStore.Env(), s.version)
-	return backup.Pack(data, s.store.Settings.BackupPassword)
+	env := ""
+	if s.backupsStore != nil {
+		env = s.backupsStore.Env()
+	}
+	data := backup.Make(state, auth, env, s.version)
+	return backup.Pack(data, password)
 }
 
 // makeBackup writes a backup in the folder.
 func (s *Server) makeBackup(tag string) (string, error) {
+	path, _, err := s.writeBackup(tag)
+	return path, err
+}
+
+// writeBackup writes a backup in the folder and gives back where it is and
+// what it holds (the bytes are what is sent to Telegram). The moment is
+// written in the state afterwards: the map is written under the lock, and
+// the file is saved with the lock released.
+func (s *Server) writeBackup(tag string) (string, []byte, error) {
+	if s.backupsStore == nil {
+		return "", nil, fmt.Errorf("the panel has no backup folder")
+	}
 	blob, err := s.packBackup()
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	name, err := s.backupsStore.Write(blob, s.store.Settings.BackupPassword != "", tag)
+	path, err := s.backupsStore.Write(blob, backup.IsEncrypted(blob), tag)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
+	s.store.Lock()
 	s.store.Meta["last_backup"] = now()
+	s.store.Unlock()
 	s.store.Save()
-	return name, nil
+	return path, blob, nil
 }
 
 // backupExtension is the name of a backup: encrypted or not.
 func (s *Server) backupExtension() string {
-	if s.store.Settings.BackupPassword != "" {
+	if s.backupPassword() != "" {
 		return "tmbk"
 	}
 	return "json.gz"
@@ -494,3 +615,17 @@ func jsonMarshal(value any) (map[string]any, error) {
 var _ = orch.Driver(nil)
 var _ = os.Getenv
 var _ = strconv.Itoa
+
+// BackupNow is the backup the Telegram bot is asked for with /backup: the
+// same backup as the button of the page, written on this server and sent to
+// the chats, and the sentence the bot answers with.
+func (s *Server) BackupNow() (string, error) {
+	path, blob, err := s.writeBackup("manual")
+	if err != nil {
+		return "", err
+	}
+	sent, configured, sendErr := s.sendBackup(filepath.Base(path), blob)
+	answer := backupAnswer(path, sent, configured, sendErr)
+	message, _ := answer["message"].(string)
+	return message, nil
+}

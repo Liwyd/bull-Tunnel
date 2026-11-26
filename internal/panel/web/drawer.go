@@ -58,7 +58,7 @@ func dHead(title, sub, status string) string {
 			escape(status), escape(say(status)))
 	}
 	return fmt.Sprintf(`<div class="d-head"><div style="flex:1;min-width:0"><h2>%s</h2><div class="d-sub">%s</div></div>`+
-		`<div class="right">%s<button class="btn icon" data-close aria-label="Close">✕</button></div></div>`,
+		`<div class="right">%s<button type="button" class="btn icon" data-close aria-label="Close">✕</button></div></div>`,
 		title, sub, label)
 }
 
@@ -137,7 +137,7 @@ func (f *Facts) handoverBox(l *model.Link) string {
 	minutes := f.State.Settings.FailbackAfter / 60
 	if carrier, there := f.State.Handover[l.ID]; there && carrier != "" {
 		return fmt.Sprintf(`<div class="box"><h4>Port handover</h4><p class="note">The ports of this tunnel are open on <b>%s</b> (the same Iran server) right now, because this tunnel had a problem. They come back on their own once it stays up for %d minutes without a drop.</p>
-       <div class="btns"><button class="btn sm" data-act="POST /api/links/%s/release" data-done="The ports came back">Bring them back now</button></div></div>`,
+       <div class="btns"><button type="button" class="btn sm" data-act="POST /api/links/%s/release" data-done="The ports came back">Bring them back now</button></div></div>`,
 			escape(f.label(f.State.Links.Get(carrier))), minutes, escape(l.ID))
 	}
 	carried := []string{}
@@ -166,6 +166,8 @@ func (f *Facts) portsBox(l *model.Link) string {
 		class := "up"
 		if exitBad(exit) {
 			class = "down"
+		} else if !exitMeasured(exit) {
+			class = "unknown"
 		}
 		rows = append(rows, fmt.Sprintf(`<div class="opt"><span class="dot %s"></span><span class="grow">`+
 			`<span style="text-align:left"><span class="mono">%s</span> → %s ↪ %s</span>%s</span></div>`,
@@ -181,7 +183,7 @@ func (f *Facts) portsBox(l *model.Link) string {
     <p class="hint">One port per line: “<span class="mono">443</span>” means port 443 of this Iran server goes to the same port on the foreign server; “<span class="mono">8443=2096</span>” means 8443 inside goes to 2096 outside; “<span class="mono">2053-2060</span>” is a range.</p>
     %s
     %s
-    <div class="btns"><button class="btn primary sm" data-act="PUT /api/links/%s" data-done="The ports are saved and are being applied on the Iran server">Save and apply</button></div>
+    <div class="btns"><button type="button" class="btn primary sm" data-act="PUT /api/links/%s" data-done="The ports are saved and are being applied on the Iran server">Save and apply</button></div>
     </form></div>`,
 		escape(f.Name[l.IranID]), escape(strings.Join(l.Ports, "\n")), exits,
 		check("accept_udp", l.AcceptUDP, "Forward UDP as well"), escape(l.ID))
@@ -197,6 +199,9 @@ func (f *Facts) protocolBox(l *model.Link) string {
 		// nothing runs on this tunnel yet: Apply starts from the first
 		// candidate, the way the drawer always did
 		selected = all[0]
+		if candidates := f.State.Settings.CandidateTransports; len(candidates) > 0 {
+			selected = candidates[0]
+		}
 	}
 	tiles := []string{}
 	for _, transport := range all {
@@ -235,8 +240,8 @@ func (f *Facts) protocolBox(l *model.Link) string {
     <div class="tgrid">%s</div>
     %s
     <div class="btns">
-      <button class="btn primary sm" data-act="POST /api/links/%s/transport" data-done="Switching to {transport} has started">Apply</button>
-      <button class="btn sm" data-act="POST /api/links/%s/retest" data-done="Testing every protocol has started">Test every protocol</button>
+      <button type="button" class="btn primary sm" data-act="POST /api/links/%s/transport" data-done="Switching to {transport} has started">Apply</button>
+      <button type="button" class="btn sm" data-act="POST /api/links/%s/retest" data-done="Testing every protocol has started">Test every protocol</button>
     </div>
     </form></div>`,
 		strings.Join(tiles, ""),
@@ -247,20 +252,32 @@ func (f *Facts) protocolBox(l *model.Link) string {
 // settingsBox is the name, the place among the tunnels of the pair, the
 // carriers the automatic repair may use — and the buttons that forget the
 // tunnel or delete it.
+//
+// A tunnel with no carriers of its own follows the global list of the
+// settings. That is a state of its own, not a list that happens to be the
+// global one: if the boxes were all the form sent, saving the name would
+// turn "follow the global list" into a fixed copy of today's list, and a
+// carrier the operator later adds to the settings would never reach this
+// tunnel. So the form says which of the two he means, and ticking a box
+// is what turns the second one on.
 func (f *Facts) settingsBox(l *model.Link) string {
 	boxes := []string{}
+	global := len(l.Allowed) == 0
 	allowed := l.Allowed
-	if len(allowed) == 0 {
+	if global {
 		allowed = f.State.Settings.CandidateTransports
 	}
 	for _, transport := range f.carriers() {
-		boxes = append(boxes, fmt.Sprintf(`<label><input type="checkbox" data-field="allowed" data-checks value="%s"%s>%s</label>`,
-			escape(transport), boolAttr(contains(allowed, transport)), escape(transport)))
+		boxes = append(boxes, fmt.Sprintf(`<label><input type="checkbox" data-field="allowed" data-checks data-implies="%s" value="%s"%s>%s</label>`,
+			escape(`[data-field="allowed_mode"][value="custom"]`), escape(transport), boolAttr(contains(allowed, transport)), escape(transport)))
 	}
-	deleteButton := fmt.Sprintf(`<button class="btn sm danger" data-act="DELETE /api/links/%s?purge=1" data-confirm="Delete the tunnel %s from the panel and from the servers?" data-done="Deleted">Delete the tunnel</button>`,
+	mode := fmt.Sprintf(`<label class="check"><input type="radio" name="allowed-mode" data-field="allowed_mode" value="global"%s> <span>Follow the global list of the settings</span></label>`+
+		`<label class="check"><input type="radio" name="allowed-mode" data-field="allowed_mode" value="custom"%s> <span>Only the protocols ticked here</span></label>`,
+		boolAttr(global), boolAttr(!global))
+	deleteButton := fmt.Sprintf(`<button type="button" class="btn sm danger" data-act="DELETE /api/links/%s?purge=1" data-confirm="Delete the tunnel %s from the panel and from the servers?" data-done="Deleted">Delete the tunnel</button>`,
 		escape(l.ID), escape(f.label(l)))
 	if !l.Managed {
-		deleteButton = fmt.Sprintf(`<button class="btn sm" data-act="DELETE /api/links/%s" data-confirm="Remove the tunnel %s from the panel? (the servers are left alone)" data-done="Deleted">Forget it (it stays on the server)</button>`,
+		deleteButton = fmt.Sprintf(`<button type="button" class="btn sm" data-act="DELETE /api/links/%s" data-confirm="Remove the tunnel %s from the panel? (the servers are left alone)" data-done="Deleted">Forget it (it stays on the server)</button>`,
 			escape(l.ID), escape(f.label(l))) + deleteButton
 	}
 	return fmt.Sprintf(`<div class="box"><h4>Settings</h4>
@@ -269,8 +286,9 @@ func (f *Facts) settingsBox(l *model.Link) string {
     %s
     %s
     <label>The protocols the automatic repair of this tunnel tries</label>
+    %s
     <div class="tchecks">%s</div>
-    <div class="btns"><button class="btn sm" data-act="PUT /api/links/%s" data-done="Saved">Save</button>
+    <div class="btns"><button type="button" class="btn sm" data-act="PUT /api/links/%s" data-done="Saved">Save</button>
       %s</div>
     </form></div>`,
 		text("Display name", "label", l.Label, "", ""),
@@ -279,7 +297,7 @@ func (f *Facts) settingsBox(l *model.Link) string {
 			hint("For a path that connects and then stalls on large transfers: try 1400, then 1360 or 1280. 0 leaves the engine's own value. The setting is written on both ends."),
 		num("Heartbeat (seconds)", "heartbeat", l.Heartbeat, 0, 0, 1)+
 			hint("How often the Iran server sends a keep-alive down the control channel: a lower number notices a dead server sooner. 0 leaves the engine's own rhythm (a beat every 10 seconds). Written on the Iran server only."),
-		strings.Join(boxes, ""), escape(l.ID), deleteButton)
+		mode, strings.Join(boxes, ""), escape(l.ID), deleteButton)
 }
 
 /* -------------------------------------------------------------- a server */
@@ -354,8 +372,8 @@ func (f *Facts) serverDrawer(s *model.Server) string {
     <dt>Priority</dt><dd>%d%s</dd>
     %s
   </dl>
-  <div class="btns"><button class="btn sm" data-edit-server="%s">%s Edit</button><button class="btn sm" data-test-server="%s">Test SSH</button>
-  <button class="btn sm" data-act="POST /api/scan" data-done="{added} existing tunnels were found and added">%s Find the tunnels</button><button class="btn sm" data-act="POST /api/servers/%s/install" data-done="Installation has started">Install the tunnel engine</button><button class="btn sm danger" data-act="DELETE /api/servers/%s" data-confirm="Remove the server from the panel? The tunnels the panel built are deleted from the servers; your own tunnels are left alone." data-done="Deleted">%s Delete</button></div></div>`,
+  <div class="btns"><button type="button" class="btn sm" data-edit-server="%s">%s Edit</button><button type="button" class="btn sm" data-test-server="%s">Test SSH</button>
+  <button type="button" class="btn sm" data-act="POST /api/scan" data-done="{added} existing tunnels were found and added">%s Find the tunnels</button><button type="button" class="btn sm" data-act="POST /api/servers/%s/install" data-done="Installation has started">Install the tunnel engine</button><button type="button" class="btn sm danger" data-act="DELETE /api/servers/%s" data-confirm="Remove the server from the panel? The tunnels the panel built are deleted from the servers; your own tunnels are left alone." data-done="Deleted">%s Delete</button></div></div>`,
 		escape(s.SSHUser), escape(s.IP), s.SSHPort,
 		escape(orDash(s.HostKey)),
 		milliseconds(s.SSHLatencyMS), escape(f.ago(s.LastSeen)),
@@ -368,10 +386,10 @@ func (f *Facts) serverDrawer(s *model.Server) string {
 		out.WriteString(f.commandBox(s))
 	}
 	out.WriteString(fmt.Sprintf(`<div class="box"><h4>Tunnels (%d)</h4>%s
-    <div class="btns"><button class="btn sm" data-new-link="%s">%s New tunnel</button>`,
+    <div class="btns"><button type="button" class="btn sm" data-new-link="%s">%s New tunnel</button>`,
 		len(built), rowsOf(built), escape(s.ID), iconAdd))
 	if len(brokenIDs) > 0 {
-		out.WriteString(fmt.Sprintf(`<button class="btn sm" data-discover-links="%s">Rebuild the broken tunnels</button>`,
+		out.WriteString(fmt.Sprintf(`<button type="button" class="btn sm" data-discover-links="%s">Rebuild the broken tunnels</button>`,
 			escape(strings.Join(brokenIDs, ","))))
 	}
 	out.WriteString(`</div></div>`)
@@ -379,10 +397,7 @@ func (f *Facts) serverDrawer(s *model.Server) string {
 	if s.Role == model.Kharej && len(f.Exits[s.ID]) > 0 {
 		rows := []string{}
 		for _, entry := range f.Exits[s.ID] {
-			class := "up"
-			if entry.Bad {
-				class = "down"
-			}
+			class := entry.dot()
 			rows = append(rows, fmt.Sprintf(`<div class="opt"><span class="dot %s"></span><span class="grow">`+
 				`<span style="text-align:left"><span class="mono">%d</span> ↪ %s</span>%s</span></div>`,
 				class, entry.Port, escape(entry.Text), entryTargets(entry, f.Name)))
@@ -397,7 +412,7 @@ func (f *Facts) serverDrawer(s *model.Server) string {
 			ids = append(ids, link.ID)
 		}
 		out.WriteString(fmt.Sprintf(`<div class="box"><h4>Pairs without a tunnel</h4>%s
-    <div class="btns"><button class="btn sm" data-discover-links="%s">Build with the best protocol</button></div></div>`,
+    <div class="btns"><button type="button" class="btn sm" data-discover-links="%s">Build with the best protocol</button></div></div>`,
 			rowsOf(offers), escape(strings.Join(ids, ","))))
 	}
 	return out.String()
@@ -424,7 +439,7 @@ func (f *Facts) probeBox(s *model.Server) string {
     <form>
     <input type="hidden" data-field="server" value="%s">
     <div class="grid2"><label>%s<select data-field="peer">%s</select></label>
-    <div class="btns"><button class="btn sm primary" data-act="POST /api/probe" data-done="Best: {best}" data-act-error="error" data-act-error-text="The measurement failed:">⚡ Measure the connection</button></div></div>
+    <div class="btns"><button type="button" class="btn sm primary" data-act="POST /api/probe" data-done="Best: {best}" data-act-error="error" data-act-error-text="The measurement failed:">⚡ Measure the connection</button></div></div>
     </form>
     %s</div>`,
 		hint, escape(s.ID), escape(label), strings.Join(options, ""), f.probeTable(s))
@@ -478,7 +493,7 @@ func (f *Facts) probeTable(s *model.Server) string {
 		if link != nil {
 			verdict += fmt.Sprintf(` <form style="display:inline"><input type="hidden" data-field="transport" value="%s">`+
 				`<input type="checkbox" data-field="pin" checked hidden>`+
-				`<button class="btn sm primary" data-act="POST /api/links/%s/transport" data-done="The protocol %s was applied">Apply</button></form>`,
+				`<button type="button" class="btn sm primary" data-act="POST /api/links/%s/transport" data-done="The protocol %s was applied">Apply</button></form>`,
 				escape(row.Transport), escape(link.ID), escape(row.Transport))
 		}
 		rows = append(rows, fmt.Sprintf(`<tr><td class="mono">%s%s</td><td class="mono">%s</td><td class="mono">%s</td><td class="mono">%s</td><td>%s</td></tr>`,
@@ -497,9 +512,9 @@ func (f *Facts) commandBox(s *model.Server) string {
     <p class="hint">When not even TCP is possible, the panel writes the command into a TXT record and the agent on the server reads and runs it.</p>
     <form>
     <input type="hidden" data-field="action" value="status">
-    <div class="btns"><button class="btn sm" data-act="POST /api/servers/%s/agent" data-done="The command channel is ready ({command_record})">Install the command channel</button>
-      <button class="btn sm" data-act="POST /api/servers/%s/command" data-done="The command was sent ({id}); read the answer with “Read the answer”">Send the “status” command</button>
-      <button class="btn sm" data-act="GET /api/servers/%s/command" data-act-into="#cmd-out" data-act-key="result,error" data-act-else="No answer yet">Read the answer</button></div>
+    <div class="btns"><button type="button" class="btn sm" data-act="POST /api/servers/%s/agent" data-done="The command channel is ready ({command_record})">Install the command channel</button>
+      <button type="button" class="btn sm" data-act="POST /api/servers/%s/command" data-done="The command was sent ({id}); read the answer with “Read the answer”">Send the “status” command</button>
+      <button type="button" class="btn sm" data-act="GET /api/servers/%s/command" data-act-into="#cmd-out" data-act-key="result,error" data-act-else="No answer yet">Read the answer</button></div>
     </form>
     <div id="cmd-out" class="sub mono"></div></div>`,
 		escape(s.ID), escape(s.ID), escape(s.ID))
@@ -549,7 +564,7 @@ func (f *Facts) domainDrawer(d *model.Domain) string {
     <dl class="kv"><dt>Record IP</dt><dd class="mono">%s</dd><dt>TTL</dt><dd class="mono">%ds</dd>
     <dt>Last switch</dt><dd>%s</dd><dt>Automatic failover</dt><dd>%s</dd>
     %s</dl>
-    <div class="btns"><button class="btn sm" data-edit-domain="%s">%s Edit</button><button class="btn sm" data-act="POST /api/domains/%s/sync" data-done="The record was read">%s Read the record from DNS</button><button class="btn sm danger" data-act="DELETE /api/domains/%s" data-confirm="Remove the domain from the panel? (the DNS record is left alone)" data-done="Deleted">%s Delete</button></div></div>`,
+    <div class="btns"><button type="button" class="btn sm" data-edit-domain="%s">%s Edit</button><button type="button" class="btn sm" data-act="POST /api/domains/%s/sync" data-done="The record was read">%s Read the record from DNS</button><button type="button" class="btn sm danger" data-act="DELETE /api/domains/%s" data-confirm="Remove the domain from the panel? (the DNS record is left alone)" data-done="Deleted">%s Delete</button></div></div>`,
 		escape(d.FQDN), escape(where), note, f.failback(d),
 		escape(orDash(d.CurrentIP)), d.TTL, escape(f.ago(d.LastSwitch)), onOff(d.AutoFailover),
 		errorLine(d.Error),
@@ -602,7 +617,7 @@ func (f *Facts) routesBox(d *model.Domain, iran *model.Server) string {
       <span class="grow"><span style="text-align:left"><span class="mono">%s</span> → %s%s</span>
       <span class="sub mono">%s</span></span>`, class, escape(one.Spec), escape(via), exitSuffix(one.Exit), escape(sub))
 		if link != nil {
-			line += fmt.Sprintf(`<button class="btn sm" data-link="%s">Tunnel</button>`, escape(link.ID))
+			line += fmt.Sprintf(`<button type="button" class="btn sm" data-link="%s">Tunnel</button>`, escape(link.ID))
 		}
 		rows = append(rows, line+"</div>")
 	}
@@ -655,7 +670,7 @@ func (f *Facts) routesBox(d *model.Domain, iran *model.Server) string {
     <label>Which ports does this domain use?</label>
     <div class="tchecks">%s</div>
     <p class="hint">A domain only counts as healthy when all of these ports work, and it only moves to another Iran server that has all of them healthy.</p>
-    <div class="btns"><button class="btn primary sm" data-act="PUT /api/domains/%s" data-done="The ports of the domain are saved">Save the ports</button></div>
+    <div class="btns"><button type="button" class="btn primary sm" data-act="PUT /api/domains/%s" data-done="The ports of the domain are saved">Save the ports</button></div>
     </form></div>`,
 		escape(iran.Name), list, boxes, escape(d.ID))
 }
@@ -682,12 +697,12 @@ func (f *Facts) iranBox(d *model.Domain) string {
 		buttons := ""
 		if id != order[0] {
 			buttons += fmt.Sprintf(`<form><input type="hidden" data-field="iran_id" value="%s">`+
-				`<button class="btn sm ghost" data-act="POST /api/domains/%s/primary" data-done="%s is now the primary server of %s" title="Once the failure is over, the traffic comes back to this server">Make it primary</button></form>`,
+				`<button type="button" class="btn sm ghost" data-act="POST /api/domains/%s/primary" data-done="%s is now the primary server of %s" title="Once the failure is over, the traffic comes back to this server">Make it primary</button></form>`,
 				escape(id), escape(d.ID), escape(server.Name), escape(d.FQDN))
 		}
 		if id != d.IranID {
 			buttons += fmt.Sprintf(`<form><input type="hidden" data-field="iran_id" value="%s">`+
-				`<button class="btn sm" data-act="POST /api/domains/%s/switch" data-confirm="Change the record of %s in DNS to %s (%s)?" data-done="The record was changed">Switch</button></form>`,
+				`<button type="button" class="btn sm" data-act="POST /api/domains/%s/switch" data-confirm="Change the record of %s in DNS to %s (%s)?" data-done="The record was changed">Switch</button></form>`,
 				escape(id), escape(d.ID), escape(d.FQDN), escape(server.Name), escape(server.IP))
 		}
 		rows = append(rows, fmt.Sprintf(`<div class="opt"><span class="dot %s"></span>
@@ -723,7 +738,7 @@ func (f *Facts) groupBox(d *model.Domain) string {
 	return fmt.Sprintf(`<div class="box"><h4>Group</h4>
     <p class="hint">%s</p>
     %s
-    <div class="btns"><button class="btn sm" data-act-form="domain" data-act-edit="%s">Edit group</button></div></div>`,
+    <div class="btns"><button type="button" class="btn sm" data-act-form="domain" data-act-edit="%s">Edit group</button></div></div>`,
 		mode, list, escape(d.ID))
 }
 
@@ -821,11 +836,14 @@ func entryTargets(entry forwarded, name map[string]string) string {
 		if shown == "" {
 			shown = target.ServerID
 		}
-		if !target.OK {
+		switch target.Reach {
+		case flagNo:
 			parts = append(parts, fmt.Sprintf(`<b style="color:var(--down)">%s does not answer</b>`, escape(shown)))
-			continue
+		case flagYes:
+			parts = append(parts, fmt.Sprintf(`%s <span style="color:var(--ok)">✓</span>`, escape(shown)))
+		default: // never measured: neither a tick nor a cross
+			parts = append(parts, escape(shown))
 		}
-		parts = append(parts, fmt.Sprintf(`%s <span style="color:var(--ok)">✓</span>`, escape(shown)))
 	}
 	if len(parts) == 0 {
 		return ""
@@ -852,6 +870,17 @@ func exitTextOf(exit map[string]any, name map[string]string) string {
 func exitBad(exit map[string]any) bool {
 	for _, target := range exitTargets(exit) {
 		if exitFlag(target, "ok") == flagNo {
+			return true
+		}
+	}
+	return false
+}
+
+// exitMeasured tells whether any target of a forwarded port was ever measured:
+// a port whose targets nobody has looked at is neither up nor down.
+func exitMeasured(exit map[string]any) bool {
+	for _, target := range exitTargets(exit) {
+		if exitFlag(target, "ok") != flagUnknown {
 			return true
 		}
 	}

@@ -25,8 +25,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+	// The zone of the nightly backup is a name ("Asia/Tehran"), and a name
+	// is only read when the machine has the zone database. A minimal server
+	// does not; this carries the database in the binary instead.
+	_ "time/tzdata"
 
 	"golang.org/x/crypto/scrypt"
 )
@@ -328,15 +333,80 @@ func (s *Store) List() []File {
 	return out
 }
 
-// Prune keeps the newest backups and removes the others.
+// Prune keeps the newest backups and removes the others. A folder that holds
+// fewer files than it may keep is left as it is.
 func (s *Store) Prune(keep int) {
 	files := s.List()
 	if keep < 1 {
 		keep = 1
 	}
+	if len(files) <= keep {
+		return
+	}
 	for _, file := range files[keep:] {
 		os.Remove(filepath.Join(s.Dir, file.Name))
 	}
+}
+
+// DefaultZone is the zone of the nightly backup when the settings name none,
+// or one this machine cannot read.
+const DefaultZone = "Asia/Tehran"
+
+// ParseClock reads the time of the night as the settings write it, "HH:MM".
+func ParseClock(text string) (hour, minute int, ok bool) {
+	hh, mm, found := strings.Cut(strings.TrimSpace(text), ":")
+	if !found || len(hh) < 1 || len(hh) > 2 || len(mm) != 2 {
+		return 0, 0, false
+	}
+	hour, err1 := strconv.Atoi(hh)
+	minute, err2 := strconv.Atoi(mm)
+	if err1 != nil || err2 != nil || hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return 0, 0, false
+	}
+	return hour, minute, true
+}
+
+// KnownZone says whether the name is a time zone this machine can read.
+func KnownZone(name string) bool {
+	_, err := time.LoadLocation(name)
+	return err == nil
+}
+
+// Location is the zone of the settings, or the default one when the name is
+// empty or unknown, or the zone of the machine when even that cannot be read.
+func Location(name string) *time.Location {
+	for _, candidate := range []string{strings.TrimSpace(name), DefaultZone} {
+		if candidate == "" {
+			continue
+		}
+		if location, err := time.LoadLocation(candidate); err == nil {
+			return location
+		}
+	}
+	return time.Local
+}
+
+// Due says whether the backup of the night has to be made now: it is switched
+// on, the time of the night (in the zone of the settings) has come today, and
+// the last nightly backup is older than that moment. The decision is one
+// backup a day, made at the first look after the time — a panel that was
+// down at that minute makes it when it comes back, and a panel that has made
+// it does not make it again before tomorrow's time.
+func Due(enabled bool, at, zone string, now, last time.Time) bool {
+	if !enabled {
+		return false
+	}
+	hour, minute, ok := ParseClock(at)
+	if !ok {
+		return false
+	}
+	location := Location(zone)
+	local := now.In(location)
+	scheduled := time.Date(local.Year(), local.Month(), local.Day(), hour, minute, 0, 0, location)
+	if local.Before(scheduled) {
+		return false
+	}
+	return last.Before(scheduled)
 }
 
 // Read reads a backup of the folder.

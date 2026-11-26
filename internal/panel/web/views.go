@@ -247,7 +247,7 @@ func (f *Facts) tunnels(parts Parts, o Opts) {
 		`<dt>Auto repair</dt><dd>` + onOff(settings.AutoRepair) + `</dd>` +
 		`<dt>Mode</dt><dd>` + mode(settings.ObserveOnly) + `</dd>` +
 		`</dl>` +
-		`<div class="btns"><button class="btn sm" data-open-settings>` + iconEdit + ` Edit the protocols</button></div>`
+		`<div class="btns"><button type="button" class="btn sm" data-open-settings>` + iconEdit + ` Edit the protocols</button></div>`
 }
 
 // boolAttr is a checkbox, ticked or not.

@@ -103,7 +103,9 @@ func TestAFormIsWorkedByThePanel(t *testing.T) {
 	}
 	for _, want := range []string{`data-field="observe_only"`, `data-field="check_interval"`,
 		`data-field="candidate_transports"`, `data-field="telegram.cha`, `data-field="backup_keep"`,
-		`data-confirm-2-when="auto_repair"`, `data-act="POST /api/telegram/test"`,
+		// the names of the marks are the ones the dataset gives back
+		// camel-cased: a digit in the name (confirm-2) never reached the script
+		`data-confirm-strong="`, `data-confirm-when="auto_repair"`, `data-act="POST /api/telegram/test"`,
 		`data-act-form="restore"`, "Turn observe mode off?"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("the settings form does not have %q in it", html)
@@ -120,8 +122,10 @@ func TestAFormKeepsWhatItDoesNotShow(t *testing.T) {
 	panel.store.Servers.Put("k1", &model.Server{ID: "k1", Name: "frankfurt", Role: "kharej",
 		IP: "203.0.113.7", CommandKey: "cmd-1", SSHPassword: "hunter2", Enabled: true})
 	panel.store.Providers.Put("p1", &model.DNSProvider{ID: "p1", Name: "main", Kind: "arvan", Zone: "example.ir"})
+	panel.store.Links.Put("l1", &model.Link{ID: "l1", KharejID: "k1", IranID: "i1", Ports: []string{"443"}})
+	panel.store.Links.Put("l2", &model.Link{ID: "l2", KharejID: "k1", IranID: "i2", Ports: []string{"443"}})
 	panel.store.Domains.Put("d1", &model.Domain{ID: "d1", FQDN: "a.example.ir", ProviderID: "p1",
-		IranID: "i1", PrimaryIran: "i2", Group: []string{"l1"}, Ports: []string{"443"}, TTL: 300})
+		IranID: "i1", PrimaryIran: "i2", Group: []string{"l2"}, Ports: []string{"443"}, TTL: 300})
 
 	// the server: its role, its command key and the secrets, which are
 	// shown as the mask of them
@@ -140,17 +144,27 @@ func TestAFormKeepsWhatItDoesNotShow(t *testing.T) {
 		}
 	}
 
-	// the domain: the servers the record is on, and its group of tunnels
+	// the domain: the servers the record is on, which the form does not
+	// show, and its group of tunnels, which it does: the boxes of the
+	// tunnels, the ones of the group ticked and first (the order of the group
+	// is the order of the Iran servers)
 	_, answer = aGet(t, server, http.MethodGet, "/api/form?id=domain&edit=d1", "", cookie)
 	html, method, endpoint = formParts(t, answer)
 	if method != "PUT" || endpoint != "/api/domains/d1" {
 		t.Errorf("the form is sent with %s to %s, want PUT to /api/domains/d1", method, endpoint)
 	}
 	for _, want := range []string{`data-field="iran_id" value="i1"`, `data-field="primary_iran" value="i2"`,
-		`data-field="group" data-lines value="l1"`, `value="a.example.ir"`, `value="443"`} {
+		`data-field="group" data-checks value="l2" checked`, `data-field="group" data-checks value="l1">`,
+		`value="a.example.ir"`, `data-field="ports" value="443"`, `data-lines`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("the form of a domain does not keep %q: %s", want, html)
 		}
+	}
+	if strings.Contains(html, `type="hidden" data-field="group"`) {
+		t.Errorf("the group of the domain is hidden on its form, so it can never be edited: %s", html)
+	}
+	if strings.Index(html, `value="l2"`) > strings.Index(html, `value="l1"`) {
+		t.Errorf("the tunnels of the group do not come first, in the order of the group: %s", html)
 	}
 }
 

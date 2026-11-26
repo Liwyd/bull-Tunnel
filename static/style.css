@@ -353,6 +353,13 @@ select {
 .two { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 18px; align-items: start; }
 @media (max-width: 1180px) { .two { grid-template-columns: minmax(0, 1fr); } }
 .cols { display: grid; gap: 18px; }
+/* the settings: the index of the sections on the left, the sections beside it */
+.two.settings-grid { grid-template-columns: minmax(200px, 270px) minmax(0, 1fr); }
+.settings-grid > .index-group { position: sticky; top: 0; }
+@media (max-width: 1180px) {
+  .two.settings-grid { grid-template-columns: minmax(0, 1fr); }
+  .settings-grid > .index-group { position: static; }
+}
 
 /* the numbered index down the side of a long form (type-2 "01 / 02 / 03") */
 .index { display: grid; gap: 2px; align-content: start; }
@@ -477,6 +484,7 @@ legend { color: var(--muted); font-size: 12px; padding: 0 6px; }
 .dwire.dim { opacity: .08; }
 .xwire { fill: none; stroke: var(--forward); stroke-width: 1.4; stroke-dasharray: 5 6; opacity: .85; }
 .xwire.down { stroke: var(--down); }
+.xwire.dim { opacity: .08; }
 .hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
 @keyframes dash { to { stroke-dashoffset: -24; } }
 /* The labels on the wires: a pill for the wire that is picked, plain text
@@ -504,6 +512,9 @@ legend { color: var(--muted); font-size: 12px; padding: 0 6px; }
 .wlabel.hop.down rect { stroke: color-mix(in srgb, var(--down) 60%, var(--line)); }
 .wlabel.hop.down text { fill: var(--down); }
 .wlabel:hover rect { stroke: var(--text); }
+/* what is not on the path of the node under the pointer fades, the labels
+   and the hop wires too (the same fade as .wire.dim and .dwire.dim) */
+.wlabel.dim, .wlabel.plain.dim, .wlabel.plain.standby.dim { opacity: .12; }
 
 /* The zoom tools sit on the canvas, plain, the way the type-1 design has
    them: a fit, a smaller, the size, a bigger, a reset. */
@@ -676,7 +687,10 @@ table.tbl td.mono { font-family: var(--mono); font-size: 12px; }
 .empty-card li.done { color: var(--ok); }
 
 /* ============================================================== responsive */
+/* the button that opens the sidebar exists only where the sidebar is a sheet */
+#btn-menu { display: none; }
 @media (max-width: 1080px) {
+  #btn-menu { display: inline-flex; }
   .shell { grid-template-columns: minmax(0, 1fr); grid-template-areas: "top" "main" "foot"; }
   .side {
     position: fixed; top: 0; bottom: 0; left: 0; width: 260px; z-index: 45;

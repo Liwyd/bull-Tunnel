@@ -19,9 +19,9 @@ func (f *Facts) settings(parts Parts) {
 	section := func(number, title, kicker, body string) string {
 		return fmt.Sprintf(`<div class="section" id="set-%s">
     <header><span class="n">%s</span><h3>%s</h3><span class="k">%s</span></header>
-    <div class="modal-body">%s</div></div>`, number, number, title, kicker, body)
+    <div class="body">%s</div></div>`, number, number, title, kicker, body)
 	}
-	openSettings := `<div class="btns"><button class="btn sm" data-open-settings>` + iconEdit + ` Open the full settings</button></div>`
+	openSettings := `<div class="btns"><button type="button" class="btn sm" data-open-settings>` + iconEdit + ` Open the full settings</button></div>`
 
 	// the carriers: the ones that are tested first, then the rest. The
 	// group is marked the way the settings form marks it, so the collector
@@ -44,9 +44,9 @@ func (f *Facts) settings(parts Parts) {
 		}
 		accounts = append(accounts, fmt.Sprintf(`<div class="opt"><span class="prov %s">%s</span>
         <span class="grow">%s <span class="mono muted small">%s</span></span>
-        <button class="btn sm" data-verify-provider="%s">Test</button>
-        <button class="btn sm" data-edit-provider="%s">%s Edit</button>
-        <button class="btn sm danger" data-del-provider="%s">%s</button></div>`,
+        <button type="button" class="btn sm" data-verify-provider="%s">Test</button>
+        <button type="button" class="btn sm" data-edit-provider="%s">%s Edit</button>
+        <button type="button" class="btn sm danger" data-del-provider="%s">%s</button></div>`,
 			escape(provider.Kind), label, escape(provider.Name), escape(provider.Zone),
 			escape(provider.ID), escape(provider.ID), iconEdit, escape(provider.ID), iconTrash))
 	}
@@ -95,7 +95,7 @@ func (f *Facts) settings(parts Parts) {
 
 	body += section("04", "DNS accounts", "PROVIDERS",
 		`<div class="opt-list">`+accountsBody+`</div>`+
-			`<div class="btns"><button class="btn sm" data-add="provider">`+iconAdd+` Add a DNS account</button></div>`)
+			`<div class="btns"><button type="button" class="btn sm" data-add="provider">`+iconAdd+` Add a DNS account</button></div>`)
 
 	body += section("05", "Reporting and backups", "TELEGRAM / BACKUP",
 		check("telegram.enabled", tgOn, "Send every event to Telegram")+
@@ -120,7 +120,7 @@ func (f *Facts) settings(parts Parts) {
 		if i == 0 {
 			class = " on"
 		}
-		buttons = append(buttons, fmt.Sprintf(`<button data-goto="set-%s"%s><span class="n">%s</span><span class="t">%s</span><span class="d">%s</span></button>`,
+		buttons = append(buttons, fmt.Sprintf(`<button type="button" data-goto="set-%s"%s><span class="n">%s</span><span class="t">%s</span><span class="d">%s</span></button>`,
 			one.number, class, one.number, one.title, one.text))
 	}
 	parts["set-index"] = `<span class="label">Sections</span><div class="index">` + strings.Join(buttons, "") + `</div>`

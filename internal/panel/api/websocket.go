@@ -106,12 +106,15 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 
 // Broadcast tells the open pages that something changed.
 func (s *Server) Broadcast(message map[string]any) {
-	if message == nil {
-		s.hub.send(map[string]any{"type": "state", "state": s.fullState()})
-		return
-	}
-	if message["type"] == "state" {
-		s.hub.send(map[string]any{"type": "state", "state": s.fullState()})
+	if message == nil || message["type"] == "state" {
+		// The state is read under the lock: the monitor and the repairs
+		// write it from other goroutines, and a map walked while it is
+		// written stops the whole panel. Every caller of Broadcast (the
+		// orchestrator's push) has released the lock before it calls.
+		s.store.RLock()
+		state := s.fullState()
+		s.store.RUnlock()
+		s.hub.send(map[string]any{"type": "state", "state": state})
 		return
 	}
 	s.hub.send(message)

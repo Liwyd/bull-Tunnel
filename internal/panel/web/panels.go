@@ -127,7 +127,7 @@ func (f *Facts) domainDetail(domain *model.Domain) string {
       <span class="sub mono">%s</span></span>`,
 			class, escape(one.Spec), escape(via), exitSuffix(one.Exit), escape(sub))
 		if link != nil {
-			line += fmt.Sprintf(`<button class="btn sm" data-link="%s">Tunnel</button>`, escape(link.ID))
+			line += fmt.Sprintf(`<button type="button" class="btn sm" data-link="%s">Tunnel</button>`, escape(link.ID))
 		}
 		routeRows = append(routeRows, line+"</div>")
 	}
@@ -238,9 +238,9 @@ func (f *Facts) domainDetail(domain *model.Domain) string {
         %s
       </dl>
       <div class="btns">
-        <button class="btn sm" data-edit-domain="%s">%s Edit</button>
-        <button class="btn sm" data-sync="%s">%s Read the record from DNS</button>
-        <button class="btn sm danger" data-del-domain="%s">%s Delete</button>
+        <button type="button" class="btn sm" data-edit-domain="%s">%s Edit</button>
+        <button type="button" class="btn sm" data-act="POST /api/domains/%s/sync" data-done="The record was read">%s Read the record from DNS</button>
+        <button type="button" class="btn sm danger" data-del-domain="%s">%s Delete</button>
       </div>
     </div>
   </div>
@@ -253,7 +253,7 @@ func (f *Facts) domainDetail(domain *model.Domain) string {
     </div>
     <div class="panel-body">
       <div class="opt-list">%s</div>
-      <div class="btns"><button class="btn sm" data-dom-ports="%s">%s Choose the ports</button></div>
+      <div class="btns"><button type="button" class="btn sm" data-dom-ports="%s">%s Choose the ports</button></div>
     </div>
   </div>
 
@@ -381,10 +381,7 @@ func (f *Facts) serverCard(server *model.Server) string {
 	if server.Role == "kharej" && len(f.Exits[server.ID]) > 0 {
 		rows := []string{}
 		for _, entry := range f.Exits[server.ID] {
-			class := "up"
-			if entry.Bad {
-				class = "down"
-			}
+			class := entry.dot()
 			rows = append(rows, fmt.Sprintf(`<div class="opt"><span class="dot %s"></span><span class="grow">`+
 				`<span class="mono">%d</span><span class="sub">→ %s · %s</span></span></div>`,
 				class, entry.Port, escape(entry.Text), escape(entry.Method)))
@@ -398,7 +395,7 @@ func (f *Facts) serverCard(server *model.Server) string {
 	}
 	rebuild := ""
 	if broken > 0 {
-		rebuild = fmt.Sprintf(`<button class="btn sm" data-discover-links="%s">Rebuild the broken ones</button>`,
+		rebuild = fmt.Sprintf(`<button type="button" class="btn sm" data-discover-links="%s">Rebuild the broken ones</button>`,
 			escape(strings.Join(brokenIDs, ",")))
 	}
 	return fmt.Sprintf(`<div class="card">
@@ -422,9 +419,9 @@ func (f *Facts) serverCard(server *model.Server) string {
         %s
       </div>
       <div class="card-foot">
-        <button class="btn sm" data-open-server="%s">Open</button>
-        <button class="btn sm" data-edit-server="%s">%s Edit</button>
-        <button class="btn sm" data-test-server="%s">Test SSH</button>
+        <button type="button" class="btn sm" data-open-server="%s">Open</button>
+        <button type="button" class="btn sm" data-edit-server="%s">%s Edit</button>
+        <button type="button" class="btn sm" data-test-server="%s">Test SSH</button>
         %s
       </div>
     </div>`,
