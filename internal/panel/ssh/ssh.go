@@ -28,6 +28,18 @@ import (
 // ErrTimeout says that a command did not finish in time.
 var ErrTimeout = errors.New("the command timed out")
 
+// ErrStalled says that a server took the connection and then went quiet: it
+// did not finish the handshake, or it did not open a session, in time.
+var ErrStalled = errors.New("the server stopped answering")
+
+// defaultStep is how long a step of the conversation with a server may take
+// when the pool was given no timeout of its own.
+const defaultStep = 10 * time.Second
+
+// uploadTimeout is how long a file may take to be written on a server: a
+// release of the engine is a few megabytes, over a line that may be slow.
+const uploadTimeout = 3 * time.Minute
+
 // Result is what a command on a server answered.
 type Result struct {
 	Code int
@@ -112,11 +124,27 @@ func (p *Pool) conn(s *model.Server) (*xssh.Client, error) {
 	return client, nil
 }
 
+// step is how long one step of the conversation with a server may take: the
+// connection, the handshake, the opening of a session.
+func (p *Pool) step() time.Duration {
+	if p.connectTimeout <= 0 {
+		return defaultStep
+	}
+	return p.connectTimeout
+}
+
 // dial opens a connection to a server.
+//
+// The timeout of the client configuration only covers the TCP connection. A
+// server that accepts the connection and then says nothing would hold the
+// handshake for ever — and with it the lock of the server, and the monitor
+// that waits for every server of the cycle. So the connection is made here,
+// with a deadline on it for the whole handshake, and the deadline is taken off
+// again when the handshake is over: the connection is kept and reused.
 func (p *Pool) dial(s *model.Server) (*xssh.Client, error) {
 	config := &xssh.ClientConfig{
 		User:            s.SSHUser,
-		Timeout:         p.connectTimeout,
+		Timeout:         p.step(),
 		HostKeyCallback: p.hostKeyCallback(s),
 	}
 	if s.SSHKey != "" {
@@ -135,11 +163,22 @@ func (p *Pool) dial(s *model.Server) (*xssh.Client, error) {
 		config.Auth = append(config.Auth, xssh.Password(s.SSHPassword))
 	}
 	address := net.JoinHostPort(s.IP, strconv.Itoa(s.SSHPort))
-	client, err := xssh.Dial("tcp", address, config)
+	conn, err := net.DialTimeout("tcp", address, p.step())
 	if err != nil {
 		return nil, fmt.Errorf("SSH %s:%d: %w", s.IP, s.SSHPort, err)
 	}
-	return client, nil
+	conn.SetDeadline(time.Now().Add(p.step()))
+	sshConn, channels, requests, err := xssh.NewClientConn(conn, address, config)
+	if err != nil {
+		conn.Close()
+		var timeout net.Error
+		if errors.As(err, &timeout) && timeout.Timeout() {
+			err = fmt.Errorf("%w: the handshake did not finish in %s", ErrStalled, p.step())
+		}
+		return nil, fmt.Errorf("SSH %s:%d: %w", s.IP, s.SSHPort, err)
+	}
+	conn.SetDeadline(time.Time{})
+	return xssh.NewClient(sshConn, channels, requests), nil
 }
 
 // hostKeyCallback checks the key of the server and refuses the ones that
@@ -223,13 +262,19 @@ func (p *Pool) Run(s *model.Server, command string, timeout time.Duration, input
 		if err != nil {
 			return Result{}, err
 		}
-		result, err := runOnce(client, command, timeout, input)
+		result, err := runOnce(client, command, timeout, p.step(), input)
 		if err == nil {
 			return result, nil
 		}
 		if errors.Is(err, ErrTimeout) {
 			p.Drop(s.ID)
 			return Result{}, fmt.Errorf("%s: command timed out after %s", s.Name, timeout)
+		}
+		if errors.Is(err, ErrStalled) {
+			// a server that went quiet is not asked a second time: that would
+			// only double the wait of everything that waits for the answer
+			p.Drop(s.ID)
+			return Result{}, fmt.Errorf("%s: %w", s.Name, err)
 		}
 		p.Drop(s.ID)
 		if attempt == 1 {
@@ -239,9 +284,42 @@ func (p *Pool) Run(s *model.Server, command string, timeout time.Duration, input
 	return Result{}, fmt.Errorf("unreachable")
 }
 
+// openSession opens a session on an open connection, and gives up after the
+// step: opening a session waits for the answer of the server, and a server that
+// took the connection and then went quiet would be waited for for ever. On a
+// timeout the connection is closed, so that the goroutine that waits for the
+// answer unwinds instead of staying behind for as long as the process lives.
+func openSession(client *xssh.Client, step time.Duration) (*xssh.Session, error) {
+	type opened struct {
+		session *xssh.Session
+		err     error
+	}
+	result := make(chan opened, 1)
+	go func() {
+		session, err := client.NewSession()
+		result <- opened{session, err}
+	}()
+	timer := time.NewTimer(step)
+	defer timer.Stop()
+	select {
+	case got := <-result:
+		return got.session, got.err
+	case <-timer.C:
+		client.Close()
+		// a session that was opened just as the time ran out is closed, not
+		// leaked
+		go func() {
+			if got := <-result; got.session != nil {
+				got.session.Close()
+			}
+		}()
+		return nil, fmt.Errorf("%w: no session was opened in %s", ErrStalled, step)
+	}
+}
+
 // runOnce runs a command on an open connection.
-func runOnce(client *xssh.Client, command string, timeout time.Duration, input []byte) (Result, error) {
-	session, err := client.NewSession()
+func runOnce(client *xssh.Client, command string, timeout time.Duration, step time.Duration, input []byte) (Result, error) {
+	session, err := openSession(client, step)
 	if err != nil {
 		return Result{}, err
 	}
@@ -299,7 +377,16 @@ func (p *Pool) Put(s *model.Server, data []byte, path string, mode os.FileMode) 
 	if err != nil {
 		return err
 	}
-	err = putSFTP(client, data, path, mode)
+	// SFTP waits for the answers of the server like every other call: one
+	// that went quiet is cut off, and the connection with it
+	uploaded := make(chan error, 1)
+	go func() { uploaded <- putSFTP(client, data, path, mode) }()
+	select {
+	case err = <-uploaded:
+	case <-time.After(uploadTimeout):
+		p.Drop(s.ID)
+		return fmt.Errorf("%s: upload %s failed: %w: no answer in %s", s.Name, path, ErrStalled, uploadTimeout)
+	}
 	if err == nil {
 		return nil
 	}

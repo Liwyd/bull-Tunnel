@@ -39,6 +39,33 @@ type fakeDriver struct {
 	asked chan struct{}
 	// askedOnce guards asked.
 	askedOnce sync.Once
+
+	// mu guards what the background work writes: the repairs and the builds
+	// run while the test reads the calls.
+	mu sync.Mutex
+	// exits and reach are what the kharejs answer about their forwarded ports.
+	exits map[int]*engine.Exit
+	reach map[string]bool
+	// listening are the ports that are taken on the servers, and listens how
+	// many times the panel asked.
+	listening map[int]bool
+	listens   int
+	// waitUp, when it is not nothing, answers the wait for a tunnel to come up.
+	waitUp func(link *model.Link) (*engine.Probe, error)
+}
+
+// record writes down a call of the panel.
+func (d *fakeDriver) record(call string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.calls = append(d.calls, call)
+}
+
+// callList is the calls of the panel so far.
+func (d *fakeDriver) callList() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]string{}, d.calls...)
 }
 
 func newFakeDriver() *fakeDriver {
@@ -75,27 +102,31 @@ func (d *fakeDriver) EngineInfo(s *model.Server) (string, []string, error) {
 }
 
 func (d *fakeDriver) Deploy(link *model.Link, iran *model.Server, kharej *model.Server, transport string, ports []string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.calls = append(d.calls, "deploy:"+link.ID+":"+transport)
 	d.deployed[link.ID] = transport
 	return nil
 }
 
 func (d *fakeDriver) DeployIran(link *model.Link, iran *model.Server, kharej *model.Server, ports []string) error {
-	d.calls = append(d.calls, "deploy-iran:"+link.ID)
+	d.record(fmt.Sprintf("deploy-iran:%s:probe=%d", link.ID, link.ProbePort))
 	return nil
 }
 
 func (d *fakeDriver) Stop(link *model.Link, iran *model.Server, kharej *model.Server) error {
-	d.calls = append(d.calls, "stop:"+link.ID)
+	d.record("stop:" + link.ID)
 	return nil
 }
 
 func (d *fakeDriver) Remove(link *model.Link, iran *model.Server, kharej *model.Server) error {
-	d.calls = append(d.calls, "remove:"+link.ID)
+	d.record("remove:" + link.ID)
 	return nil
 }
 
 func (d *fakeDriver) Check(iran *model.Server, links []*model.Link) (map[string]*engine.Probe, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	out := map[string]*engine.Probe{}
 	for _, link := range links {
 		if d.down[iran.ID] {
@@ -112,6 +143,12 @@ func (d *fakeDriver) Check(iran *model.Server, links []*model.Link) (map[string]
 }
 
 func (d *fakeDriver) WaitUp(link *model.Link, iran *model.Server, timeout int) (*engine.Probe, error) {
+	d.mu.Lock()
+	wait := d.waitUp
+	d.mu.Unlock()
+	if wait != nil {
+		return wait(link)
+	}
 	latency := 12.0
 	return &engine.Probe{OK: true, Active: "active", LatencyMS: &latency, Verified: true}, nil
 }
@@ -121,20 +158,36 @@ func (d *fakeDriver) Scan(s *model.Server) ([]*engine.Found, error) {
 }
 
 func (d *fakeDriver) Listening(s *model.Server) (map[int]bool, error) {
-	return map[int]bool{}, nil
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.listens++
+	out := map[int]bool{}
+	for port := range d.listening {
+		out[port] = true
+	}
+	return out, nil
 }
 
 func (d *fakeDriver) Exits(s *model.Server, ports []int, targets []string) (map[int]*engine.Exit, map[string]bool, error) {
-	return map[int]*engine.Exit{}, map[string]bool{}, nil
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	exits, reach := map[int]*engine.Exit{}, map[string]bool{}
+	for port, exit := range d.exits {
+		exits[port] = exit
+	}
+	for target, ok := range d.reach {
+		reach[target] = ok
+	}
+	return exits, reach, nil
 }
 
 func (d *fakeDriver) PutFile(s *model.Server, path string, data []byte, mode os.FileMode) error {
-	d.calls = append(d.calls, "put:"+path)
+	d.record("put:" + path)
 	return nil
 }
 
 func (d *fakeDriver) Run(s *model.Server, command string, timeout time.Duration) (int, string, string, error) {
-	d.calls = append(d.calls, "run:"+command)
+	d.record("run:" + command)
 	return 0, "", "", nil
 }
 
@@ -187,7 +240,14 @@ type aWorld struct {
 
 func newWorld(t *testing.T) *aWorld {
 	t.Helper()
-	s := store.New("")
+	return newWorldAt(t, "")
+}
+
+// newWorldAt is the world of the tests with a state file at a path: the panel
+// writes it, and the tests that are about the writing need one.
+func newWorldAt(t *testing.T, path string) *aWorld {
+	t.Helper()
+	s := store.New(path)
 	s.Settings.ObserveOnly = false
 	s.Settings.AutoRepair = true
 	s.Settings.AutoAdopt = false
@@ -288,6 +348,9 @@ func TestTheRecordMovesWhenTheTunnelIsDown(t *testing.T) {
 	w.driver.up["l1"] = false
 	w.orch.CheckAll()
 	w.orch.CheckAll()
+	// the repair of the dead tunnel runs in the background: the test reads
+	// the state when it is over
+	w.orch.WaitBackground()
 
 	if w.domain.IranID != iran2.ID {
 		t.Errorf("the domain points at %q, it must point at the other Iran server", w.domain.IranID)
@@ -316,6 +379,7 @@ func TestThePortsAreHandedOverOnTheSameServer(t *testing.T) {
 
 	w.orch.CheckAll()
 	w.orch.CheckAll()
+	w.orch.WaitBackground()
 
 	if w.domain.IranID != w.iran.ID {
 		t.Errorf("the domain points at %q, it must stay on the same Iran server", w.domain.IranID)
@@ -426,6 +490,7 @@ func TestTheCycleAndTheRepairDoNotCollide(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 	close(stop)
 	wg.Wait()
+	w.orch.WaitBackground()
 }
 
 // TestTheCycleGivesTheLockBackWhileItWaitsForAServer: the change the

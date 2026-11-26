@@ -60,6 +60,25 @@ type Orchestrator struct {
 	broadcast func(message map[string]any)
 	// resolver watches the propagation of a changed record.
 	resolver Resolver
+	// backup makes a full backup and says what it made: the bot's /backup.
+	backup func() (string, error)
+
+	// bg counts the work that runs in the background: the repairs, the
+	// builds, the evaluation of the domains they ask for. The tests wait for
+	// it, and so can a program that is about to stop.
+	bg sync.WaitGroup
+	// scanMu lets one scan of the servers run at a time: the monitor, the API
+	// and the bot all ask for one, and two scans that ran together would both
+	// find the same tunnel and both add it.
+	scanMu sync.Mutex
+	// evalMu lets one evaluation of the domains run at a time: two of them
+	// would both decide to move the same record.
+	evalMu sync.Mutex
+	// evaluating says that an evaluation was asked for in the background and
+	// is queued or running; evalAgain says that it was asked for again while
+	// it ran. Both are guarded by mu.
+	evaluating bool
+	evalAgain  bool
 
 	// repairAfter is when a tunnel may be repaired again.
 	repairAfter map[string]float64
@@ -307,6 +326,64 @@ func (o *Orchestrator) Store() *store.Store { return o.store }
 
 // settings are the settings of the panel.
 func (o *Orchestrator) settings() *model.Settings { return o.store.Settings }
+
+// TryBusy reserves a tunnel for an operation: it says whether the tunnel was
+// free. Asking and reserving are one step — two operations that both found the
+// tunnel free and both started on it would write its configuration over each
+// other.
+func (o *Orchestrator) TryBusy(linkID string) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.busy[linkID] {
+		return false
+	}
+	o.busy[linkID] = true
+	return true
+}
+
+// background runs work that the monitor must not wait for, and counts it.
+func (o *Orchestrator) background(work func()) {
+	o.bg.Add(1)
+	go func() {
+		defer o.bg.Done()
+		work()
+	}()
+}
+
+// WaitBackground waits for the work that runs in the background — the
+// repairs, the builds — to end. The monitor never calls it: it is for the
+// tests, and for a program that is about to stop.
+func (o *Orchestrator) WaitBackground() { o.bg.Wait() }
+
+// evaluateLater asks for the domains to be looked at again, in the
+// background, once an operation that changed a tunnel is over. At most one
+// such evaluation runs; a request that comes while it runs makes it run once
+// more, and not once for every request — a handful of repairs that end
+// together would otherwise start a handful of evaluations on top of each
+// other.
+func (o *Orchestrator) evaluateLater() {
+	o.mu.Lock()
+	if o.evaluating {
+		o.evalAgain = true
+		o.mu.Unlock()
+		return
+	}
+	o.evaluating = true
+	o.mu.Unlock()
+	o.background(func() {
+		for {
+			o.evaluateDomains()
+			o.mu.Lock()
+			if !o.evalAgain {
+				o.evaluating = false
+				o.mu.Unlock()
+				return
+			}
+			o.evalAgain = false
+			o.mu.Unlock()
+		}
+	})
+}
 
 // Busy tells whether an operation is running on a tunnel.
 func (o *Orchestrator) Busy(linkID string) bool {

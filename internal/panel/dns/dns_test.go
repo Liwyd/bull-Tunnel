@@ -2,9 +2,13 @@ package dns
 
 import (
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Liwyd/bull-Tunnel/internal/panel/model"
@@ -299,5 +303,178 @@ func TestTheTextOfATXTRecord(t *testing.T) {
 	}
 	if QuoteTXT(`a\b`) != `"a\\b"` {
 		t.Errorf("the text is quoted %s, the backslash must be escaped", QuoteTXT(`a\b`))
+	}
+}
+
+// aSocksServer is a SOCKS5 server for the tests: it asks for the login when
+// one is given, remembers where it was asked to connect, and passes the bytes
+// on. It gives back its address.
+func aSocksServer(t *testing.T, user string, password string) (string, func() []string) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("cannot listen: %v", err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	var mu sync.Mutex
+	asked := []string{}
+	serve := func(conn net.Conn) {
+		defer conn.Close()
+		head := make([]byte, 2)
+		if _, err := io.ReadFull(conn, head); err != nil || head[0] != 5 {
+			return
+		}
+		methods := make([]byte, head[1])
+		if _, err := io.ReadFull(conn, methods); err != nil {
+			return
+		}
+		if user != "" {
+			conn.Write([]byte{5, 2})
+			sub := make([]byte, 2)
+			if _, err := io.ReadFull(conn, sub); err != nil {
+				return
+			}
+			given := make([]byte, int(sub[1])+1)
+			if _, err := io.ReadFull(conn, given); err != nil {
+				return
+			}
+			name := string(given[:sub[1]])
+			secret := make([]byte, given[sub[1]])
+			if _, err := io.ReadFull(conn, secret); err != nil {
+				return
+			}
+			if name != user || string(secret) != password {
+				conn.Write([]byte{1, 1})
+				return
+			}
+			conn.Write([]byte{1, 0})
+		} else {
+			conn.Write([]byte{5, 0})
+		}
+		request := make([]byte, 4)
+		if _, err := io.ReadFull(conn, request); err != nil {
+			return
+		}
+		var host string
+		switch request[3] {
+		case 1:
+			ip := make([]byte, 4)
+			io.ReadFull(conn, ip)
+			host = net.IP(ip).String()
+		case 3:
+			size := make([]byte, 1)
+			io.ReadFull(conn, size)
+			name := make([]byte, size[0])
+			io.ReadFull(conn, name)
+			host = string(name)
+		case 4:
+			ip := make([]byte, 16)
+			io.ReadFull(conn, ip)
+			host = net.IP(ip).String()
+		}
+		port := make([]byte, 2)
+		io.ReadFull(conn, port)
+		target := net.JoinHostPort(host, strconv.Itoa(int(port[0])<<8|int(port[1])))
+		mu.Lock()
+		asked = append(asked, target)
+		mu.Unlock()
+		upstream, err := net.Dial("tcp", target)
+		if err != nil {
+			conn.Write([]byte{5, 5, 0, 1, 0, 0, 0, 0, 0, 0})
+			return
+		}
+		defer upstream.Close()
+		conn.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
+		go io.Copy(upstream, conn)
+		io.Copy(conn, upstream)
+	}
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go serve(conn)
+		}
+	}()
+	return listener.Addr().String(), func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string{}, asked...)
+	}
+}
+
+// TestASocksProxyIsDialledByItsAddress: BT_DNS_PROXY=socks5://host:port. The
+// dialer used to be given the whole URL as if it were an address, so every
+// request through a SOCKS5 proxy failed before it left the machine.
+func TestASocksProxyIsDialledByItsAddress(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("through the proxy"))
+	}))
+	defer backend.Close()
+
+	cases := []struct {
+		name     string
+		user     string
+		password string
+		url      func(address string) string
+	}{
+		{"without a login", "", "", func(a string) string { return "socks5://" + a }},
+		{"with a login", "bull", "s3cret", func(a string) string { return "socks5://bull:s3cret@" + a }},
+		{"remote resolution", "", "", func(a string) string { return "socks5h://" + a }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			address, asked := aSocksServer(t, c.user, c.password)
+			client, err := httpClient(c.url(address))
+			if err != nil {
+				t.Fatalf("the client cannot be built: %v", err)
+			}
+			response, err := client.Get(backend.URL)
+			if err != nil {
+				t.Fatalf("the request through the proxy failed: %v", err)
+			}
+			defer response.Body.Close()
+			body, _ := io.ReadAll(response.Body)
+			if string(body) != "through the proxy" {
+				t.Errorf("the answer is %q, it must be the one of the backend", body)
+			}
+			want := strings.TrimPrefix(backend.URL, "http://")
+			if got := asked(); len(got) != 1 || got[0] != want {
+				t.Errorf("the proxy was asked for %v, it must be asked for %s", got, want)
+			}
+		})
+	}
+
+	// a login the proxy does not accept is an error, not a silent direct call
+	address, _ := aSocksServer(t, "bull", "s3cret")
+	client, err := httpClient("socks5://bull:wrong@" + address)
+	if err != nil {
+		t.Fatalf("the client cannot be built: %v", err)
+	}
+	if _, err := client.Get(backend.URL); err == nil {
+		t.Error("the request went through a proxy that refused the login")
+	}
+}
+
+// TestAnHTTPProxyIsUsedAsAProxy: the other schemes keep their meaning.
+func TestAnHTTPProxyIsUsedAsAProxy(t *testing.T) {
+	asked := make(chan string, 1)
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked <- r.URL.String()
+		w.Write([]byte("proxied"))
+	}))
+	defer proxyServer.Close()
+	client, err := httpClient(proxyServer.URL)
+	if err != nil {
+		t.Fatalf("the client cannot be built: %v", err)
+	}
+	response, err := client.Get("http://dns.example.com/zone")
+	if err != nil {
+		t.Fatalf("the request failed: %v", err)
+	}
+	response.Body.Close()
+	if got := <-asked; got != "http://dns.example.com/zone" {
+		t.Errorf("the proxy was asked for %q, it must be asked for the full address", got)
 	}
 }

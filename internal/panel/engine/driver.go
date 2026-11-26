@@ -34,25 +34,36 @@ type Driver struct {
 	// often cannot reach the artifact host, so the panel downloads the
 	// engine and pushes it over SSH.
 	cacheDir string
-	release  string
-	source   string
-	token    string
+	// settings gives the release, the source and the token of the engine as
+	// they are now. They are asked for every time they are needed and not
+	// kept: the operator changes them in the panel, and a restored backup
+	// replaces them, so a copy taken when the driver was made would be the
+	// old one for ever.
+	settings func() (release string, source string, token string)
 
 	mu sync.Mutex
 }
 
-// NewDriver returns a driver.
-func NewDriver(pool *ssh.Pool, cacheDir string, release string, source string, token string) *Driver {
+// NewDriver returns a driver. The settings function says which release of the
+// engine is installed, where it is fetched from and with which token.
+func NewDriver(pool *ssh.Pool, cacheDir string, settings func() (release string, source string, token string)) *Driver {
 	return &Driver{
 		pool:     pool,
 		confDir:  ConfDir,
 		unitDir:  UnitDir,
 		binPath:  BinPath,
 		cacheDir: cacheDir,
-		release:  release,
-		source:   source,
-		token:    token,
+		settings: settings,
 	}
+}
+
+// current is the release, the source and the token of the engine as the
+// settings say them now.
+func (d *Driver) current() (string, string, string) {
+	if d.settings == nil {
+		return "", "", ""
+	}
+	return d.settings()
 }
 
 // confPath is where the configuration of a tunnel is on the server.
@@ -162,23 +173,23 @@ func (d *Driver) EnsureInstalled(s *model.Server, install bool) (string, error) 
 	return version, nil
 }
 
-// artifactURLs are the tarball and the checksums of the configured release.
+// artifactURLs are the tarball and the checksums of a release.
 //
 // engine_source may be a plain base URL ("https://host/artifacts"), in
 // which case the layout of a GitHub release page is assumed, or a template
 // containing "{tag}" for full control.
-func (d *Driver) artifactURLs(name string) (string, string) {
-	base := strings.TrimRight(d.source, "/")
+func artifactURLs(release string, source string, name string) (string, string) {
+	base := strings.TrimRight(source, "/")
 	if base == "" {
 		base = ReleaseBase
 	}
 	switch {
 	case strings.Contains(base, "{tag}"):
-		base = strings.ReplaceAll(base, "{tag}", d.release)
-	case d.release == "" || d.release == "latest":
+		base = strings.ReplaceAll(base, "{tag}", release)
+	case release == "" || release == "latest":
 		base = base + "/latest/download"
 	default:
-		base = base + "/download/" + d.release
+		base = base + "/download/" + release
 	}
 	return base + "/" + name, base + "/SHA256SUMS"
 }
@@ -187,13 +198,15 @@ func (d *Driver) artifactURLs(name string) (string, string) {
 // returns the binary.
 func (d *Driver) binary(arch string) ([]byte, error) {
 	name := strings.ReplaceAll(Asset, "{arch}", arch)
-	tag := d.release
+	// one reading of the settings for the whole fetch: the URLs, the folder of
+	// the cache and the token must be the ones of the same release
+	tag, source, token := d.current()
 	path := filepath.Join(d.cacheDir, tag, name)
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	tarURL, sumsURL := d.artifactURLs(name)
+	tarURL, sumsURL := artifactURLs(tag, source, name)
 	cached := false
 	if _, err := os.Stat(path); err == nil {
 		cached = true
@@ -208,9 +221,17 @@ func (d *Driver) binary(arch string) ([]byte, error) {
 	// we have is still that one — a tarball cached under the name "latest"
 	// would otherwise be handed out for ever, and a server would keep the
 	// build it had.
-	want := d.publishedChecksum(sumsURL, name)
+	want := d.publishedChecksum(sumsURL, name, token)
+	if cached && want == "" {
+		// The checksums cannot be fetched — the host is out of reach, or it
+		// does not publish them — so nothing says that the tarball we have is
+		// not the newest one. A server must still get its engine: the cached
+		// file is used, as it was when it was fetched. Without this, a panel
+		// that is offline could install nothing it had already downloaded.
+		return binaryFrom(path, name)
+	}
 	if !cached || want == "" || checksumOf(path) != want {
-		blob, err := d.fetch(tarURL)
+		blob, err := d.fetch(tarURL, token)
 		if err != nil {
 			return nil, err
 		}
@@ -228,10 +249,18 @@ func (d *Driver) binary(arch string) ([]byte, error) {
 }
 
 // publishedChecksum is the checksum the release publishes for this file, if
-// any.
-func (d *Driver) publishedChecksum(sumsURL string, name string) string {
+// any. A private source wants the token for the checksums as much as it wants
+// it for the tarball.
+func (d *Driver) publishedChecksum(sumsURL string, name string, token string) string {
+	request, err := http.NewRequest(http.MethodGet, sumsURL, nil)
+	if err != nil {
+		return ""
+	}
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
 	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Get(sumsURL)
+	resp, err := client.Do(request)
 	if err != nil {
 		return ""
 	}
@@ -253,13 +282,13 @@ func (d *Driver) publishedChecksum(sumsURL string, name string) string {
 }
 
 // fetch downloads a release file.
-func (d *Driver) fetch(url string) ([]byte, error) {
+func (d *Driver) fetch(url string, token string) ([]byte, error) {
 	request, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	if d.token != "" {
-		request.Header.Set("Authorization", "Bearer "+d.token)
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Do(request)
@@ -402,7 +431,11 @@ func (d *Driver) stopSide(s *model.Server, name string, purge bool, unit string)
 	}
 	command := fmt.Sprintf("systemctl disable --now %s >/dev/null 2>&1; true", u)
 	if purge {
-		command += fmt.Sprintf("; rm -f %s/%s %s/%s.metrics.json; systemctl daemon-reload", d.unitDir, u, d.confDir, name)
+		// the configuration goes with the tunnel, and so does the copy of the
+		// original the panel made when it first touched a file it had not
+		// written: a purged tunnel leaves nothing of itself in the directory
+		command += fmt.Sprintf("; rm -f %s/%s %s/%s.metrics.json %s/%s.toml %s/%s.toml.bt-orig; systemctl daemon-reload",
+			d.unitDir, u, d.confDir, name, d.confDir, name, d.confDir, name)
 	}
 	if _, _, _, err := d.Run(s, command, 30*time.Second); err != nil {
 		// a server that cannot be reached is not a reason to keep the

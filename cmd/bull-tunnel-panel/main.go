@@ -77,7 +77,16 @@ func main() {
 	defer pool.Close()
 
 	// the driver: the real engine, or the simulated network of the demo
-	var driver orch.Driver = engine.NewDriver(pool, filepath.Join(data, "cache"), state.Settings.EngineRelease, state.Settings.EngineSource, state.Settings.EngineToken)
+	// The release, the source and the token of the engine are read from the
+	// settings every time the driver needs them: the operator changes them in
+	// the panel, and a backup that is restored replaces them, so a copy taken
+	// at start would be the old one for ever.
+	var driver orch.Driver = engine.NewDriver(pool, filepath.Join(data, "cache"), func() (string, string, string) {
+		state.RLock()
+		defer state.RUnlock()
+		settings := state.Settings
+		return settings.EngineRelease, settings.EngineSource, settings.EngineToken
+	})
 	// the DNS: the real service, or the one of the demo
 	var dnsFactory func(provider *model.DNSProvider) (dns.Client, error) = func(provider *model.DNSProvider) (dns.Client, error) {
 		return dns.New(provider, os.Getenv("BT_DNS_PROXY"))
@@ -108,10 +117,17 @@ func main() {
 		Resolver: resolver,
 	})
 
-	bot := telegram.New(func() model.Telegram { return state.Settings.TG() },
-		func(command string, args []string) (string, error) {
-			return brain.BotCommand(command, args), nil
-		})
+	bot := telegram.New(func() model.Telegram {
+		state.RLock()
+		defer state.RUnlock()
+		return state.Settings.TG()
+	}, func(command string, args []string) (string, error) {
+		return brain.BotCommand(command, args), nil
+	})
+	// The events the operator must hear about reach Telegram through the
+	// queue of the bot: Notify only puts the message in it, so the monitor
+	// never waits for Telegram, and a bot that is not configured drops it.
+	brain.WithNotify(bot.Notify)
 	panel := api.New(api.Options{
 		Store:        state,
 		Orchestrator: brain,
@@ -128,6 +144,9 @@ func main() {
 		Driver:       driver,
 	})
 	brain.SetBroadcast(panel.Broadcast)
+	// the backups: the one of every night, and the one the bot is asked for
+	go panel.RunBackups(stop)
+	brain.WithBackup(panel.BackupNow)
 
 	// the monitor: the cycle that checks every path and moves what must be
 	// moved
@@ -153,21 +172,22 @@ func main() {
 		IdleTimeout:  2 * time.Minute,
 		WriteTimeout: 5 * time.Minute,
 	}
+	// The certificate is loaded into the configuration of the server, and the
+	// server is started the same way with it and without it: the signal that
+	// stops a plain panel stops a panel with TLS as well, and the connections
+	// are drained and the pool and the bot closed on the way out.
 	certificate, key := os.Getenv("BT_SSL_CERT"), os.Getenv("BT_SSL_KEY")
-	if certificate != "" && key != "" {
-		server.TLSConfig = &tls.Config{Certificates: []tls.Certificate{}}
+	secure := certificate != "" && key != ""
+	if secure {
 		loaded, err := tls.LoadX509KeyPair(certificate, key)
 		if err != nil {
 			log.Fatalf("the certificate cannot be read: %v", err)
 		}
-		server.TLSConfig.Certificates[0] = loaded
-		log.Printf("the panel answers on https://%s", server.Addr)
-		if err := server.ListenAndServeTLS(certificate, key); err != nil {
-			log.Fatalf("the panel stopped: %v", err)
+		server.TLSConfig = &tls.Config{
+			Certificates: []tls.Certificate{loaded},
+			MinVersion:   tls.VersionTLS12,
 		}
-		return
 	}
-	log.Printf("the panel answers on http://%s", server.Addr)
 	go func() {
 		// a signal stops the panel the way it should
 		signals := make(chan os.Signal, 1)
@@ -177,7 +197,17 @@ func main() {
 		defer cancel()
 		server.Shutdown(ctx)
 	}()
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	var err error
+	if secure {
+		log.Printf("the panel answers on https://%s", server.Addr)
+		// the certificate is in TLSConfig already: no file names are given,
+		// so the server does not read it a second time
+		err = server.ListenAndServeTLS("", "")
+	} else {
+		log.Printf("the panel answers on http://%s", server.Addr)
+		err = server.ListenAndServe()
+	}
+	if err != nil && err != http.ErrServerClosed {
 		log.Fatalf("the panel stopped: %v", err)
 	}
 }

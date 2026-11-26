@@ -90,27 +90,42 @@ func New(provider *model.DNSProvider, proxyURL string) (Client, error) {
 
 // httpClient is the client the panel asks the services with. The timeout is
 // the one of the Python panel: twenty seconds.
+//
+// The proxy is an URL: "http://host:port" and "https://host:port" are used the
+// way the standard library uses them, "socks5://[user:password@]host:port" is
+// dialled through the SOCKS5 server. The SOCKS5 dialer is given the address of
+// the server (host and port) and the login out of the URL — not the URL itself,
+// which is no address anybody can connect to.
 func httpClient(proxyURL string) (*http.Client, error) {
+	direct := &net.Dialer{Timeout: 20 * time.Second, KeepAlive: 30 * time.Second}
 	transport := &http.Transport{
-		DialContext:         (&net.Dialer{Timeout: 20 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		DialContext:         direct.DialContext,
 		MaxIdleConns:        10,
 		IdleConnTimeout:     90 * time.Second,
 		TLSHandshakeTimeout: 20 * time.Second,
 	}
 	if proxyURL != "" {
-		if strings.HasPrefix(proxyURL, "socks5://") || strings.HasPrefix(proxyURL, "socks5h://") {
-			dialer, err := proxy.SOCKS5("tcp", proxyURL, nil, proxy.Direct)
+		parsed, err := url.Parse(proxyURL)
+		if err != nil {
+			return nil, dnsError("the proxy cannot be used: %v", err)
+		}
+		switch strings.ToLower(parsed.Scheme) {
+		case "socks5", "socks5h":
+			if parsed.Hostname() == "" {
+				return nil, dnsError("the proxy cannot be used: %s has no address", proxyURL)
+			}
+			dialer, err := proxy.FromURL(parsed, direct)
 			if err != nil {
 				return nil, dnsError("the proxy cannot be used: %v", err)
 			}
-			transport.DialContext = func(ctx context.Context, network string, addr string) (net.Conn, error) {
-				return dialer.Dial(network, addr)
+			if withContext, ok := dialer.(proxy.ContextDialer); ok {
+				transport.DialContext = withContext.DialContext
+			} else {
+				transport.DialContext = func(ctx context.Context, network string, addr string) (net.Conn, error) {
+					return dialer.Dial(network, addr)
+				}
 			}
-		} else {
-			parsed, err := url.Parse(proxyURL)
-			if err != nil {
-				return nil, dnsError("the proxy cannot be used: %v", err)
-			}
+		default:
 			transport.Proxy = http.ProxyURL(parsed)
 		}
 	}

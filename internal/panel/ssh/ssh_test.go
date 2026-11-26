@@ -4,9 +4,12 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -330,5 +333,164 @@ func TestTheHostKeysAreKeptOnDisk(t *testing.T) {
 	}
 	if string(written) != string(want) {
 		t.Errorf("the file of the keys is not the one of the fixtures:\ngot:\n%s\nwant:\n%s", written, want)
+	}
+}
+
+// aSilentServer is a server that takes the connection and never says a word:
+// the handshake of a client that connects to it waits for ever. It gives back
+// the port it listens on.
+func aSilentServer(t *testing.T) int {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("cannot listen: %v", err)
+	}
+	var mu sync.Mutex
+	var held []net.Conn
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			held = append(held, conn)
+			mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		listener.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, conn := range held {
+			conn.Close()
+		}
+	})
+	return listener.Addr().(*net.TCPAddr).Port
+}
+
+// aServerThatNeverOpensASession finishes the handshake like a real server and
+// then does not answer the opening of a session.
+func aServerThatNeverOpensASession(t *testing.T) int {
+	t.Helper()
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("cannot make a key: %v", err)
+	}
+	signer, err := xssh.NewSignerFromKey(key)
+	if err != nil {
+		t.Fatalf("cannot make a signer: %v", err)
+	}
+	config := &xssh.ServerConfig{NoClientAuth: true}
+	config.AddHostKey(signer)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("cannot listen: %v", err)
+	}
+	stop := make(chan struct{})
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				_, channels, requests, err := xssh.NewServerConn(conn, config)
+				if err != nil {
+					return
+				}
+				go xssh.DiscardRequests(requests)
+				// the channels are never read: no session is ever answered
+				_ = channels
+				<-stop
+			}()
+		}
+	}()
+	t.Cleanup(func() {
+		listener.Close()
+		close(stop)
+	})
+	return listener.Addr().(*net.TCPAddr).Port
+}
+
+// TestAServerThatNeverSpeaksDoesNotHoldThePanel: the timeout of the client
+// configuration covers the TCP connection only. A server that accepts the
+// connection and then says nothing must fail the ping within the timeout of
+// the pool, release the lock of the server, and leave no connection behind —
+// or one stalled server would hold the whole check cycle for ever.
+func TestAServerThatNeverSpeaksDoesNotHoldThePanel(t *testing.T) {
+	port := aSilentServer(t)
+	pool := NewPool(300*time.Millisecond, NewHostKeys(filepath.Join(t.TempDir(), "hostkeys.json")))
+	defer pool.Close()
+	s := aServer(t, port, "")
+
+	// twice: the second ping is the proof that the lock of the server was
+	// given back by the first one
+	for i := 0; i < 2; i++ {
+		start := time.Now()
+		done := make(chan error, 1)
+		go func() {
+			_, err := pool.Ping(s)
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Fatal("the ping of a server that says nothing succeeded")
+			}
+			if !errors.Is(err, ErrStalled) {
+				t.Errorf("the ping said %q, it must say that the server stopped answering", err)
+			}
+			if took := time.Since(start); took > 3*time.Second {
+				t.Errorf("the ping took %s, it must give up after about the timeout of the pool", took)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("the ping of a server that says nothing never came back")
+		}
+	}
+	pool.mu.Lock()
+	open := len(pool.conns)
+	pool.mu.Unlock()
+	if open != 0 {
+		t.Errorf("the pool holds %d connections, a handshake that failed leaves none", open)
+	}
+}
+
+// TestAServerThatNeverOpensASessionDoesNotHoldThePanel: the handshake is
+// done, and the server does not answer the request of a session. The panel
+// must give up, close the connection, and not retry on the same one.
+func TestAServerThatNeverOpensASessionDoesNotHoldThePanel(t *testing.T) {
+	port := aServerThatNeverOpensASession(t)
+	pool := NewPool(300*time.Millisecond, NewHostKeys(filepath.Join(t.TempDir(), "hostkeys.json")))
+	defer pool.Close()
+	s := aServer(t, port, "")
+
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() {
+		_, err := pool.Ping(s)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("the ping of a server that opens no session succeeded")
+		}
+		if !errors.Is(err, ErrStalled) {
+			t.Errorf("the ping said %q, it must say that the server stopped answering", err)
+		}
+		// one wait, not two: the panel does not ask a quiet server again
+		if took := time.Since(start); took > 1500*time.Millisecond {
+			t.Errorf("the ping took %s, it must give up after one timeout of the pool", took)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the ping of a server that opens no session never came back")
+	}
+	pool.mu.Lock()
+	open := len(pool.conns)
+	pool.mu.Unlock()
+	if open != 0 {
+		t.Errorf("the pool holds %d connections, the connection of a stalled server must be dropped", open)
 	}
 }

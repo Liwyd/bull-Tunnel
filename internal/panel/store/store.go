@@ -35,6 +35,10 @@ type Store struct {
 	// network calls are made with the lock released, or the panel would
 	// answer nothing while a slow server is being checked.
 	mu sync.RWMutex
+	// saveMu makes the writes of the state file one at a time. Save takes it
+	// before it takes the lock of the state, so the state a Save writes is
+	// never older than the one of a Save that wrote before it.
+	saveMu sync.Mutex
 
 	Servers   *Set[model.Server]
 	Links     *Set[model.Link]
@@ -243,11 +247,23 @@ type rawState struct {
 //
 // The write is atomic and the file is only readable by its owner: it holds
 // the SSH passwords and the API tokens.
+//
+// The state is marshalled with the lock of the state held for reading: the
+// monitor, the repairs and the API write the maps and the slices of the state
+// while the panel saves it, and the runtime stops the whole program the moment
+// a map is written while it is walked ("concurrent map iteration and map
+// write"). So Save must not be called by a caller that holds the lock of the
+// state, for reading or for writing — it takes it itself, and a caller that
+// holds it would wait for itself. The file is written with the lock released.
 func (s *Store) Save() error {
 	if s.path == "" {
 		return nil
 	}
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
+	s.mu.RLock()
 	data, err := Marshal(s.Raw())
+	s.mu.RUnlock()
 	if err != nil {
 		return err
 	}

@@ -259,7 +259,7 @@ transport = "tcpmux"
 	if found[0].Token() != "abc" {
 		t.Errorf("the token of the tunnel is %q, it must be abc", found[0].Token())
 	}
-	if found[1].Token() != "bulltunnel" {
+	if found[1].Token() != "backpack" {
 		t.Errorf("the token of the tunnel is %q, it must be the default of the engine", found[1].Token())
 	}
 	if found[1].Host() != "1.2.3.4" {

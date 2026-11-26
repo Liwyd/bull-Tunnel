@@ -5,16 +5,21 @@ package telegram
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Liwyd/bull-Tunnel/internal/panel/model"
+	"golang.org/x/net/proxy"
 )
 
 // Icon is the sign of a level of an event.
@@ -40,13 +45,16 @@ type Bot struct {
 	// Handler answers the commands of the chats.
 	Handler Handler
 
-	queue   chan string
-	offset  int
-	mu      sync.Mutex
-	client  *http.Client
-	cfgKey  string
-	stopped chan struct{}
-	once    sync.Once
+	queue  chan string
+	offset int
+	// mu guards the transport and the proxy it was made for.
+	mu sync.Mutex
+	// transport is how the bot reaches Telegram, and proxyKey is the proxy it
+	// was made for: a proxy that is changed in the settings makes a new one.
+	transport *http.Transport
+	proxyKey  string
+	stopped   chan struct{}
+	once      sync.Once
 }
 
 // New returns a bot.
@@ -65,17 +73,76 @@ func (b *Bot) Active() bool {
 	return cfg.Enabled && cfg.BotToken != ""
 }
 
-// httpClient is the client the bot talks to Telegram with. The timeout is
-// the one of the Python panel: forty seconds.
-func (b *Bot) httpClient(cfg model.Telegram) *http.Client {
-	key := cfg.APIBase + "|" + cfg.Proxy
+// transportFor is how the bot reaches Telegram through a proxy.
+//
+// The proxy is an URL. "http://" and "https://" proxies are used the way the
+// standard library uses them; "socks5://[user:password@]host:port" is dialled
+// through the SOCKS5 server, which is how a panel that sits where Telegram is
+// blocked reaches it. An address without a scheme is taken for an HTTP proxy.
+// Without a proxy the bot uses the proxy of the environment, as a plain HTTP
+// client does.
+func transportFor(proxyURL string) (*http.Transport, error) {
+	direct := &net.Dialer{Timeout: 20 * time.Second, KeepAlive: 30 * time.Second}
+	transport := &http.Transport{
+		Proxy:               http.ProxyFromEnvironment,
+		DialContext:         direct.DialContext,
+		MaxIdleConns:        4,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 20 * time.Second,
+	}
+	proxyURL = strings.TrimSpace(proxyURL)
+	if proxyURL == "" {
+		return transport, nil
+	}
+	if !strings.Contains(proxyURL, "://") {
+		proxyURL = "http://" + proxyURL
+	}
+	parsed, err := url.Parse(proxyURL)
+	if err != nil || parsed.Hostname() == "" {
+		return nil, &Error{Message: fmt.Sprintf("the proxy %q cannot be used", proxyURL)}
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https":
+		transport.Proxy = http.ProxyURL(parsed)
+	case "socks5", "socks5h":
+		dialer, err := proxy.FromURL(parsed, direct)
+		if err != nil {
+			return nil, &Error{Message: fmt.Sprintf("the proxy cannot be used: %v", err)}
+		}
+		// the address is given to the SOCKS5 server as it is, a name too:
+		// the proxy resolves it, which is the point when the resolver of the
+		// machine is the one that is censored
+		transport.Proxy = nil
+		if withContext, ok := dialer.(proxy.ContextDialer); ok {
+			transport.DialContext = withContext.DialContext
+		} else {
+			transport.DialContext = func(ctx context.Context, network string, addr string) (net.Conn, error) {
+				return dialer.Dial(network, addr)
+			}
+		}
+	default:
+		return nil, &Error{Message: fmt.Sprintf("the proxy scheme %q is not one the bot speaks (http, https, socks5)", parsed.Scheme)}
+	}
+	return transport, nil
+}
+
+// httpClient is the client the bot talks to Telegram with, through the proxy
+// of the settings. The timeout is the one of the Python panel: forty seconds
+// for a call, and the caller says how long a file may take.
+func (b *Bot) httpClient(cfg model.Telegram, timeout time.Duration) (*http.Client, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.client == nil || key != b.cfgKey {
-		b.client = &http.Client{Timeout: 40 * time.Second}
-		b.cfgKey = key
+	if b.transport == nil || b.proxyKey != cfg.Proxy {
+		transport, err := transportFor(cfg.Proxy)
+		if err != nil {
+			return nil, err
+		}
+		if b.transport != nil {
+			b.transport.CloseIdleConnections()
+		}
+		b.transport, b.proxyKey = transport, cfg.Proxy
 	}
-	return b.client
+	return &http.Client{Timeout: timeout, Transport: b.transport}, nil
 }
 
 // url is the address of a method of the Telegram API.
@@ -95,7 +162,11 @@ func (b *Bot) Call(method string, cfg *model.Telegram, params map[string]any) (a
 		return nil, err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	response, err := b.httpClient(*cfg).Do(request)
+	client, err := b.httpClient(*cfg, 40*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -135,9 +206,7 @@ func (b *Bot) Notify(text string) {
 
 // SendTo sends a message to a chat.
 func (b *Bot) SendTo(chatID string, text string, cfg *model.Telegram) error {
-	if len(text) > 4000 {
-		text = text[:4000]
-	}
+	text = Truncate(text, 4000)
 	_, err := b.Call("sendMessage", cfg, map[string]any{
 		"chat_id":                  chatID,
 		"text":                     text,
@@ -156,9 +225,7 @@ func (b *Bot) SendFile(name string, blob []byte, caption string, cfg *model.Tele
 	if cfg.BotToken == "" || len(cfg.ChatIDs) == 0 {
 		return 0, &Error{Message: "the Telegram bot or the Chat ID is not configured"}
 	}
-	if len(caption) > 1000 {
-		caption = caption[:1000]
-	}
+	caption = Truncate(caption, 1000)
 	sent := 0
 	var last error
 	for _, chat := range cfg.ChatIDs {
@@ -203,7 +270,10 @@ func (b *Bot) sendDocument(cfg model.Telegram, chatID string, name string, blob 
 		return err
 	}
 	request.Header.Set("Content-Type", writer.FormDataContentType())
-	client := &http.Client{Timeout: 120 * time.Second}
+	client, err := b.httpClient(cfg, 120*time.Second)
+	if err != nil {
+		return err
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return err
@@ -384,4 +454,76 @@ func textOf(value any) string {
 func Escape(text string) string {
 	replacer := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 	return replacer.Replace(text)
+}
+
+// Truncate cuts a text of Telegram's HTML to at most limit characters.
+//
+// The cut is made by characters and not by bytes, which would split a letter
+// of a language that takes more than one byte — and the HTML is kept valid:
+// a tag or an entity the cut would leave half written is dropped, and the
+// tags that are still open are closed. Telegram refuses a message it cannot
+// parse, and the whole message would be lost for a few characters too many.
+func Truncate(text string, limit int) string {
+	if utf8.RuneCountInString(text) <= limit {
+		return text
+	}
+	// room for the mark that says the text was cut, and for the tags that
+	// have to be closed after it
+	room := 1
+	if limit > 4*closeRoom {
+		room += closeRoom
+	}
+	out := string([]rune(text)[:max(limit-room, 0)])
+	// an entity or a tag that was cut in the middle
+	if i := strings.LastIndex(out, "<"); i >= 0 && !strings.Contains(out[i:], ">") {
+		out = out[:i]
+	}
+	if i := strings.LastIndex(out, "&"); i >= 0 && !strings.Contains(out[i:], ";") && utf8.RuneCountInString(out[i:]) <= 10 {
+		out = out[:i]
+	}
+	return out + "…" + closingTags(out)
+}
+
+// closeRoom is how many characters are kept free for the closing tags of a
+// text that was cut.
+const closeRoom = 40
+
+// closingTags closes the tags a piece of HTML leaves open, innermost first.
+func closingTags(text string) string {
+	open := []string{}
+	for {
+		start := strings.IndexByte(text, '<')
+		if start < 0 {
+			break
+		}
+		end := strings.IndexByte(text[start:], '>')
+		if end < 0 {
+			break
+		}
+		tag := text[start+1 : start+end]
+		text = text[start+end+1:]
+		if tag == "" {
+			continue
+		}
+		if tag[0] == '/' {
+			name := strings.ToLower(strings.TrimSpace(tag[1:]))
+			for i := len(open) - 1; i >= 0; i-- {
+				if open[i] == name {
+					open = open[:i]
+					break
+				}
+			}
+			continue
+		}
+		name := strings.ToLower(strings.Fields(tag)[0])
+		if strings.HasSuffix(tag, "/") {
+			continue
+		}
+		open = append(open, name)
+	}
+	out := ""
+	for i := len(open) - 1; i >= 0; i-- {
+		out += "</" + open[i] + ">"
+	}
+	return out
 }

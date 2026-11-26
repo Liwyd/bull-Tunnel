@@ -663,24 +663,26 @@ func (s *Store) ExitOf(link *model.Link, port int) map[string]any {
 		byIP[server.IP] = server.ID
 	}
 	targets := []any{}
-	list, _ := hop["targets"].([]any)
-	for _, item := range list {
-		text, _ := item.(string)
+	for _, text := range HopTargets(hop["targets"]) {
 		reach := map[string]any{}
 		if kharej.ExitReach != nil {
 			if found, there := kharej.ExitReach[text]; there {
 				reach = found
 			}
 		}
-		ok := false
-		if value, there := reach["ok"]; there {
-			ok, _ = value.(bool)
-		}
-		targets = append(targets, map[string]any{
+		target := map[string]any{
 			"addr":      text,
 			"server_id": byIP[engine.TargetHost(text)],
-			"ok":        ok,
-		})
+		}
+		// "ok" says whether the kharej could reach the target the last time it
+		// was measured. A target nobody measured has none: it is not known to be
+		// down, and it must not be shown as if it were.
+		if value, there := reach["ok"]; there {
+			if ok, isBool := value.(bool); isBool {
+				target["ok"] = ok
+			}
+		}
+		targets = append(targets, target)
 	}
 	inferred := false
 	if value, there := hop["inferred"]; there {
@@ -694,6 +696,25 @@ func (s *Store) ExitOf(link *model.Link, port int) map[string]any {
 		"inferred": inferred,
 		"targets":  targets,
 	}
+}
+
+// HopTargets is the addresses of a hop. The panel writes them as a list of
+// strings, and a state file read back from the disk holds them as a list of
+// values: both are the same addresses.
+func HopTargets(value any) []string {
+	switch list := value.(type) {
+	case []string:
+		return list
+	case []any:
+		out := []string{}
+		for _, item := range list {
+			if text, ok := item.(string); ok {
+				out = append(out, text)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // FirstPort is the first port of a mapping, or -1.

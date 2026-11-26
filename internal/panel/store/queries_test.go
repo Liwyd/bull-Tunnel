@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Liwyd/bull-Tunnel/internal/panel/model"
 )
@@ -245,5 +247,168 @@ func TestTheMeshOffersTunnelsThatCanBeToldApart(t *testing.T) {
 	}
 	if len(s.Links.List()) != len(aState(t).Links.List())+len(created) {
 		t.Errorf("the panel has %d tunnels, it must have %d", len(s.Links.List()), len(aState(t).Links.List())+len(created))
+	}
+}
+
+// anExitState is a state with one tunnel whose ports leave the kharej in
+// every way there is: straight to another host, to a port whose exit the
+// panel measured, and to a port nobody measured.
+func anExitState() (*Store, *model.Link) {
+	s := New("")
+	kharej := &model.Server{ID: "sk", Name: "K", Role: model.Kharej, IP: "10.0.1.1"}
+	iran := &model.Server{ID: "si", Name: "I", Role: model.Iran, IP: "10.0.2.1"}
+	other := &model.Server{ID: "so", Name: "O", Role: model.Kharej, IP: "9.9.9.9"}
+	for _, server := range []*model.Server{kharej, iran, other} {
+		s.Servers.Put(server.ID, server)
+	}
+	link := &model.Link{
+		ID: "l1", IranID: "si", KharejID: "sk", TunnelPort: 3080,
+		Status: model.StatusUp, Transport: "tcpmux",
+		Ports: []string{"443=1.2.3.4:5201", "8443=2096", "2053=2097"},
+	}
+	link.Normalize()
+	s.Links.Put(link.ID, link)
+	kharej.Exits = map[string]map[string]any{
+		// as the panel writes them in memory: a list of strings
+		"2096": {"method": "xray", "targets": []string{"9.9.9.9:80"}, "via": "", "inferred": false},
+		// as they are read back from the state file: a list of values
+		"2097": {"method": "gost", "targets": []any{"9.9.9.9:81"}, "via": "", "inferred": true},
+	}
+	kharej.ExitReach = map[string]map[string]any{
+		"9.9.9.9:80": {"ok": true, "fails": 0},
+		"9.9.9.9:81": {"ok": nil, "fails": 0}, // known, never measured
+	}
+	return s, link
+}
+
+// TestTheTargetsOfAnExitAreShownWhateverTheirForm: the targets of a mapping
+// that names a host ("443=1.2.3.4:5201") were never shown, because the code
+// read the list of a state that was just read back from the disk and not the
+// list the panel itself writes.
+func TestTheTargetsOfAnExitAreShownWhateverTheirForm(t *testing.T) {
+	s, link := anExitState()
+	cases := map[int]string{443: "1.2.3.4:5201", 8443: "9.9.9.9:80", 2053: "9.9.9.9:81"}
+	for port, want := range cases {
+		exit := s.ExitOf(link, port)
+		if exit == nil {
+			t.Fatalf("port %d: the exit is not there", port)
+		}
+		targets, _ := exit["targets"].([]any)
+		if len(targets) != 1 {
+			t.Fatalf("port %d: the exit has %d targets, it must have one", port, len(targets))
+		}
+		target, _ := targets[0].(map[string]any)
+		if target["addr"] != want {
+			t.Errorf("port %d: the target is %v, it must be %s", port, target["addr"], want)
+		}
+	}
+	// the server of the address is found: 9.9.9.9 is one of ours
+	exit := s.ExitOf(link, 8443)
+	target := exit["targets"].([]any)[0].(map[string]any)
+	if target["server_id"] != "so" {
+		t.Errorf("the server of the target is %v, it must be so", target["server_id"])
+	}
+}
+
+// TestATargetNobodyMeasuredIsNotDown: "ok" says what the last measurement
+// said. A target that was never measured has none — it used to be reported as
+// down, and the dashboard drew it with a red cross.
+func TestATargetNobodyMeasuredIsNotDown(t *testing.T) {
+	s, link := anExitState()
+	first := func(port int) map[string]any {
+		exit := s.ExitOf(link, port)
+		if exit == nil {
+			t.Fatalf("port %d: the exit is not there", port)
+		}
+		return exit["targets"].([]any)[0].(map[string]any)
+	}
+	// never heard of
+	if _, there := first(443)["ok"]; there {
+		t.Errorf("port 443: a target nobody measured says %v, it must say nothing", first(443)["ok"])
+	}
+	// known, with no answer yet
+	if _, there := first(2053)["ok"]; there {
+		t.Errorf("port 2053: a target with no answer yet says %v, it must say nothing", first(2053)["ok"])
+	}
+	// measured, and reachable
+	if ok, there := first(8443)["ok"]; !there || ok != true {
+		t.Errorf("port 8443: a target that answered says %v, it must say true", ok)
+	}
+	// measured, and not reachable: that one is really down
+	link.Ports = []string{"8443=2096"}
+	s.Servers.Get("sk").ExitReach["9.9.9.9:80"] = map[string]any{"ok": false, "fails": 3}
+	if ok, there := first(8443)["ok"]; !there || ok != false {
+		t.Errorf("port 8443: a target that did not answer says %v, it must say false", ok)
+	}
+}
+
+// TestTheStateCanBeSavedWhileItIsWritten: the monitor, the repairs and the API
+// write the maps of the state while the panel saves it. The runtime stops the
+// whole program when a map is written while it is walked, so Save must
+// marshal the state under the lock, and the writers must take it too. Run with
+// the race detector: go test -race ./internal/panel/store/
+func TestTheStateCanBeSavedWhileItIsWritten(t *testing.T) {
+	s := New(filepath.Join(t.TempDir(), "state.json"))
+	server := &model.Server{ID: "sk", Name: "K", Role: model.Kharej, IP: "10.0.1.1"}
+	s.Servers.Put(server.ID, server)
+	link := &model.Link{ID: "l1", IranID: "si", KharejID: "sk", Status: model.StatusUp}
+	link.Normalize()
+	s.Links.Put(link.ID, link)
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	// the writers: the maps of a server and of a tunnel, and the layout
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			s.Lock()
+			if link.Tests == nil {
+				link.Tests = map[string]map[string]any{}
+			}
+			link.Tests["tcp"+string(rune('a'+i%20))] = map[string]any{"ok": true, "at": float64(i)}
+			if server.ExitReach == nil {
+				server.ExitReach = map[string]map[string]any{}
+			}
+			server.ExitReach["1.2.3."+string(rune('a'+i%20))] = map[string]any{"ok": nil, "fails": i}
+			s.Layout["n"+string(rune('a'+i%20))] = []float64{float64(i), 1}
+			s.AddEvent(&model.Event{ID: "e", Message: "x"})
+			s.Unlock()
+		}
+	}()
+	// the savers: several at once, as the monitor, a handler and the bot do
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if err := s.Save(); err != nil {
+					t.Errorf("the state cannot be saved: %v", err)
+					return
+				}
+			}
+		}()
+	}
+	time.Sleep(400 * time.Millisecond)
+	close(stop)
+	wg.Wait()
+
+	// what was written is a state that can be read back
+	again := New(s.Path())
+	if again.LoadError != "" {
+		t.Fatalf("the state that was saved cannot be read back: %s", again.LoadError)
+	}
+	if again.Links.Get("l1") == nil {
+		t.Error("the tunnel is missing from the state that was saved")
 	}
 }

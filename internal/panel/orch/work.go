@@ -58,6 +58,9 @@ type Options struct {
 	Broadcast func(message map[string]any)
 	// Resolver watches the propagation of a changed record.
 	Resolver Resolver
+	// Backup makes a full backup and says what it made. The bot's /backup
+	// calls it; without it the bot says that backups are not configured.
+	Backup func() (string, error)
 }
 
 // WithDriver gives the brain its way to talk to the servers.
@@ -84,6 +87,14 @@ func (o *Orchestrator) WithBroadcast(broadcast func(message map[string]any)) *Or
 	return o
 }
 
+// WithBackup gives the brain its way to make a backup, for the bot.
+func (o *Orchestrator) WithBackup(backup func() (string, error)) *Orchestrator {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.backup = backup
+	return o
+}
+
 // WithResolver gives the brain its way to watch the propagation.
 func (o *Orchestrator) WithResolver(resolver Resolver) *Orchestrator {
 	o.resolver = resolver
@@ -98,6 +109,7 @@ func NewWith(st *store.Store, options Options) *Orchestrator {
 	o.notify = options.Notify
 	o.broadcast = options.Broadcast
 	o.resolver = options.Resolver
+	o.backup = options.Backup
 	return o
 }
 
@@ -476,17 +488,44 @@ func (o *Orchestrator) checkExits() {
 		if err != nil {
 			continue
 		}
+		// The state is changed under the lock, and what the operator is told
+		// is said after it: Emit takes the same lock to write the event in the
+		// log, and a lock that the caller holds is not given twice — the
+		// panel froze for good the first time an exit was found.
+		var said []anEvent
 		o.store.Lock()
 		current := o.store.Servers.Get(kharej.ID)
 		if current != nil {
-			o.updateExits(current, ports, found, reach)
+			said = o.updateExits(current, ports, found, reach)
 		}
 		o.store.Unlock()
+		o.emitAll(said)
 	}
 }
 
-// updateExits writes what the exits of a kharej are in the state.
-func (o *Orchestrator) updateExits(kharej *model.Server, ports []int, found map[int]*engine.Exit, reach map[string]bool) {
+// anEvent is a line for the log of the panel that the work under the lock of
+// the state has decided to write: it is written after the lock is released.
+type anEvent struct {
+	level   string
+	kind    string
+	message string
+	notify  bool
+	refs    map[string]string
+}
+
+// emitAll writes the events that were collected under the lock, with the lock
+// released.
+func (o *Orchestrator) emitAll(events []anEvent) {
+	for _, event := range events {
+		o.Emit(event.level, event.kind, event.message, event.notify, event.refs)
+	}
+}
+
+// updateExits writes what the exits of a kharej are in the state, with the
+// lock of the state held. It gives back what the operator has to be told: the
+// caller says it after it released the lock.
+func (o *Orchestrator) updateExits(kharej *model.Server, ports []int, found map[int]*engine.Exit, reach map[string]bool) []anEvent {
+	said := []anEvent{}
 	now := model.Now()
 	fresh := map[string]map[string]any{}
 	for _, port := range ports {
@@ -502,10 +541,7 @@ func (o *Orchestrator) updateExits(kharej *model.Server, ports []int, found map[
 			}
 		} else if old != nil {
 			inferred, _ := old["inferred"].(bool)
-			seen := 0.0
-			if value, there := old["seen"]; there {
-				seen, _ = value.(float64)
-			}
+			seen, _ := numberOf(old["seen"])
 			if inferred && now-seen < 3600 {
 				// inferred from the live connections: keep it through a
 				// quiet spell
@@ -524,12 +560,14 @@ func (o *Orchestrator) updateExits(kharej *model.Server, ports []int, found map[
 					inferred = ", inferred from the live connections"
 				}
 				method, _ := hop["method"].(string)
-				o.Emit("info", "exit", fmt.Sprintf("port %d on %s is forwarded to %s (%s%s)",
-					port, kharej.Name, strings.Join(to, ", "), method, inferred), false,
-					map[string]string{"server": kharej.ID})
+				said = append(said, anEvent{level: "info", kind: "exit", notify: false,
+					message: fmt.Sprintf("port %d on %s is forwarded to %s (%s%s)",
+						port, kharej.Name, strings.Join(to, ", "), method, inferred),
+					refs: map[string]string{"server": kharej.ID}})
 			} else {
-				o.Emit("info", "exit", fmt.Sprintf("port %d on %s is no longer forwarded to another server", port, kharej.Name), false,
-					map[string]string{"server": kharej.ID})
+				said = append(said, anEvent{level: "info", kind: "exit", notify: false,
+					message: fmt.Sprintf("port %d on %s is no longer forwarded to another server", port, kharej.Name),
+					refs:    map[string]string{"server": kharej.ID}})
 			}
 		}
 	}
@@ -573,46 +611,62 @@ func (o *Orchestrator) updateExits(kharej *model.Server, ports []int, found map[
 		if len(portsOf) == 0 {
 			portsOf = []string{"-"}
 		}
+		// What the last measurement said: true, false, or nothing — a target
+		// that was never measured is not known to be down, and it is not
+		// known to have been down either.
+		was, measured := entry["ok"].(bool)
 		if ok {
-			was := false
-			if value, there := entry["ok"]; there {
-				was, _ = value.(bool)
-			}
-			if was == false {
-				o.Emit("success", "exit", fmt.Sprintf("the exit %s of %s is reachable again (port %s)",
-					o.exitName(target), kharej.Name, strings.Join(portsOf, ", ")), true,
-					map[string]string{"server": kharej.ID})
+			if measured && !was {
+				said = append(said, anEvent{level: "success", kind: "exit", notify: true,
+					message: fmt.Sprintf("the exit %s of %s is reachable again (port %s)",
+						o.exitName(target), kharej.Name, strings.Join(portsOf, ", ")),
+					refs: map[string]string{"server": kharej.ID}})
 			}
 			since := now
-			if value, there := entry["since"]; there {
-				if f, ok := value.(float64); ok {
-					since = f
+			if measured && was {
+				// it was reachable already: it has been since then
+				if value, there := numberOf(entry["since"]); there {
+					since = value
 				}
 			}
 			kharej.ExitReach[target] = map[string]any{"ok": true, "fails": 0, "since": since}
 			continue
 		}
 		fails := 0
-		if value, there := entry["fails"]; there {
-			fails, _ = value.(int)
+		if value, there := numberOf(entry["fails"]); there {
+			fails = int(value)
 		}
 		entry["fails"] = fails + 1
-		if fails+1 >= o.settings().FailThreshold {
-			was := false
-			if value, there := entry["ok"]; there {
-				was, _ = value.(bool)
-			}
-			if !was {
-				entry["ok"] = false
-				entry["since"] = now
-				o.Emit("warning", "exit", fmt.Sprintf("port %s on %s is forwarded to %s, but that destination does not answer from %s. "+
+		if fails+1 >= o.settings().FailThreshold && (!measured || was) {
+			// the exit just went from reachable (or unknown) to unreachable:
+			// that is said once. Said again in every cycle it would be a
+			// message to Telegram every few seconds for as long as the
+			// destination is down.
+			entry["ok"] = false
+			entry["since"] = now
+			said = append(said, anEvent{level: "warning", kind: "exit", notify: true,
+				message: fmt.Sprintf("port %s on %s is forwarded to %s, but that destination does not answer from %s. "+
 					"(information only; this step is outside the tunnel and the panel changes nothing)",
-					strings.Join(portsOf, ", "), kharej.Name, o.exitName(target), kharej.Name), true,
-					map[string]string{"server": kharej.ID})
-			}
+					strings.Join(portsOf, ", "), kharej.Name, o.exitName(target), kharej.Name),
+				refs: map[string]string{"server": kharej.ID}})
 		}
 		kharej.ExitReach[target] = entry
 	}
+	return said
+}
+
+// numberOf reads a number of the state: the panel writes them as integers,
+// and a state that was read back from the file holds every number as a float.
+func numberOf(value any) (float64, bool) {
+	switch v := value.(type) {
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case float64:
+		return v, true
+	}
+	return 0, false
 }
 
 // exitName is how an exit is named: the server of the address, when it is
@@ -632,8 +686,9 @@ func targetsOf(hop map[string]any) []string {
 	if hop == nil {
 		return nil
 	}
-	list, _ := hop["targets"].([]string)
-	return list
+	// the panel writes the targets as a list of strings; a state that was
+	// read back from the file holds them as a list of values
+	return store.HopTargets(hop["targets"])
 }
 
 // sameTargets tells whether two hops go to the same addresses.

@@ -26,6 +26,13 @@ func (f *Found) Transport() string {
 	return "tcp"
 }
 
+// DefaultToken is the secret the engine uses for a side whose configuration
+// names none (defaultToken in internal/engine/cmd/defaults.go). The panel
+// must say the same word: a tunnel found without a token is written back with
+// the one the engine really used, or the two ends would stop agreeing the
+// moment the panel rewrites one of them.
+const DefaultToken = "backpack"
+
 // Token is the secret the two ends of the tunnel share.
 func (f *Found) Token() string {
 	if value, there := f.Data.Get("token"); there {
@@ -34,7 +41,7 @@ func (f *Found) Token() string {
 			return text
 		}
 	}
-	return "bulltunnel" // the engine's built-in default
+	return DefaultToken // the engine's built-in default
 }
 
 // Port is the port the tunnel listens on (or dials).

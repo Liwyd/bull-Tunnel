@@ -107,9 +107,13 @@ func (o *Orchestrator) ensureProbe(link *model.Link) int {
 	for busy[port] {
 		port++
 	}
+	// the port that is in the tunnel now is the one that counts: another
+	// operation may have given it one while this one looked for a free port
 	o.write(link, func(current *model.Link) {
 		if current.ProbePort == 0 {
 			current.ProbePort = port
+		} else {
+			port = current.ProbePort
 		}
 	})
 	return port
@@ -195,7 +199,9 @@ func (o *Orchestrator) try(link *model.Link, transport string, ports []string) *
 		return result
 	}
 	work.ProbePort = o.ensureProbe(work)
-	var probe *engine.Probe
+	// without a driver the panel has no way to build anything: that is an
+	// answer of the test, and not a nil that is read a few lines down
+	probe := &engine.Probe{OK: false, Error: "the panel has no way to reach the servers"}
 	if o.driver != nil {
 		if err := o.driver.Deploy(work, iran, kharej, transport, ports); err != nil {
 			probe = &engine.Probe{OK: false, Error: err.Error()}
@@ -275,10 +281,20 @@ func (o *Orchestrator) markUp(link *model.Link, transport string, latency *float
 // The tunnel is worked on as a copy: the panel writes the state while the
 // discovery talks to the servers, and every change is written to the tunnel
 // that is there now, under the lock of the state.
+//
+// It reserves the tunnel, and says no when something is working on it.
 func (o *Orchestrator) Discover(link *model.Link, transports []string) bool {
-	if o.Busy(link.ID) {
+	if !o.TryBusy(link.ID) {
 		return false
 	}
+	defer o.SetBusy(link.ID, false)
+	return o.discover(link, transports)
+}
+
+// discover is Discover for a tunnel the caller has reserved already: the
+// background work reserves the tunnel in the cycle, so that the next cycle does
+// not start it twice, and then runs it with the cycle released.
+func (o *Orchestrator) discover(link *model.Link, transports []string) bool {
 	work := o.copyLink(link)
 	if work == nil {
 		return false
@@ -287,12 +303,10 @@ func (o *Orchestrator) Discover(link *model.Link, transports []string) bool {
 	if iran == nil || kharej == nil {
 		return false
 	}
-	o.SetBusy(link.ID, true)
 	previous := work.Status
 	o.write(link, func(current *model.Link) { current.Status = model.StatusTesting })
 	o.Changed()
 	defer func() {
-		o.SetBusy(link.ID, false)
 		o.write(link, func(current *model.Link) {
 			if current.Status == model.StatusTesting {
 				current.Status = previous
@@ -318,7 +332,9 @@ func (o *Orchestrator) Discover(link *model.Link, transports []string) bool {
 		return false
 	}
 	if taken := o.portsTaken(work); taken != "" {
+		changed := false
 		o.write(link, func(current *model.Link) {
+			changed = current.Error != taken
 			if current.Built {
 				current.Status = model.StatusDown
 			} else {
@@ -326,8 +342,15 @@ func (o *Orchestrator) Discover(link *model.Link, transports []string) bool {
 			}
 			current.Error = taken
 		})
-		o.Emit("error", "discover", fmt.Sprintf("tunnel %s was not built: %s", o.LinkLabel(work), taken), true,
-			map[string]string{"link": link.ID})
+		// The ports are taken by something that is not ours, and they will not
+		// be free in a minute: the tunnel is looked at again after the backoff
+		// and not in every cycle, and the operator is told once for a reason —
+		// not every few seconds, in Telegram, for as long as it lasts.
+		o.setRepairAfter(link.ID, model.Now()+RepairBackoff)
+		if changed {
+			o.Emit("error", "discover", fmt.Sprintf("tunnel %s was not built: %s", o.LinkLabel(work), taken), true,
+				map[string]string{"link": link.ID})
+		}
 		return false
 	}
 	candidates := transports
@@ -408,6 +431,7 @@ func (o *Orchestrator) Discover(link *model.Link, transports []string) bool {
 		return false
 	}
 	o.markUp(work, best.Transport, final.LatencyMS)
+	o.clearRepairAfter(link.ID)
 	ranking := []string{}
 	for i, result := range good {
 		if i >= 4 {
@@ -431,9 +455,10 @@ func latencyOf(result *model.TestResult) float64 {
 
 // SetTransport puts a tunnel on another carrier.
 func (o *Orchestrator) SetTransport(link *model.Link, transport string, pin bool) bool {
-	if o.Busy(link.ID) {
+	if !o.TryBusy(link.ID) {
 		return false
 	}
+	defer o.SetBusy(link.ID, false)
 	work := o.copyLink(link)
 	if work == nil {
 		return false
@@ -442,17 +467,13 @@ func (o *Orchestrator) SetTransport(link *model.Link, transport string, pin bool
 	if iran == nil || kharej == nil {
 		return false
 	}
-	o.SetBusy(link.ID, true)
 	old := work.Transport
 	o.write(link, func(current *model.Link) {
 		current.Status = model.StatusTesting
 		current.Pinned = pin
 	})
 	o.Changed()
-	defer func() {
-		o.SetBusy(link.ID, false)
-		o.Changed()
-	}()
+	defer o.Changed()
 
 	if err := o.install(iran); err != nil {
 		o.write(link, func(current *model.Link) {
@@ -505,10 +526,21 @@ func (o *Orchestrator) SetTransport(link *model.Link, transport string, pin bool
 
 // Repair rebuilds a tunnel that is down while its two servers answer: it
 // tries the other carriers.
+//
+// It reserves the tunnel, and says no when something is working on it.
 func (o *Orchestrator) Repair(link *model.Link) bool {
-	if o.Busy(link.ID) {
+	if !o.TryBusy(link.ID) {
 		return false
 	}
+	defer o.SetBusy(link.ID, false)
+	return o.repair(link)
+}
+
+// repair is Repair for a tunnel the caller has reserved already. The cycle
+// reserves the tunnel and then runs the repair in the background, so that the
+// next cycle does not start it twice — which is why the repair itself must not
+// ask whether the tunnel is free: it is not, the caller holds it.
+func (o *Orchestrator) repair(link *model.Link) bool {
 	work := o.copyLink(link)
 	if work == nil {
 		return false
@@ -517,11 +549,9 @@ func (o *Orchestrator) Repair(link *model.Link) bool {
 	if !o.Usable(iran) || !o.Usable(kharej) {
 		return false
 	}
-	o.SetBusy(link.ID, true)
 	o.write(link, func(current *model.Link) { current.Status = model.StatusTesting })
 	o.Changed()
 	defer func() {
-		o.SetBusy(link.ID, false)
 		o.write(link, func(current *model.Link) {
 			if current.Status == model.StatusTesting {
 				current.Status = model.StatusDown
@@ -529,6 +559,9 @@ func (o *Orchestrator) Repair(link *model.Link) bool {
 		})
 		o.Changed()
 	}()
+	// the copy carries the probe port of the stored tunnel: what is deployed
+	// from it at the end must keep it
+	work.ProbePort = o.ensureProbe(work)
 
 	current := work.Transport
 	var order []string
@@ -574,7 +607,7 @@ func (o *Orchestrator) Repair(link *model.Link) bool {
 				how = fmt.Sprintf("with the protocol %s (previous: %s)", transport, orUnknown(current, "—"))
 			}
 			o.Emit("success", "repair", fmt.Sprintf("tunnel %s %s is back up and in service (%.0fms)",
-				o.LinkLabel(link), how, latencyOf(result)), true,
+				o.LinkLabel(work), how, latencyOf(result)), true,
 				map[string]string{"link": link.ID})
 			return true
 		}
@@ -582,49 +615,65 @@ func (o *Orchestrator) Repair(link *model.Link) bool {
 	// nothing worked: leave the best known transport deployed so the tunnel
 	// heals by itself when the path does
 	fallback := ""
-	if link.Pinned && current != "" {
+	if work.Pinned && current != "" {
 		fallback = current
 	} else {
-		ranked := link.RankedTransports(o.settings().CandidateTransports)
+		ranked := work.RankedTransports(o.settings().CandidateTransports)
 		if len(ranked) > 0 {
 			fallback = ranked[0]
 		} else {
 			fallback = current
 		}
 	}
+	// The result is written to the tunnel that is in the panel now, under the
+	// lock of the state — the argument may be that very tunnel, and the API
+	// reads it while this runs — and what is deployed is the working copy with
+	// the fallback in it, not the tunnel as it was before the tests.
 	if fallback != "" {
-		link.Transport = fallback
+		work.Transport = fallback
+		o.write(link, func(stored *model.Link) { stored.Transport = fallback })
 		if o.driver != nil {
-			o.driver.Deploy(link, iran, kharej, fallback, ports)
+			o.driver.Deploy(work, iran, kharej, fallback, ports)
 		}
 	}
-	link.Status, link.Error = model.StatusDown, "all transports failed"
-	if link.FailCount < o.settings().FailThreshold {
-		link.FailCount = o.settings().FailThreshold
-	}
+	o.write(link, func(stored *model.Link) {
+		stored.Status, stored.Error = model.StatusDown, "all transports failed"
+		if stored.FailCount < o.settings().FailThreshold {
+			stored.FailCount = o.settings().FailThreshold
+		}
+	})
 	o.setRepairAfter(link.ID, model.Now()+RepairBackoff)
 	o.Emit("error", "repair", fmt.Sprintf("rebuilding the tunnel %s failed; no protocol answered (retrying in %d minutes)",
-		o.LinkLabel(link), RepairBackoff/60), true,
+		o.LinkLabel(work), RepairBackoff/60), true,
 		map[string]string{"link": link.ID})
 	return false
 }
 
 // redeployIranSide writes the configuration of the Iran side of a tunnel
 // again.
+//
+// The tunnel is worked on as a copy, and the copy carries the probe port: the
+// port is given to the stored tunnel by ensureProbe, and the copy would not
+// know it — the configuration would be written without the probe port, and
+// the tunnel, which is healthy, would read as down at the next check.
 func (o *Orchestrator) redeployIranSide(link *model.Link) bool {
-	iran, kharej := o.Pair(link)
-	if !o.Usable(iran) || kharej == nil || link.Transport == "" {
+	work := o.copyLink(link)
+	if work == nil {
 		return false
 	}
-	o.ensureProbe(link)
+	iran, kharej := o.Pair(work)
+	if !o.Usable(iran) || kharej == nil || work.Transport == "" {
+		return false
+	}
+	work.ProbePort = o.ensureProbe(work)
 	if o.driver == nil {
 		return false
 	}
 	ports := []string{}
-	o.read(func() { ports = o.store.LinkPorts(link) })
-	if err := o.driver.DeployIran(link, iran, kharej, ports); err != nil {
-		o.Emit("error", "deploy", fmt.Sprintf("updating the ports of %s failed: %v", o.LinkLabel(link), err), true,
-			map[string]string{"link": link.ID})
+	o.read(func() { ports = o.store.LinkPorts(work) })
+	if err := o.driver.DeployIran(work, iran, kharej, ports); err != nil {
+		o.Emit("error", "deploy", fmt.Sprintf("updating the ports of %s failed: %v", o.LinkLabel(work), err), true,
+			map[string]string{"link": work.ID})
 		return false
 	}
 	return true
@@ -670,7 +719,9 @@ func (o *Orchestrator) SettingsChanged(link *model.Link) bool {
 	if iran == nil || kharej == nil {
 		return false
 	}
-	o.SetBusy(work.ID, true)
+	if !o.TryBusy(work.ID) {
+		return false
+	}
 	defer func() {
 		o.SetBusy(work.ID, false)
 		o.Changed()
@@ -731,24 +782,36 @@ func (o *Orchestrator) ScheduleRepairs() {
 			continue
 		}
 		iran, kharej := o.Pair(link)
-		if o.Usable(iran) && o.Usable(kharej) {
-			// reserve the tunnel now, so the next tick does not start it
-			// twice
-			o.SetBusy(link.ID, true)
-			// the repair runs in the background: it can take a minute, and
-			// the check cycle must not wait for it — the cycle is what
-			// checks every tunnel and moves every domain.
-			go func(link *model.Link) {
-				defer o.SetBusy(link.ID, false)
-				o.Repair(link)
-				o.evaluateDomains()
-			}(link)
+		if !o.Usable(iran) || !o.Usable(kharej) {
+			continue
 		}
+		// Reserve the tunnel now, so the next tick does not start it twice.
+		// The reservation is held by the background work and given back when
+		// it ends, and the work itself must not ask for it again: it would
+		// find the tunnel busy — it is, with this very reservation — and
+		// return at once, and no tunnel would ever be repaired.
+		if !o.TryBusy(link.ID) {
+			continue
+		}
+		// the repair runs in the background: it can take a minute, and the
+		// check cycle must not wait for it — the cycle is what checks every
+		// tunnel and moves every domain.
+		o.background(func() {
+			defer o.SetBusy(link.ID, false)
+			o.repair(link)
+			o.evaluateLater()
+		})
 	}
 }
 
 // kick starts the work a group of tunnels needs: a tunnel that is not
 // built is built, a tunnel that is down is repaired.
+//
+// The work runs in the background, with the tunnel reserved. A build or a
+// repair takes minutes — it tests the carriers one after the other — and the
+// cycle that called this is the one that checks every tunnel and moves every
+// domain: it cannot wait for a tunnel that is being rebuilt. The domains are
+// looked at again when the work is over.
 func (o *Orchestrator) kick(group []*model.Link) {
 	if !o.settings().AutoRepair || o.settings().ObserveOnly {
 		return
@@ -761,17 +824,32 @@ func (o *Orchestrator) kick(group []*model.Link) {
 		if !o.Usable(iran) || !o.Usable(kharej) {
 			continue
 		}
+		var work func()
 		switch link.Status {
 		case model.StatusPending:
-			o.Discover(link, nil)
-		case model.StatusDown:
-			if o.repairAfterAt(link.ID) <= model.Now() {
-				o.SetBusy(link.ID, true)
-				o.SetBusy(link.ID, false)
-				o.Repair(link)
-				o.evaluateDomains()
+			// a tunnel that could not be built — its ports are taken, no
+			// protocol answered — is tried again after the backoff and not in
+			// every cycle
+			if o.repairAfterAt(link.ID) > model.Now() {
+				continue
 			}
+			work = func() { o.discover(link, nil) }
+		case model.StatusDown:
+			if o.repairAfterAt(link.ID) > model.Now() {
+				continue
+			}
+			work = func() { o.repair(link) }
+		default:
+			continue
 		}
+		if !o.TryBusy(link.ID) {
+			continue
+		}
+		o.background(func() {
+			defer o.SetBusy(link.ID, false)
+			work()
+			o.evaluateLater()
+		})
 	}
 }
 

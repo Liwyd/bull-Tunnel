@@ -120,6 +120,18 @@ func (o *Orchestrator) BotCommand(command string, args []string) string {
 		return "🔄 the immediate check has started"
 	case "/scan":
 		return fmt.Sprintf("🔍 the search is over: %d new tunnels were added", o.ScanAll(nil))
+	case "/backup":
+		o.mu.Lock()
+		backup := o.backup
+		o.mu.Unlock()
+		if backup == nil {
+			return "backups are not configured"
+		}
+		said, err := backup()
+		if err != nil {
+			return "❌ the backup failed: " + escapeHTML(err.Error())
+		}
+		return "💾 " + escapeHTML(orUnknown(said, "the backup was made"))
 	}
 	return "unknown command — /help"
 }

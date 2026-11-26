@@ -19,7 +19,13 @@ import (
 // The decisions are taken with the lock of the state released for the
 // actions: a record is changed over the network, and the panel must not
 // stop answering while the DNS service is slow.
+//
+// Only one evaluation runs at a time: the cycle asks for one, and so does every
+// repair that ends in the background, and two of them that ran together would
+// both decide to move the same record.
 func (o *Orchestrator) evaluateDomains() {
+	o.evalMu.Lock()
+	defer o.evalMu.Unlock()
 	for _, domain := range o.store.Domains.List() {
 		// the domain is read as a copy: the panel writes the state while
 		// the cycle watches the domains
@@ -218,15 +224,16 @@ func (o *Orchestrator) handOver(src *model.Link, dst *model.Link, reason string)
 	if src == nil || dst == nil {
 		return false
 	}
-	if o.Busy(src.ID) || o.Busy(dst.ID) {
+	if !o.TryBusy(src.ID) {
 		return false
 	}
-	o.SetBusy(src.ID, true)
-	o.SetBusy(dst.ID, true)
-	defer func() {
-		o.SetBusy(src.ID, false)
-		o.SetBusy(dst.ID, false)
-	}()
+	defer o.SetBusy(src.ID, false)
+	if src.ID != dst.ID {
+		if !o.TryBusy(dst.ID) {
+			return false
+		}
+		defer o.SetBusy(dst.ID, false)
+	}
 
 	old := o.store.Links.Get(o.store.Carrier(src.ID))
 	if old == nil {
@@ -267,11 +274,13 @@ func (o *Orchestrator) releaseHandovers() {
 		// the ports go back to the tunnel they belong to: its
 		// configuration is rewritten, so it must not be rewritten by
 		// something else at the same time
-		if o.Busy(src.ID) || o.Busy(dst.ID) {
+		if !o.TryBusy(src.ID) {
 			continue
 		}
-		o.SetBusy(src.ID, true)
-		o.SetBusy(dstID, true)
+		if src.ID != dst.ID && !o.TryBusy(dst.ID) {
+			o.SetBusy(src.ID, false)
+			continue
+		}
 		o.store.ReleaseHandover(srcID)
 		o.redeployIranSide(dst)
 		o.redeployIranSide(src)
@@ -369,7 +378,7 @@ func (o *Orchestrator) assignInitial(domain *model.Domain) {
 		return
 	}
 	key := "init:" + domain.CurrentIP
-	if o.suggested[domain.ID] != key {
+	if o.suggestedOf(domain.ID) != key {
 		o.setSuggested(domain.ID, key)
 		o.Emit("warning", "domain", fmt.Sprintf("domain %s points at %s, which is not one of the registered Iran servers; the record was left untouched. "+
 			"Pick the Iran server by hand in the domain panel.",
@@ -545,7 +554,15 @@ func firstN(list []string, count int) []string {
 
 // ScanAll looks for the tunnels that already run on the servers and adds
 // them to the panel. It returns how many were added.
+//
+// One scan runs at a time. The monitor, the API and the bot all ask for one,
+// and two scans that ran together would both find the same tunnel before
+// either had added it, and add it twice. A scan that is asked for while
+// another one runs waits for it, and then looks again: what the first one
+// added is there by then, and is not added a second time.
 func (o *Orchestrator) ScanAll(servers []*model.Server) int {
+	o.scanMu.Lock()
+	defer o.scanMu.Unlock()
 	if servers == nil {
 		for _, server := range o.store.Servers.List() {
 			servers = append(servers, server)
@@ -564,7 +581,10 @@ func (o *Orchestrator) ScanAll(servers []*model.Server) int {
 			continue
 		}
 		found[server.ID] = items
-		server.LastScan = model.Now()
+		// the server in the panel, under the lock of the state: the one that
+		// was given may be that very server, and the cycle reads it
+		scanned := model.Now()
+		o.writeServer(server, func(current *model.Server) { current.LastScan = scanned })
 	}
 	o.setLastScan(model.Now())
 
@@ -588,7 +608,16 @@ func (o *Orchestrator) ScanAll(servers []*model.Server) int {
 			}
 		}
 	}
-	added := 0
+	// The pairs are worked out first, with the lock released — a name is
+	// resolved on the way, and the panel must not stop answering while the
+	// resolver is slow — and adopted after.
+	type pair struct {
+		iran   *model.Server
+		kharej *model.Server
+		server *engine.Found
+		client *engine.Found
+	}
+	pairs := []pair{}
 	for id, items := range found {
 		kharej := o.store.Servers.Get(id)
 		if kharej == nil || kharej.Role != model.Kharej {
@@ -634,14 +663,19 @@ func (o *Orchestrator) ScanAll(servers []*model.Server) int {
 			if match.found.Active != "active" || client.Active != "active" {
 				continue
 			}
-			if o.adopt(match.server, kharej, match.found, client) {
-				added++
-			}
+			pairs = append(pairs, pair{iran: match.server, kharej: kharej, server: match.found, client: client})
+		}
+	}
+	added := 0
+	for _, p := range pairs {
+		if o.adopt(p.iran, p.kharej, p.server, p.client) {
+			added++
 		}
 	}
 	if added > 0 {
 		// drop the placeholders of the pairs that turned out to have a
 		// tunnel already
+		o.store.Lock()
 		for _, link := range o.store.Links.List() {
 			if !link.Managed || link.Status != model.StatusPending || link.Transport != "" {
 				continue
@@ -653,15 +687,40 @@ func (o *Orchestrator) ScanAll(servers []*model.Server) int {
 				}
 			}
 		}
+		o.store.Unlock()
 	}
 	o.Changed()
 	return added
 }
 
 // adopt adds a tunnel that was found on the servers to the panel.
+//
+// The state is changed under the lock, and the operator is told after it is
+// released: Emit takes the lock itself.
 func (o *Orchestrator) adopt(iran *model.Server, kharej *model.Server, server *engine.Found, client *engine.Found) bool {
+	o.store.Lock()
+	link := o.adoptLocked(iran, kharej, server, client)
+	o.store.Unlock()
+	if link == nil {
+		return false
+	}
+	ports, _ := engine.SplitPorts(portsOf(server.Data))
+	state := "active"
+	if server.Active != "active" || client.Active != "active" {
+		state = fmt.Sprintf("service: %s / %s", orUnknown(server.Active, "?"), orUnknown(client.Active, "?"))
+	}
+	o.Emit("success", "adopt", fmt.Sprintf("the existing tunnel «%s» between %s ⇄ %s was found and added to the panel (%s, tunnel port %d, ports: %s, %s)",
+		server.Name, kharej.Name, iran.Name, server.Transport(), link.TunnelPort, orUnknown(strings.Join(ports, ", "), "—"), state), true,
+		map[string]string{"link": link.ID})
+	return true
+}
+
+// adoptLocked is adopt with the lock of the state held. It gives back the
+// tunnel it added, or nothing when the tunnel was known already — a tunnel that
+// is known is brought up to date with what was found, and is not added again.
+func (o *Orchestrator) adoptLocked(iran *model.Server, kharej *model.Server, server *engine.Found, client *engine.Found) *model.Link {
 	if strings.HasPrefix(server.Name, "bt-") && o.store.Links.Has(strings.TrimPrefix(server.Name, "bt-")) {
-		return false // one of ours
+		return nil // one of ours
 	}
 	ports, probe := engine.SplitPorts(portsOf(server.Data))
 	var existing *model.Link
@@ -691,7 +750,7 @@ func (o *Orchestrator) adopt(iran *model.Server, kharej *model.Server, server *e
 				existing.KharejUnit = client.Unit
 			}
 		}
-		return false
+		return nil
 	}
 	link := &model.Link{
 		IranID:     iran.ID,
@@ -721,14 +780,7 @@ func (o *Orchestrator) adopt(iran *model.Server, kharej *model.Server, server *e
 		link.KharejUnit = client.Unit
 	}
 	o.store.Links.Put(link.ID, link)
-	state := "active"
-	if server.Active != "active" || client.Active != "active" {
-		state = fmt.Sprintf("service: %s / %s", orUnknown(server.Active, "?"), orUnknown(client.Active, "?"))
-	}
-	o.Emit("success", "adopt", fmt.Sprintf("the existing tunnel «%s» between %s ⇄ %s was found and added to the panel (%s, tunnel port %d, ports: %s, %s)",
-		server.Name, kharej.Name, iran.Name, server.Transport(), link.TunnelPort, orUnknown(strings.Join(ports, ", "), "—"), state), true,
-		map[string]string{"link": link.ID})
-	return true
+	return link
 }
 
 // withoutPorts is the settings of a tunnel without its ports.
