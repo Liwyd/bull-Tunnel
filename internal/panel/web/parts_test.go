@@ -226,6 +226,86 @@ func TestAFreshPanelSaysWhatToDoFirst(t *testing.T) {
 	}
 }
 
+// The "Add" menu of a page offers what belongs to that page: the network view
+// is the overview and offers everything, the others only their own things.
+func TestTheAddMenuOfAPageHoldsWhatBelongsToIt(t *testing.T) {
+	parts := New(world(t), 1000, 990, nil, nil, Opts{}).Parts
+
+	const (
+		kharej   = `data-add="server" data-role="kharej"`
+		iran     = `data-add="server" data-role="iran"`
+		link     = `data-add="link"`
+		provider = `data-add="provider"`
+		domain   = `data-add="domain"`
+	)
+	all := []string{kharej, iran, link, provider, domain}
+	for _, c := range []struct {
+		part string
+		want []string
+	}{
+		{"net-actions", all},
+		{"tun-actions", []string{link}},
+		{"dom-actions", []string{domain, provider}},
+		{"inf-actions", []string{kharej, iran}},
+	} {
+		html := parts[c.part]
+		if strings.Count(html, `class="btn primary menu-btn"`) != 1 {
+			t.Errorf("%s does not hold exactly one Add menu: %s", c.part, html)
+		}
+		for _, entry := range all {
+			has := strings.Contains(html, entry)
+			wanted := false
+			for _, w := range c.want {
+				wanted = wanted || w == entry
+			}
+			if has != wanted {
+				t.Errorf("%s: the entry %s is there = %v, want %v", c.part, entry, has, wanted)
+			}
+		}
+	}
+}
+
+// The hint is for a completely empty panel only: a single server, a single
+// tunnel or a single domain is enough to end it, and a pair of servers with
+// no domain (the old rule kept it on screen for good) does not bring it back.
+func TestTheHintIsShownOnAnEmptyPanelOnly(t *testing.T) {
+	shown := func(state *store.Store) bool {
+		return strings.Contains(New(state, 1000, 990, nil, nil, Opts{}).Parts["empty-hint"], "Getting started")
+	}
+	if !shown(store.New("")) {
+		t.Errorf("an empty panel does not say what to do first")
+	}
+
+	one := store.New("")
+	one.Servers.Put("k1", &model.Server{ID: "k1", Name: "frankfurt", Role: "kharej", IP: "203.0.113.7",
+		Priority: 1, Enabled: true, Status: "online"})
+	if shown(one) {
+		t.Errorf("the hint is shown beside a server")
+	}
+
+	pair := store.New("")
+	pair.Servers.Put("k1", &model.Server{ID: "k1", Name: "frankfurt", Role: "kharej", IP: "203.0.113.7",
+		Priority: 1, Enabled: true, Status: "online"})
+	pair.Servers.Put("i1", &model.Server{ID: "i1", Name: "tehran", Role: "iran", IP: "198.51.100.4",
+		Priority: 1, Enabled: true, Status: "online"})
+	if shown(pair) {
+		t.Errorf("the hint is shown beside an Iran and a foreign server with no domain")
+	}
+
+	domain := store.New("")
+	domain.Domains.Put("d1", &model.Domain{ID: "d1", FQDN: "a.example.ir", TTL: 300, Status: "ok"})
+	if shown(domain) {
+		t.Errorf("the hint is shown beside a domain")
+	}
+
+	link := store.New("")
+	link.Links.Put("l1", &model.Link{ID: "l1", KharejID: "k1", IranID: "i1", Transport: "ws",
+		Ports: []string{"8443"}, Status: "up", Built: true})
+	if shown(link) {
+		t.Errorf("the hint is shown beside a tunnel")
+	}
+}
+
 // The feed of the log is worked out by Go: every row carries the level of
 // the event, the message the panel wrote — escaped, as HTML is — and the
 // newest event is at the top, where the flash of a new event lights it up.

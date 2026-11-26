@@ -153,27 +153,44 @@ func (f *Facts) sidebar(parts Parts) {
 	parts["top-flags"] = strings.Join(flags, "")
 }
 
-// the buttons in the header of every page.
-var addMenu = `<div class="menu"><button type="button" class="btn primary menu-btn">` + iconAdd + ` Add</button>
+// What the "Add" menu can create: the entries of the menu, by name.
+const (
+	addKharej   = `<button type="button" data-add="server" data-role="kharej">Foreign server</button>`
+	addIran     = `<button type="button" data-add="server" data-role="iran">Iran server</button>`
+	addLink     = `<button type="button" data-add="link">New tunnel</button>`
+	addProvider = `<button type="button" data-add="provider">DNS account</button>`
+	addDomain   = `<button type="button" data-add="domain">Domain</button>`
+)
+
+// addMenuOf is the "Add" menu of a page, with the entries that make sense on
+// that page and nothing else.
+func addMenuOf(items ...string) string {
+	return `<div class="menu"><button type="button" class="btn primary menu-btn">` + iconAdd + ` Add</button>
     <div class="menu-pop">
-      <button type="button" data-add="server" data-role="kharej">Foreign server</button>
-      <button type="button" data-add="server" data-role="iran">Iran server</button>
-      <button type="button" data-add="link">New tunnel</button>
-      <button type="button" data-add="provider">DNS account</button>
-      <button type="button" data-add="domain">Domain</button>
+      ` + strings.Join(items, "\n      ") + `
     </div></div>`
+}
+
+// The menus: the overview (the network view) can add everything, and every
+// other page adds what belongs to it.
+var (
+	addMenuAll     = addMenuOf(addKharej, addIran, addLink, addProvider, addDomain)
+	addMenuTunnels = addMenuOf(addLink)
+	addMenuDomains = addMenuOf(addDomain, addProvider)
+	addMenuServers = addMenuOf(addKharej, addIran)
+)
 
 // actions is the row of buttons at the top right of a page.
 func (f *Facts) actions(parts Parts) {
 	find := `<button type="button" class="btn" id="btn-scan">` + iconScan + ` Find tunnels</button>`
 	check := `<button type="button" class="btn" id="btn-check">` + iconCheck + ` Check</button>`
 	test := `<button type="button" class="btn primary" id="btn-discover">` + iconZap + ` Test &amp; connect</button>`
-	parts["net-actions"] = find + check + test + addMenu
+	parts["net-actions"] = find + check + test + addMenuAll
 	parts["tun-actions"] = `<button type="button" class="btn" id="btn-scan-2">` + iconScan + ` Find tunnels</button>` +
 		`<button type="button" class="btn" id="btn-check-2">` + iconCheck + ` Check</button>` +
-		`<button type="button" class="btn primary" id="btn-discover-2">` + iconZap + ` Test &amp; connect</button>` + addMenu
-	parts["dom-actions"] = addMenu
-	parts["inf-actions"] = addMenu
+		`<button type="button" class="btn primary" id="btn-discover-2">` + iconZap + ` Test &amp; connect</button>` + addMenuTunnels
+	parts["dom-actions"] = addMenuDomains
+	parts["inf-actions"] = addMenuServers
 	parts["set-actions"] = `<button type="button" class="btn" id="btn-settings">` + iconEdit + ` Edit the settings</button>`
 }
 
@@ -229,10 +246,12 @@ func (f *Facts) cells(list []Cell) []string {
 	return out
 }
 
-// onboarding is what a panel with nothing in it says: the three steps.
+// onboarding is what a panel with nothing in it says: the three steps. It is
+// said to a completely empty panel only: the first server, tunnel or domain
+// that is added ends it, however few the rest are.
 func (f *Facts) onboarding(parts Parts) {
-	show := len(f.Servers) < 2 || (len(f.Domains) == 0 && len(f.Servers) < 3)
-	if !show {
+	empty := len(f.Servers) == 0 && len(f.Links) == 0 && len(f.Domains) == 0
+	if !empty {
 		parts["empty-hint"] = "" // an empty part hides the hint
 		return
 	}

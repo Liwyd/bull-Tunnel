@@ -52,6 +52,10 @@ everything it found that stopped bull-Tunnel from being used for real.
 - Editing a server keeps its live status; checkbox groups can be cleared;
   an empty minutes field no longer saves 60× its default; settings are
   clamped to sane bounds; a cancelled confirm no longer reloads the page.
+- "Getting started" shows only on an empty panel; the graph never re-arranges
+  itself (a card stays where it is, new cards are placed once and remembered,
+  resizing does not re-zoom) and a "Re-arrange" button lays it out on demand;
+  each page's Add menu offers only what belongs to that page.
 - Observe-mode pill and demo/production footer are shown; settings have
   padding and their index sits on the left; the mobile sidebar closes;
   signing out stops the websocket reconnect loop.

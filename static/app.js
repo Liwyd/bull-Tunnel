@@ -210,8 +210,9 @@ async function loadView() {
   if (drawer) params.set("open", `${drawer.type}:${drawer.id}`);
   try {
     const answer = await api("GET", `/api/view?${params}`);
-    if (mine === viewSeq) { VIEW = answer.network; PARTS = answer.parts; }
+    if (mine === viewSeq) { VIEW = answer.network; PARTS = answer.parts; return true; }
   } catch (_) { /* the page keeps the view it already has */ }
+  return false; // the answer was not used: a newer question took its place, or it failed
 }
 
 /* What a page holds is the panel's: this puts it in the element with that
@@ -437,8 +438,14 @@ function fit() {
    of the operator on the card he is dragging, and draws the wires between
    the cards it can measure. */
 let flowAdopted = false;
+// rearranging is true for the one render that follows "Re-arrange": every card
+// takes the place the panel gives it, the ones that were dragged too.
+let rearranging = false;
 function renderFlow() {
   if (!S || !VIEW) return;
+  // the cards met for the first time in this render: the ones the page came
+  // with, and the ones the panel adds later
+  const met = [];
   // The page comes with the cards already in it (the panel draws them before
   // the script runs). They are taken over, not drawn beside: a card the
   // script did not know of would stay for good, a ghost of the one that was
@@ -449,6 +456,7 @@ function renderFlow() {
       if (els[el.dataset.id]) { el.parentNode.removeChild(el); continue; }
       els[el.dataset.id] = el;
       pos[el.dataset.id] = [parseFloat(el.style.left) || 0, parseFloat(el.style.top) || 0];
+      met.push(el.dataset.id);
       bindDrag(el);
     }
   }
@@ -470,12 +478,28 @@ function renderFlow() {
     const cls = `${n.class} ${keep}`.trim();
     if (el.className !== cls) el.className = cls;
     if (el.classList.contains("dragging")) continue; // a hand is on the card
-    pos[n.id] = [n.x, n.y];
-    el.style.left = `${n.x}px`;
-    el.style.top = `${n.y}px`;
+    // A card that is on the canvas stays where it is: the panel works out
+    // the places again at every render (a server was added, a column grew),
+    // and the cards the operator has not touched must not jump with it. Only
+    // a card that has no place yet takes the one the panel gives — and so
+    // does every card when the graph is re-arranged on purpose.
+    if (rearranging || !pos[n.id]) {
+      pos[n.id] = [n.x, n.y];
+      el.style.left = `${n.x}px`;
+      el.style.top = `${n.y}px`;
+      met.push(n.id);
+    }
     el.style.height = `${n.height}px`;
   }
   for (const id of Object.keys(els)) if (!seen.has(id)) { els[id].remove(); delete els[id]; delete pos[id]; }
+
+  // The place of a new card is the panel's own guess, and the panel guesses
+  // again at the next render: it is kept, so that the card stays where the
+  // operator saw it first, after a reload too. A card the panel already holds
+  // a place for is left alone.
+  const kept = {};
+  for (const id of met) if (seen.has(id) && pos[id] && !(S.layout && S.layout[id])) kept[id] = pos[id];
+  if (Object.keys(kept).length) saveLayout(kept);
 
   renderColumns();
   $("#flow-badge").innerHTML = `<i class="dot ok"></i><span>${esc(VIEW.badge)}</span>`;
@@ -762,15 +786,29 @@ $("#tools").addEventListener("click", async (e) => {
   if (z === "in") zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1.2);
   else if (z === "out") zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1 / 1.2);
   else if (z === "fit") fit();
-  else if (z === "reset") {
-    if (!confirm("Reset the server layout to the default?")) return;
-    if (!(await quiet(act(() => api("DELETE", "/api/layout"))))) return;
-    for (const id of Object.keys(pos)) delete pos[id];
-    if (S) S.layout = {};
-    needFit = true; // the cards are back where the panel puts them: the camera follows
-    loadViewThenRender();
-  }
+  else if (z === "reset") rearrange();
 });
+$("#rearrange").onclick = rearrange;
+// The one way to put the cards back where the panel puts them: the places the
+// operator dragged them to are forgotten, and the fresh ones are kept like
+// those of any new card.
+async function rearrange() {
+  if (!confirm("Re-arrange the graph? The positions you dragged the cards to are forgotten.")) return;
+  if (!(await quiet(act(() => api("DELETE", "/api/layout"))))) return;
+  // a place that was dragged a moment ago and not sent yet must not come back
+  clearTimeout(saveLayout.t);
+  pendingLayout = {};
+  if (S) S.layout = {};
+  needFit = true; // the cards are back where the panel puts them: the camera follows
+  // The view is asked for after the layout is gone, so it holds the fresh
+  // places. An answer that a newer question pushed aside (a push of the
+  // panel came in the meantime) is not the one: the question is asked again.
+  let fresh = false;
+  for (let i = 0; i < 4 && !fresh; i++) fresh = await loadView();
+  // a view that was not asked for after the reset still holds the old places
+  rearranging = fresh;
+  try { renderAll(); } finally { rearranging = false; }
+}
 $("#show-standby").onchange = drawWires;
 $("#show-pending").onchange = (e) => { $("#show-pending-2").checked = e.target.checked; drawWires(); loadViewThenRender(); };
 $("#show-pending-2").onchange = (e) => { $("#show-pending").checked = e.target.checked; drawWires(); loadViewThenRender(); };
@@ -1261,15 +1299,12 @@ $("#scrim").onclick = closeDrawer;
 $("#modal").addEventListener("mousedown", (e) => { if (e.target.id === "modal") closeModal(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeModal(); closeDrawer(); setSide(false); } });
 
-let lastStageW = 0;
 window.addEventListener("resize", () => {
   if (window.innerWidth > 1080) setSide(false); // the sheet is a sidebar again
-  const w = stage.clientWidth;
-  if (lastStageW && Math.abs(w - lastStageW) / lastStageW > 0.3) fit();
-  lastStageW = w;
+  // the graph is only drawn again, never fitted on its own: the camera is the
+  // operator's ("Fit" is one click away)
   drawWires();
 });
-requestAnimationFrame(() => { lastStageW = stage.clientWidth; });
 
 /* The clock in the top bar, and the failback countdown. The countdown itself
    is written by Go — into the drawer and into the page of the domain, as a
