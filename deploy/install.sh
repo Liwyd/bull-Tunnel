@@ -127,14 +127,24 @@ if [ -d "$here/../cmd/bull-tunnel-panel" ]; then
 fi
 
 TMP="$(mktemp -d)"
-say "fetching the panel $VERSION for $ARCH"
-command -v curl >/dev/null || die "curl is needed to fetch the panel"
-if [ "$VERSION" = "latest" ]; then
-  url="https://github.com/$REPO/releases/latest/download/bull-tunnel_linux_${ARCH}.tar.gz"
+if [ -n "${BT_DIST:-}" ]; then
+  # Release files built on this machine (bash build.sh <dir>): without this,
+  # an install from a checkout takes only the web interface from the
+  # checkout and the binaries from the releases page, so a change to the Go
+  # code never reaches the panel it is installed on.
+  say "installing the panel from $BT_DIST for $ARCH"
+  [ -f "$BT_DIST/bull-tunnel_linux_${ARCH}.tar.gz" ] || die "$BT_DIST holds no bull-tunnel_linux_${ARCH}.tar.gz (run: bash build.sh $BT_DIST)"
+  cp "$BT_DIST/bull-tunnel_linux_${ARCH}.tar.gz" "$TMP/panel.tar.gz"
 else
-  url="https://github.com/$REPO/releases/download/v$VERSION/bull-tunnel_linux_${ARCH}.tar.gz"
+  say "fetching the panel $VERSION for $ARCH"
+  command -v curl >/dev/null || die "curl is needed to fetch the panel"
+  if [ "$VERSION" = "latest" ]; then
+    url="https://github.com/$REPO/releases/latest/download/bull-tunnel_linux_${ARCH}.tar.gz"
+  else
+    url="https://github.com/$REPO/releases/download/v$VERSION/bull-tunnel_linux_${ARCH}.tar.gz"
+  fi
+  curl -fsSL "$url" -o "$TMP/panel.tar.gz" || die "the panel could not be fetched from $url"
 fi
-curl -fsSL "$url" -o "$TMP/panel.tar.gz" || die "the panel could not be fetched from $url"
 tar -xzf "$TMP/panel.tar.gz" -C "$TMP"
 [ -f "$TMP/bull-tunnel-panel" ] || die "the fetched file does not hold the panel"
 [ -f "$TMP/bull-tunnel" ] || die "the fetched file does not hold the management tool"

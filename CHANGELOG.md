@@ -5,7 +5,75 @@ All the versions of bull-Tunnel. The project follows
 change that may break a configuration, the one after it is a change that
 only adds something.
 
-## Unreleased
+## 1.5.0 — the production pass (2026-11-26)
+
+A full review of the panel, the dashboard and the engine, and the fixes of
+everything it found that stopped bull-Tunnel from being used for real.
+
+**The panel**
+- Telegram alerts are sent: the monitor was never given the bot, so no
+  failure, failover or repair ever reached Telegram.
+- Automatic repair runs: the scheduler reserved a tunnel and the repair
+  then refused it because it was reserved.
+- The panel no longer freezes for good the first time a forwarded exit is
+  found (the exits check emitted an event while holding the state lock).
+- HTTPS mode starts (it panicked on an empty certificate list) and stops
+  cleanly on SIGTERM.
+- The state file is written under the read lock: a save during a repair
+  or a scan could crash the panel with a concurrent map write.
+- A server that accepts TCP but never speaks SSH no longer hangs the whole
+  monitor: the handshake and the session have deadlines.
+- Building or repairing a tunnel runs in the background instead of
+  blocking the check cycle; two scans at once no longer adopt a tunnel
+  twice; a port clash is reported once, not every cycle.
+- Engine release/source/token changes apply without a restart; a cached
+  engine is used when the release host is unreachable; a purge removes the
+  config files too; found tunnels without a token get the engine's real
+  default (`backpack`).
+- Exit reachability is tri-state (no more alert spam, no false "reachable
+  again"); targets of `port=host:port` mappings are shown.
+- SOCKS5 proxies work for DNS and for Telegram; long Telegram messages are
+  cut on a character boundary.
+- Nightly backups are scheduled (time, zone and number of copies from the
+  settings) and sent to Telegram; `/backup` works in the bot; pruning no
+  longer panics.
+
+**The dashboard**
+- Adding a domain works; "Test SSH" reports success; restoring a copy kept
+  on the server works; "Read the record from DNS" on the domains page works.
+- Live updates no longer re-render every part (open menus, picked tiles,
+  unsaved drawer edits and command output survive a push).
+- Every carrier the engine speaks can be enabled (`wss`, `wssmux` were
+  unreachable, and an unticked carrier disappeared).
+- No ghost graph cards; the "Not built yet" filter, the ⚡ flapping mark,
+  the hover dimming and the saved camera work; unmeasured exits are grey,
+  not red.
+- Editing a server keeps its live status; checkbox groups can be cleared;
+  an empty minutes field no longer saves 60× its default; settings are
+  clamped to sane bounds; a cancelled confirm no longer reloads the page.
+- Observe-mode pill and demo/production footer are shown; settings have
+  padding and their index sits on the left; the mobile sidebar closes;
+  signing out stops the websocket reconnect loop.
+
+**The engine**
+- Throughput: the per-stream mux window defaults to 1 MiB instead of
+  64 KiB (one connection was capped at ~3.5 Mbit/s on a 150 ms path).
+- A mux tunnel carries 2048 simultaneous connections instead of 256.
+- The server notices a client that vanished (with a client that answers
+  heartbeats), so the fallback chain can move on.
+- A forwarded port that fails to bind is retried instead of staying dead.
+- UDP: a lost address or token datagram no longer black-holes a flow or
+  leaks a pool slot; replaced clients' pool entries are cleaned up.
+- `wsmux` over `ws`/`wss` no longer loses the first bytes after the upgrade.
+- All of it stays wire compatible with older engines on the other end.
+
+**Docs and install**
+- The docs no longer claim an AES-GCM session on every carrier: the
+  encryption is the carrier's (TLS for `wss`/`wssmux`/`quic`, Noise for
+  `stealth`).
+- `BT_DIST=<dir>` installs locally built release files from a checkout.
+
+## 1.4.x — unreleased fixes before 1.5.0
 
 - **The management tool looks where the panel keeps its files**: its own
   directory was `/var/lib/bulltunnel` while the panel keeps its files in

@@ -553,6 +553,20 @@ section 6, of the later ones in the changelog.
 
 ---
 
+## 5b. The production pass — 2026-11-26 (v1.5.0)
+
+A review of the whole tree found ~85 faults (24 control plane, 33
+dashboard, 9 engine, the rest small); all were fixed in one pass, each with
+a regression test, and are listed in CHANGELOG 1.5.0. Rule 3 ("the engine
+stays untouched") was set aside on the owner's word: the engine carries the
+traffic and had real faults. Left open:
+
+* **A21** — the scan script still looks for `bull-tunnel-<name>.service`
+  first; the panel's own `bulltunnel-<name>.service` units are found through
+  the script's `ExecStart` fallback. Changing it means changing the pinned
+  fixture `tests/fixtures/script-scan.sh` together with `scripts.go`.
+* Adopted links already stored with `token: "bulltunnel"` are not migrated.
+
 ## 6. History — how this repo was rebuilt
 
 Nothing below is a plan. It is the record of the rebuild — the audit

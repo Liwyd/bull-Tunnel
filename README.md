@@ -274,12 +274,13 @@ asked under it.
 amd64, arm64, 386 and armv7, and the panel builds it, ships it, versions it
 and installs it on the servers that carry the tunnels. What it does:
 
-- **An encrypted session on every carrier:** the two ends authenticate each
-  other with a shared token, the traffic keys come from an X25519 exchange
-  stretched with HKDF-SHA256 (so a recording of the traffic cannot be read
-  later), and every frame is sealed with AES-256-GCM.
+- **An authenticated session on every carrier:** the two ends prove they
+  share the tunnel's token before anything is forwarded. The encryption is
+  the carrier's: `wss`, `wssmux` and `quic` run under TLS and `stealth`
+  under a Noise record layer; the plain carriers (`tcp`, `tcpmux`, `ws`,
+  `wsmux`, `kcp`) are best for traffic that is already encrypted end to end.
 - **Several streams over one connection:** every opened port is an independent
-  stream with a window of 64 KB (4 MB for the session), so one slow reader
+  stream with a window of 1 MB (4 MB for the session), so one slow reader
   cannot make the memory grow without a bound.
 - **The carriers:** `tcp`, `tcpmux`, `stealth` (a Noise record layer with no
   fingerprint for inspection to match), `ws` and `wss` (websockets over HTTP

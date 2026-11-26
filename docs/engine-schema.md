@@ -113,6 +113,108 @@ does not know.
 
 ## Metrics file
 
+The engine writes a small JSON file next to its config
+(`<name>.metrics.json`), atomically, every 30 seconds:
+
+```json
+{"uptime": "1h10m13s", "bytes_in": 918273, "bytes_out": 8127344,
+ "connected": true, "peer": "203.0.113.7:51234"}
+```
+
+`connected` says whether a client is attached right now; it is absent when
+the carrier cannot tell. The carriers a build speaks are not in this file:
+the engine prints them with `-v` (`transports: tcp,tcpmux,…`), and **the
+panel never tests a carrier the engine does not have**.
+
+## Health probe
+
+A tunnel the panel creates gets one extra mapping on the *server* side:
+
+```
+127.0.0.1:<probe port> = 127.0.0.1:<ssh port of the far end>
+```
+
+The probe port is bound on the loopback only, so it is not reachable from
+the internet. Reading the SSH banner from it proves the whole path: the
+packet leaves the Iran server, travels the tunnel, and comes back from the
+SSH daemon of the far end. A tunnel that answers this probe is healthy in
+the only sense that matters.
+
+A tunnel that was found on a server (adopted, not created by the panel) has
+no probe until the panel rewrites its config for the first time. Until then
+its health is inferred from the engine's own report or from the socket
+table, and the dashboard marks it as *not verified*.
+
+## The carriers
+
+The carrier is the transport under the session. The session is always
+encrypted and authenticated, so a carrier only has to move bytes.
+
+| Transport | Carrier | Notes |
+|---|---|---|
+| `tcp` | plain TCP | the simplest and the fastest |
+| `tcpmux` | TCP | the same carrier: the session is always multiplexed |
+| `ws` | WebSocket over HTTP/1.1 | survives proxies that speak HTTP |
+| `wsmux` | WebSocket | the same carrier |
+| `wss` | WebSocket over TLS | confidentiality on top of the session |
+| `wssmux` | WebSocket over TLS | the same carrier |
+| `stealth` | a Noise record layer | no TLS fingerprint and no recognisable handshake: on the wire it is indistinguishable from random |
+| `kcp` | a reliable protocol over UDP | survives a path where a long-lived TCP flow stalls |
+| `quic` | QUIC streams over UDP | brings its own TLS 1.3, multiplexing and loss recovery |
+
+`udp` carries datagrams only and cannot be probed with a TCP probe, so the
+panel does not offer it. The experimental carriers of the engine (`xdi`,
+`pck`, `spoof`) need raw sockets and root, so they are never offered to
+an unattended repair.
+
+The panel measures the carriers and keeps the fastest one that works, but
+it never switches away from a working tunnel on its own: a change is made
+only after several failed checks in a row, and traffic returns to the first
+choice after it has been stable for ten minutes.
+
+## The session
+
+Whatever the carrier, the client first proves it knows the tunnel's
+`token`, then the two ends multiplex the forwarded connections over it.
+
+```
+client (foreign server)                   server (Iran server)
+  |  dial the carrier, send the token                         |
+  |---------------------------------------------------------->|
+  |  control channel: heartbeats, "open a connection" asks    |
+  |<--------------------------------------------------------->|
+  |  data: one connection (tcp, ws…) or one smux stream       |
+  |  (tcpmux, wsmux, kcp…) per user connection                |
+  |<--------------------------------------------------------->|
+```
+
+* **Authentication.** The shared `token` is checked before the server
+  accepts a carrier. A peer that does not know it is refused.
+* **Confidentiality comes from the carrier, not from the session.** `wss`,
+  `wssmux` and `quic` run under TLS; `stealth` runs under a Noise
+  (NNpsk0, X25519 + ChaCha20-Poly1305) record layer keyed from the token.
+  `tcp`, `tcpmux`, `ws`, `wsmux` and `kcp` carry the bytes as they are —
+  which is fine for traffic that is already encrypted end to end (TLS,
+  xray, WireGuard), and the reason to pick a TLS or Noise carrier for
+  anything that is not. (The layer-3 tunnel of the engine has its own
+  X25519/AES-GCM session; the panel does not build layer-3 tunnels.)
+* **The streams.** The server opens a stream for every connection that
+  arrives on a published port, and the client connects to the destination
+  the server names. On the multiplexed carriers smux bounds the memory: a
+  receive window per stream (`mux_streambuffer`) and per session
+  (`mux_receivebuffer`), both in the configuration.
+* **The keepalive.** The server sends a heartbeat every `heartbeat`
+  seconds on the control channel; the multiplexed sessions have smux's own
+  keepalive.
+
+When the panel rewrites a config it did not write itself, every key it does
+not manage is preserved (`mux_con`, …). The keys it does manage are
+`transport`, `token`, `ports`, `accept_udp`, `mss`, `heartbeat`,
+`bind_addr`/`remote_addr` and the tunnel port. The engine ignores the keys it
+does not know.
+
+## Metrics file
+
 The engine writes a small JSON file next to its config, updated once a
 second:
 
@@ -197,7 +299,7 @@ client                                    server
   replayed as another kind of frame or as another stream.
 * **The streams.** The server opens a stream for every connection that
   arrives on a published port, and the client connects to the destination
-  the server names. The window is 4 MB per session and 64 KB per stream by
+  the server names. The window is 4 MB per session and 1 MB per stream by
   default (both are in the configuration), so that one slow reader cannot
   make the engine buffer without a bound.
 * **The keepalive.** A ping every 20 seconds; a session that hears nothing

@@ -89,19 +89,14 @@ Honest answer: **the framing is low-level, and the payload is encrypted**.
   the engine speaks it directly on a socket. There is no userspace
   "framework" between the socket and the tunnel: one `read()` gives the
   bytes of one frame, and the engine never copies more than it has to.
-* **Every carrier runs inside one session layer that is authenticated and
-  encrypted**, whatever the carrier is underneath. The two ends prove they
-  hold the same token before a byte of the user's traffic moves, the
-  traffic keys come from an ephemeral X25519 exchange stretched with
-  HKDF-SHA256 — so a recording of the traffic cannot be read later, even
-  by someone who learns the token — and every frame is sealed with
-  AES-256-GCM with its type, its flags, its length and its stream id
-  authenticated as well. A frame cannot be replayed as another kind of
-  frame or as another stream.
-* `wss`/`quic` add TLS under the session, so the carrier is encrypted
-  twice. It is not needed for the confidentiality of the payload — the
-  session already provides it — but it is what makes the tunnel look like
-  ordinary web traffic to a middlebox.
+* **Every carrier starts with the token.** The two ends prove they hold
+  the same token before a byte of the user's traffic moves. What hides the
+  traffic is the carrier: `wss`, `wssmux` and `quic` are TLS, `stealth` is
+  a Noise (X25519 + ChaCha20-Poly1305) record layer with no fingerprint
+  for inspection to match, and the plain carriers (`tcp`, `tcpmux`, `ws`,
+  `wsmux`, `kcp`) carry the bytes as they are — the right choice for
+  traffic that is already encrypted end to end, the wrong one for anything
+  that is not.
 
 ### Does it survive filtering?
 
