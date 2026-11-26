@@ -165,8 +165,8 @@ first:
 | W3 | The session cookie is `Secure` only when the request itself was TLS | ✅ done (commit 68) |
 | W4 | The websocket upgrade accepts any origin | ✅ done (commit 68) |
 | W5 | The command channel is gated on the agent only; the panel sends whatever is asked | not done |
-| W6 | The local management key counts for every route, and behind a reverse proxy every request looks local | not done |
-| W7 | Creating a link or a domain does not check that the servers it names exist | not done |
+| W6 | The local management key counts for every route, and behind a reverse proxy every request looks local | ✅ done |
+| W7 | Creating a link or a domain does not check that the servers it names exist | ✅ done |
 
 Nothing in this list is a hole in the engine or in the crypto: the review
 found the password hashing, the session signing, the quoting of names for

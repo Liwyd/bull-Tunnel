@@ -266,6 +266,12 @@ func (s *Server) links(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "the two servers of the tunnel are needed")
 			return
 		}
+		// a tunnel between servers the panel does not know could never be
+		// built, and every page that draws it would look its ends up in vain
+		if !s.store.Servers.Has(link.IranID) || !s.store.Servers.Has(link.KharejID) {
+			writeError(w, http.StatusBadRequest, "one or both servers named by the tunnel do not exist")
+			return
+		}
 		s.store.Links.Put(link.ID, link)
 		s.orch.Changed()
 		writeJSON(w, http.StatusOK, map[string]any{"link": s.linkBody(link)})
@@ -533,6 +539,17 @@ func (s *Server) domains(w http.ResponseWriter, r *http.Request) {
 		}
 		if domain.FQDN == "" || domain.ProviderID == "" {
 			writeError(w, http.StatusBadRequest, "the name and the DNS account of the domain are needed")
+			return
+		}
+		providerExists := s.store.Providers.Has(domain.ProviderID)
+		iranExists := domain.IranID == "" || s.store.Servers.Has(domain.IranID)
+		kharejExists := domain.KharejID == "" || s.store.Servers.Has(domain.KharejID)
+		if !providerExists {
+			writeError(w, http.StatusBadRequest, "the DNS account named by the domain does not exist")
+			return
+		}
+		if !iranExists || !kharejExists {
+			writeError(w, http.StatusBadRequest, "one or both servers named by the domain do not exist")
 			return
 		}
 		s.store.Domains.Put(domain.ID, domain)

@@ -77,7 +77,7 @@ func main() {
 	defer pool.Close()
 
 	// the driver: the real engine, or the simulated network of the demo
-	var driver orch.Driver = engine.NewDriver(pool, filepath.Join(data, "cache"), "latest", state.Settings.EngineRelease, state.Settings.EngineSource)
+	var driver orch.Driver = engine.NewDriver(pool, filepath.Join(data, "cache"), state.Settings.EngineRelease, state.Settings.EngineSource, state.Settings.EngineToken)
 	// the DNS: the real service, or the one of the demo
 	var dnsFactory func(provider *model.DNSProvider) (dns.Client, error) = func(provider *model.DNSProvider) (dns.Client, error) {
 		return dns.New(provider, os.Getenv("BT_DNS_PROXY"))

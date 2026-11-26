@@ -223,11 +223,25 @@ func isLocal(r *http.Request) bool {
 	if err != nil {
 		host = r.RemoteAddr
 	}
+	isLoopback := false
 	switch host {
 	case "127.0.0.1", "::1", "localhost", "unix":
-		return true
+		isLoopback = true
 	}
-	return false
+	if !isLoopback {
+		return false
+	}
+	// If behind a reverse proxy (like Nginx on localhost forwarding to the panel),
+	// make sure X-Forwarded-For is absent or also localhost, so external callers
+	// cannot spoof local key auth via a proxy.
+	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+		hops := strings.Split(fwd, ",")
+		last := strings.TrimSpace(hops[len(hops)-1])
+		if last != "127.0.0.1" && last != "::1" && last != "localhost" {
+			return false
+		}
+	}
+	return true
 }
 
 // sessionToken is the session of the request.

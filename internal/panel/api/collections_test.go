@@ -11,6 +11,13 @@ import (
 // all when it has never measured it).
 func aFloat(value float64) *float64 { return &value }
 
+// aPair puts the two servers a test tunnel names into the store: a tunnel
+// is only created between servers the panel knows.
+func aPair(panel *Server) {
+	panel.store.Servers.Put("i1", &model.Server{ID: "i1", Name: "tehran", Role: model.Iran, IP: "10.0.2.1"})
+	panel.store.Servers.Put("k1", &model.Server{ID: "k1", Name: "frankfurt", Role: model.Kharej, IP: "10.0.1.1"})
+}
+
 // What the drawer sends is the one thing he changed: a tiny form with one
 // field, or a form with a handful. Writing it must not forget the rest of
 // the tunnel — the ports he did not touch, the protocol it runs on, the
@@ -75,6 +82,7 @@ func TestATunnelIsEditedWithoutForgettingTheRest(t *testing.T) {
 func TestTheMaximumSegmentSizeIsValidatedAndStored(t *testing.T) {
 	panel, server := aServer(t)
 	cookie := aLogin(t, server)
+	aPair(panel)
 	panel.store.Links.Put("l1", &model.Link{ID: "l1", IranID: "i1", KharejID: "k1",
 		Status: "up", Transport: "ws", Ports: []string{}})
 
@@ -121,6 +129,7 @@ func TestTheMaximumSegmentSizeIsValidatedAndStored(t *testing.T) {
 func TestTheHeartbeatIsValidatedAndStored(t *testing.T) {
 	panel, server := aServer(t)
 	cookie := aLogin(t, server)
+	aPair(panel)
 	panel.store.Links.Put("l1", &model.Link{ID: "l1", IranID: "i1", KharejID: "k1",
 		Status: "up", Transport: "ws", Ports: []string{}})
 
@@ -241,11 +250,27 @@ func TestAnIdOutsideThePanelsOwnShapeIsRefused(t *testing.T) {
 	if stored != 0 {
 		t.Errorf("%d objects exist next to the refusals, there must be none", stored)
 	}
+	aPair(panel)
 	if status, _ := aGet(t, server, http.MethodPost, "/api/links",
 		`{"id": "l-keep_1.a", "iran_id": "i1", "kharej_id": "k1"}`, cookie); status != http.StatusOK {
 		t.Errorf("an id of the panel's own shape answers %d, it must be 200", status)
 	}
 	if panel.store.Links.Get("l-keep_1.a") == nil {
 		t.Error("the tunnel with an id of the panel's own shape is not stored")
+	}
+}
+
+// A tunnel or a domain that names a server or a DNS account the panel does
+// not know is refused, even when the store holds nothing at all.
+func TestATunnelOrADomainNamesWhatExists(t *testing.T) {
+	_, server := aServer(t)
+	cookie := aLogin(t, server)
+	if status, _ := aGet(t, server, http.MethodPost, "/api/links",
+		`{"iran_id": "nope", "kharej_id": "nada"}`, cookie); status != http.StatusBadRequest {
+		t.Errorf("a tunnel between unknown servers answers %d, it must be 400", status)
+	}
+	if status, _ := aGet(t, server, http.MethodPost, "/api/domains",
+		`{"fqdn": "x.example", "provider_id": "ghost"}`, cookie); status != http.StatusBadRequest {
+		t.Errorf("a domain with an unknown DNS account answers %d, it must be 400", status)
 	}
 }
