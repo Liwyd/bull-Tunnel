@@ -43,6 +43,16 @@ const (
 
 // muxPoolLimit bounds automatic growth by the aggregate receive windows. Keep
 // an explicitly configured initial pool even when it exceeds this budget.
+//
+// The budget is 128 MiB of session receive buffers: 32 sessions at the 4 MiB
+// default, which is also 4 times the default pool of 8, so the two bounds meet.
+// That is the most unread data the sessions can hold at once, and it is a
+// ceiling that is reached only when every local reader is backed up; the limit
+// is about memory, not about connections. How many connections that carries is
+// the sessions times the server's mux_con (64 by default), 2048 — it used to
+// be 32 x 8 = 256, and the 257th simultaneous connection was refused. Raising
+// mux_con raised the capacity without touching this budget, because unread data
+// is capped per session rather than per stream.
 func muxPoolLimit(size, receiveBuffer int) int {
 	limit := size * poolGrowthLimit
 	if receiveBuffer > 0 {

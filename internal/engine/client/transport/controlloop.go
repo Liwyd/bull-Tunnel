@@ -40,6 +40,10 @@ type controlLoop struct {
 	asked func()
 	// echoBeats answers every heartbeat: the websocket servers listen for it.
 	echoBeats bool
+	// echoWarm answers heartbeats on any carrier, but only once the server has
+	// proved by its warm-up (beatClock.quick) that it is a release which reads
+	// the control channel for as long as it is open. See answers.
+	echoWarm bool
 }
 
 // control builds the loop for the generation that is starting now.
@@ -58,6 +62,10 @@ func (l *lifecycle) control(link controlwire.Link, keepAlive time.Duration, dial
 			}
 		},
 		asked: func() { l.serverAsked(dial) },
+		// Every carrier, not only the websocket ones: the server presumes a
+		// client gone when it stops hearing from it, and can only do that for a
+		// client that answers. See answers.
+		echoWarm: true,
 	}
 }
 
@@ -73,7 +81,8 @@ func (c controlLoop) run() {
 	defer close(done)
 
 	signals := make(chan byte, 16)
-	go c.read(signals, done)
+	var warm atomic.Bool
+	go c.read(signals, done, &warm)
 
 	for {
 		select {
@@ -94,7 +103,7 @@ func (c controlLoop) run() {
 
 			case utils.SG_HB:
 				c.log.Debug("heartbeat signal received successfully")
-				if c.echoBeats {
+				if c.answers(&warm) {
 					if err := c.link.Send(utils.SG_HB); err != nil {
 						c.log.Errorf("failed to answer the heartbeat: %v", err)
 						go c.restart()
@@ -123,6 +132,29 @@ func (c controlLoop) run() {
 	}
 }
 
+// answers reports whether a heartbeat is to be answered.
+//
+// The answer is what lets the server tell a client that has vanished from one
+// that is merely quiet; without it a client that died without a FIN or RST kept
+// its seat ("Connected") for as long as the kernel took to give up on the
+// socket, and on KCP or QUIC for good. See the server's controlSilence.
+//
+// It is sent only to a server that has shown it reads it. Servers of earlier
+// releases read one byte from the client and stop: an answer sent to one would
+// be the only thing it ever heard, and the goodbye after it would go unread.
+// Those servers beat at the configured interval from the first beat, whereas
+// every server that keeps listening opens with the warm-up (a first beat a
+// tenth of a second in), which beatClock records as quick. The websocket
+// servers are the exception, as they have always been: they listen, and they
+// are answered whatever the warm-up showed.
+//
+// So a new client against an old server sends exactly what it always did, and
+// a new client against a new server answers every beat, which a new server
+// reads as "this client can be held to a deadline" the first time it sees one.
+func (c controlLoop) answers(warm *atomic.Bool) bool {
+	return c.echoBeats || (c.echoWarm && warm.Load())
+}
+
 // read hands every signal the server sends to the loop, bounding each read by
 // what the beat clock expects, until the channel fails or the loop returns.
 //
@@ -131,7 +163,7 @@ func (c controlLoop) run() {
 // read on a dead tunnel would block forever and the client would never
 // reconnect. Over TCP the kernel ends the read eventually, eleven minutes later
 // on the shipped keepalive.
-func (c controlLoop) read(signals chan<- byte, done <-chan struct{}) {
+func (c controlLoop) read(signals chan<- byte, done <-chan struct{}, warm *atomic.Bool) {
 	beats := newBeatClock(time.Now())
 	for {
 		if err := c.link.SetReadDeadline(time.Now().Add(beats.deadline(c.keepAlive))); err != nil {
@@ -163,6 +195,11 @@ func (c controlLoop) read(signals chan<- byte, done <-chan struct{}) {
 		}
 		if signal == utils.SG_HB {
 			beats.beat(time.Now())
+			// Recorded before the heartbeat reaches the loop, so the very first
+			// beat of a warming-up server is already answered.
+			if beats.quick {
+				warm.Store(true)
+			}
 		}
 		select {
 		case signals <- signal:

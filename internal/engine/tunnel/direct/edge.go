@@ -326,8 +326,9 @@ func (e *Edge) openFor(kind byte, m portmap.Mapping) (net.Conn, error) {
 }
 
 var (
-	errNoSession = errors.New("direct: no tunnel session is established")
-	errFlowLimit = errors.New("direct: the connection limit is reached")
+	errNoSession  = errors.New("direct: no tunnel session is established")
+	errFlowLimit  = errors.New("direct: the connection limit is reached")
+	errUDPOpening = errors.New("direct: too many udp flows are waiting for their stream to open")
 )
 
 // ---------------------------------------------------------------- udp
@@ -338,15 +339,105 @@ var (
 // source address and ends when it goes quiet. Giving each flow its own stream
 // is what keeps two clients' datagrams from being interleaved into one
 // conversation at the far end.
+//
+// The stream is opened off the receive loop (see udpFlowFor), so a flow exists
+// for a while before it has one. Datagrams that arrive in that while wait in a
+// small queue and are sent first, in order, once the stream is there.
 type udpFlow struct {
-	stream   net.Conn
+	mu     sync.Mutex
+	stream net.Conn // nil until the stream is open
+	// queue holds datagrams that arrived before the stream was open, bounded in
+	// number and in bytes: the first packets of a session are what carry its
+	// handshake, so a few are worth keeping, and a flow that cannot open must
+	// not be able to hold much while it waits.
+	queue      [][]byte
+	queueBytes int
+	closed     bool
+
 	lastSeen atomic.Int64 // unix nanoseconds
 }
+
+// How much a flow may hold while its stream is being opened.
+const (
+	udpOpeningQueue      = 32
+	udpOpeningQueueBytes = 64 << 10
+	// udpOpeningLimit is how many flows may be waiting for their stream at once
+	// on one forwarded port. Opening a flow used to block the receive loop,
+	// which made it the one throttle on a sender inventing source addresses;
+	// opening them in the background needs one of its own.
+	udpOpeningLimit = 256
+)
 
 func (f *udpFlow) touch() { f.lastSeen.Store(time.Now().UnixNano()) }
 
 func (f *udpFlow) idle(now time.Time, limit time.Duration) bool {
 	return now.Sub(time.Unix(0, f.lastSeen.Load())) > limit
+}
+
+// send carries one datagram to the origin: straight onto the stream when it is
+// open, into the queue while it is still being opened, and nowhere when the
+// queue is full — a congested UDP path drops, and so does this.
+func (f *udpFlow) send(payload []byte) error {
+	f.mu.Lock()
+	if f.closed {
+		f.mu.Unlock()
+		return net.ErrClosed
+	}
+	if f.stream == nil {
+		if len(f.queue) < udpOpeningQueue && f.queueBytes+len(payload) <= udpOpeningQueueBytes {
+			f.queue = append(f.queue, append([]byte(nil), payload...))
+			f.queueBytes += len(payload)
+		}
+		f.mu.Unlock()
+		return nil
+	}
+	stream := f.stream
+	f.mu.Unlock()
+	return network.WriteDatagram(stream, payload)
+}
+
+// install gives the flow its stream and sends what was queued, first. It
+// reports false when the flow was closed before the stream arrived, and the
+// caller closes the stream.
+//
+// The stream is published only once the queue is empty, and the queue is
+// drained in rounds, so a datagram that arrives while the last round is being
+// written is queued behind it and goes out in order rather than past it.
+func (f *udpFlow) install(stream net.Conn) bool {
+	for {
+		f.mu.Lock()
+		if f.closed {
+			f.mu.Unlock()
+			return false
+		}
+		if len(f.queue) == 0 {
+			f.stream = stream
+			f.mu.Unlock()
+			return true
+		}
+		queued := f.queue
+		f.queue, f.queueBytes = nil, 0
+		f.mu.Unlock()
+		for _, d := range queued {
+			if err := network.WriteDatagram(stream, d); err != nil {
+				// The reply pump ends on the same failure; nothing more to say.
+				stream.Close()
+				break
+			}
+		}
+	}
+}
+
+// close ends the flow, whether or not its stream has opened yet.
+func (f *udpFlow) close() {
+	f.mu.Lock()
+	f.closed = true
+	f.queue, f.queueBytes = nil, 0
+	stream := f.stream
+	f.mu.Unlock()
+	if stream != nil {
+		stream.Close()
+	}
 }
 
 // udpFlowIdle is how long a flow with no traffic in either direction is kept.
@@ -367,13 +458,13 @@ func (e *Edge) serveUDP(ctx context.Context, m portmap.Mapping) error {
 
 	var flows sync.Map // client address -> *udpFlow
 	var pumps sync.WaitGroup
+	opening := make(chan struct{}, udpOpeningLimit)
 	reaperDone := make(chan struct{})
 	defer func() {
 		cancel()
 		<-reaperDone
 		flows.Range(func(_, v any) bool {
-			flow := v.(*udpFlow)
-			flow.stream.Close()
+			v.(*udpFlow).close()
 			return true
 		})
 		pumps.Wait()
@@ -387,7 +478,7 @@ func (e *Edge) serveUDP(ctx context.Context, m portmap.Mapping) error {
 	// Close every paced stream on service cancellation, including writers waiting
 	// for bandwidth before their socket write begins.
 	stopFlows := context.AfterFunc(ctx, func() {
-		flows.Range(func(_, v any) bool { v.(*udpFlow).stream.Close(); return true })
+		flows.Range(func(_, v any) bool { v.(*udpFlow).close(); return true })
 	})
 	defer stopFlows()
 	for {
@@ -399,27 +490,39 @@ func (e *Edge) serveUDP(ctx context.Context, m portmap.Mapping) error {
 			return err
 		}
 
-		flow, err := e.udpFlowFor(&flows, &pumps, conn, client, m)
+		flow, err := e.udpFlowFor(&flows, &pumps, opening, conn, client, m)
 		if err != nil {
 			e.stats.refused.Add(1)
 			e.log.Debugf("direct: no udp backend for %s: %v", m.Listen, err)
 			continue
 		}
 		flow.touch()
-		if err := network.WriteDatagram(flow.stream, buf[:n]); err != nil {
+		if err := flow.send(buf[:n]); err != nil {
 			e.log.Debugf("direct: forwarding a datagram for %s: %v", client, err)
-			flow.stream.Close()
+			flow.close()
 		}
 	}
 }
 
-// udpFlowFor returns the flow for a client, opening a stream on first sight.
-func (e *Edge) udpFlowFor(flows *sync.Map, pumps *sync.WaitGroup, local net.PacketConn, client net.Addr, m portmap.Mapping) (*udpFlow, error) {
+// udpFlowFor returns the flow for a client, starting one on first sight.
+//
+// Starting a flow does not wait for its stream. Opening one asks the origin to
+// reach the backend and waits for its answer — up to the dial timeout — and
+// this runs on the one goroutine that reads the port, so every client's
+// datagrams, not just the new one's, stood still for as long as the origin
+// took. The stream is opened in the background instead, and the datagrams that
+// arrive meanwhile wait in the flow (see udpFlow.send).
+func (e *Edge) udpFlowFor(flows *sync.Map, pumps *sync.WaitGroup, opening chan struct{}, local net.PacketConn, client net.Addr, m portmap.Mapping) (*udpFlow, error) {
 	key := client.String()
 	if existing, ok := flows.Load(key); ok {
 		return existing.(*udpFlow), nil
 	}
 
+	select {
+	case opening <- struct{}{}:
+	default:
+		return nil, errUDPOpening
+	}
 	// A new flow counts against the cap exactly as a TCP connection does.
 	//
 	// It has to. A flow is recognised by its source address and UDP source
@@ -428,36 +531,57 @@ func (e *Edge) udpFlowFor(flows *sync.Map, pumps *sync.WaitGroup, local net.Pack
 	// cares to forge — which is the cap's whole purpose, on the one protocol
 	// where it is easiest to abuse.
 	if !e.limiter.Acquire() {
+		<-opening
 		return nil, errFlowLimit
 	}
 
-	stream, err := e.openFor(kindUDP, m)
-	if err != nil {
-		e.limiter.Release()
-		return nil, err
-	}
-	// UDP streams share the same tunnel-wide bucket as forwarded TCP.
-	stream = e.limiter.Wrap(context.Background(), stream)
-	flow := &udpFlow{stream: stream}
+	flow := &udpFlow{}
 	flow.touch()
 
 	// Two datagrams from the same client can arrive together; only one flow
 	// may survive, or the loser's reply reader would be writing replies for a
 	// stream nobody is sending on.
 	if actual, loaded := flows.LoadOrStore(key, flow); loaded {
-		stream.Close()
 		e.limiter.Release()
+		<-opening
 		return actual.(*udpFlow), nil
+	}
+
+	pumps.Add(1)
+	go func() {
+		defer pumps.Done()
+		e.openUDPFlow(flows, key, flow, opening, local, client, m)
+	}()
+	return flow, nil
+}
+
+// openUDPFlow opens a new flow's stream and then serves its replies. It ends
+// the flow, and gives back the slot it holds, when the stream cannot be opened.
+func (e *Edge) openUDPFlow(flows *sync.Map, key string, flow *udpFlow, opening chan struct{}, local net.PacketConn, client net.Addr, m portmap.Mapping) {
+	stream, err := e.openFor(kindUDP, m)
+	<-opening
+	if err != nil {
+		e.stats.refused.Add(1)
+		e.log.Debugf("direct: no udp backend for %s: %v", m.Listen, err)
+		flow.close()
+		flows.CompareAndDelete(key, flow)
+		e.limiter.Release()
+		return
+	}
+	// UDP streams share the same tunnel-wide bucket as forwarded TCP.
+	stream = e.limiter.Wrap(context.Background(), stream)
+	if !flow.install(stream) {
+		// Closed while it was opening: the service is ending, or the flow was
+		// reaped.
+		stream.Close()
+		flows.CompareAndDelete(key, flow)
+		e.limiter.Release()
+		return
 	}
 
 	e.stats.accepted.Add(1)
 	e.stats.active.Add(1)
-	pumps.Add(1)
-	go func() {
-		defer pumps.Done()
-		e.pumpUDPReplies(flows, key, flow, local, client)
-	}()
-	return flow, nil
+	e.pumpUDPReplies(flows, key, flow, local, client)
 }
 
 // pumpUDPReplies carries what comes back off the stream to the client it
@@ -465,7 +589,7 @@ func (e *Edge) udpFlowFor(flows *sync.Map, pumps *sync.WaitGroup, local net.Pack
 func (e *Edge) pumpUDPReplies(flows *sync.Map, key string, flow *udpFlow, local net.PacketConn, client net.Addr) {
 	defer func() {
 		flows.CompareAndDelete(key, flow)
-		flow.stream.Close()
+		flow.close()
 		e.stats.active.Add(-1)
 		// Paired with the Acquire in udpFlowFor. This pump is the one place a
 		// flow ends, whether it went quiet, was reaped or the stream failed, so
@@ -499,7 +623,7 @@ func (e *Edge) reapUDPFlows(ctx context.Context, flows *sync.Map) {
 		case now := <-ticker.C:
 			flows.Range(func(_, v any) bool {
 				if flow := v.(*udpFlow); flow.idle(now, udpFlowIdle) {
-					flow.stream.Close()
+					flow.close()
 				}
 				return true
 			})

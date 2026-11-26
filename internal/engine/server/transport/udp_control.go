@@ -13,6 +13,10 @@ import (
 // The udp transport's control port: TCP, even though its data is not. Claims
 // are judged side by side under the pre-authentication gate; see ADR 0004.
 
+// udpPoolAckSignal is the signal the server answers a control claim with. See
+// validControlClaim.
+const udpPoolAckSignal = utils.SG_ChanV2
+
 func (s *UdpTransport) channelHandshake(g *udpGen) {
 	// This transport's control channel is TCP even though its data is not, so
 	// this goroutine holds a listener too and Start has to wait for it. Counted
@@ -85,6 +89,9 @@ func (s *UdpTransport) seatClient(g *udpGen, conn net.Conn) {
 			// zombie. Keepalive probes turn that into a read error the control
 			// loop can act on.
 			enableKeepAlive(conn, 30*time.Second)
+			// Whether this client answers heartbeats is learnt afresh for every
+			// client that sits.
+			s.clientAnswers.Store(false)
 			s.controlChannel.Set(conn)
 			// The engine says whether it holds a control channel; the watchdog
 			// reads it rather than the socket table. See
@@ -107,11 +114,20 @@ func (s *UdpTransport) seatClient(g *udpGen, conn net.Conn) {
 func (s *UdpTransport) vacate(g *udpGen) {
 	s.controlChannel.Close()
 	s.controlChannel.Clear()
-	// Flows on the shared data socket: nothing to close, only to stop handing
-	// out.
+	s.clientAnswers.Store(false)
+	// The sockets the replaced client had pooled. Taking them off the queue was
+	// all this did, which left everything else about them behind for every
+	// redial: each one's entry in activeConnections, each one's keepAlive
+	// goroutine pinging a socket that was gone, and — worse — the entry itself,
+	// which any new socket arriving from the same address and port met as an
+	// existing connection and had its token queued as payload for nobody, so it
+	// was never registered at all. They are dropped properly now: the ping
+	// channel closed to stop the pinger, and the entry removed.
 	for drained := false; !drained; {
 		select {
-		case <-g.tunnelChannel:
+		case conn := <-g.tunnelChannel:
+			close(conn.ping)
+			s.dropTunnelConn(conn)
 		default:
 			drained = true
 		}
@@ -200,7 +216,13 @@ func (s *UdpTransport) validControlClaim(g *udpGen, conn net.Conn) bool {
 		return false
 	}
 
-	if err := utils.SendBinaryTransportStringWithin(conn, s.config.Token, utils.SG_Chan, 10*time.Second); err != nil {
+	// The answer is the token, as it always was, and the signal beside it says
+	// this server acknowledges pooled sockets and drops a repeated token (see
+	// sendPoolAck). A client of any release compares only the token — the signal
+	// is read and discarded — so an older one cannot tell the difference, and a
+	// client that sees SG_Chan instead knows the server is older and leaves the
+	// pooled sockets as they were.
+	if err := utils.SendBinaryTransportStringWithin(conn, s.config.Token, udpPoolAckSignal, 10*time.Second); err != nil {
 		s.logger.Errorf("failed to send security token: %v", err)
 		return false
 	}
@@ -219,5 +241,14 @@ func (s *UdpTransport) control(g *udpGen, ctx context.Context, lost func()) cont
 		log:      s.logger,
 		restart:  lost,
 		probeRTT: true,
+		// The first answer to a heartbeat is how this server learns the client
+		// is of a release that also ignores a repeated target address; see
+		// udpRepeats. Only while this client still holds the seat, so a late
+		// answer from one that has been replaced does not vouch for the next.
+		onAnswers: func() {
+			if ctx.Err() == nil {
+				s.clientAnswers.Store(true)
+			}
+		},
 	}
 }

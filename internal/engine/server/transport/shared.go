@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -220,6 +221,12 @@ type TunnelUDPConn struct {
 	listener    *net.UDPConn
 	ping        chan struct{}
 	mu          *sync.Mutex //mutex for ping channel
+
+	// heard is set once the client's socket has sent a datagram that went on to
+	// the user — the first answer from the backend. Until then the flow has only
+	// the server's word that the client ever got the target address; see
+	// repeatAddress and udpClientSilence.
+	heard atomic.Bool
 }
 
 // The websocket buffers.

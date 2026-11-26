@@ -43,6 +43,42 @@ type controlLoop struct {
 	farewellFlush time.Duration
 	// bye, when set, is said on every way out; see farewell.
 	bye *farewell
+
+	// silence is how long a client that answers heartbeats may say nothing
+	// before it is presumed gone. Zero means controlSilence(beat); a test sets
+	// it to something it can wait for.
+	silence time.Duration
+
+	// onAnswers, when set, is called once, the first time the client answers a
+	// heartbeat. It is how a transport learns the client is of a release that
+	// answers them — which is also what tells it the client understands
+	// whatever else that release added (see udpRepeats).
+	onAnswers func()
+}
+
+// controlSilenceFloor is the shortest silence the server will call a dead
+// client, whatever the heartbeat is.
+const controlSilenceFloor = 30 * time.Second
+
+// controlSilence is how long a client that has shown it answers heartbeats may
+// go without sending anything: three beats, never under controlSilenceFloor.
+//
+// This is the server's half of what the client has always done (beatClock):
+// the client presumes the server gone after three missed beats, and the server
+// had no equivalent. A client that vanished without a FIN or RST — a machine
+// that lost power, a path that blackholes, a NAT that dropped the mapping —
+// left the control read blocked for as long as the kernel took to give up on
+// the socket (about fifteen minutes on TCP, effectively never on KCP or QUIC,
+// where there is no kernel connection to give up), and for all that time the
+// tunnel said "Connected" while no one was there. The client's fallback chain
+// meanwhile had moved on to another carrier the server was not listening on.
+//
+// The same three beats the client uses is also what makes this safe: a
+// healthy path delivers a heartbeat answer every beat, so three missed ones is
+// the path or the client being gone, and the client's own deadline expires at
+// about the same moment.
+func controlSilence(beat time.Duration) time.Duration {
+	return max(3*livenessBeat(beat), controlSilenceFloor)
 }
 
 // run serves the channel until the generation ends or the channel fails; a
@@ -137,7 +173,28 @@ func (c controlLoop) farewell() {
 // read hands every signal the client sends to the loop until the channel
 // fails or the loop has returned.
 func (c controlLoop) read(signals chan<- byte, done <-chan struct{}) {
+	silence := c.silence
+	if silence <= 0 {
+		silence = controlSilence(c.beat)
+	}
+	// answers is set when the client first answers a heartbeat, and only then
+	// does a silence mean anything.
+	//
+	// Whether a client answers is not announced anywhere: websocket clients
+	// always did, every client of this release does once the server has shown it
+	// listens, and the rest — older clients, on the stream and datagram
+	// carriers — send nothing at all, and are as quiet when healthy as when
+	// dead. So the first answer is the negotiation. A client that never sends
+	// one keeps exactly the behaviour it had, with no deadline, and one that
+	// does is held to the silence above from then on. Nothing is added to the
+	// wire and nothing about an old client changes.
+	answers := false
 	for {
+		if answers {
+			// Re-armed before every read, so the deadline is "silence since the
+			// last thing the client said" and not since the channel opened.
+			_ = c.link.SetReadDeadline(time.Now().Add(silence))
+		}
 		signal, err := c.link.Receive()
 		if errors.Is(err, controlwire.ErrNoSignal) {
 			c.log.Warnf("ignoring a malformed control frame: %v", err)
@@ -154,10 +211,22 @@ func (c controlLoop) read(signals chan<- byte, done <-chan struct{}) {
 			default:
 			}
 			if c.ctx.Err() == nil {
-				c.log.Errorf("failed to read from the control channel: %v", err)
+				var timeout interface{ Timeout() bool }
+				if answers && errors.As(err, &timeout) && timeout.Timeout() {
+					c.log.Warnf("the client has sent nothing for %s although it answers heartbeats; "+
+						"presuming it gone and freeing the seat for the next one", silence.Round(time.Second))
+				} else {
+					c.log.Errorf("failed to read from the control channel: %v", err)
+				}
 				go c.restart()
 			}
 			return
+		}
+		if signal == utils.SG_HB && !answers {
+			answers = true
+			if c.onAnswers != nil {
+				c.onAnswers()
+			}
 		}
 		select {
 		case signals <- signal:

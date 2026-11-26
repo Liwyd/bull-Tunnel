@@ -38,11 +38,30 @@ const ( // Default values
 	// the moment one end was upgraded — and the version is settled on the
 	// control channel now instead, so nothing read it. Both the mechanism and
 	// that reasoning live in internal/utils/network/mux.go.
-	defaultMaxFrameSize     = 32768   // 32KB
-	defaultMaxReceiveBuffer = 4194304 // 4MB
-	defaultMaxStreamBuffer  = 65536   // 64KB
-	defaultSnifferLog       = "backpack.json"
-	defaultMuxCon           = 8
+	//
+	// The receive and stream buffer defaults are network.DefaultMaxReceiveBuffer
+	// (4 MiB) and network.DefaultMaxStreamBuffer (1 MiB), applied by
+	// network.ResolveMuxBuffers; the reasoning for the numbers is there.
+	defaultMaxFrameSize = 32768 // 32KB
+	defaultSnifferLog   = "backpack.json"
+
+	// defaultMuxCon is how many streams one mux session may carry at once, and
+	// with the client's pool ceiling (muxPoolLimit: at most 4 times the pool, 32
+	// sessions on the defaults) it sets how many connections a mux tunnel can
+	// carry at the same moment. At the 8 it used to be that was 32 x 8 = 256, so
+	// the 257th simultaneous connection — a torrent, a browser with many tabs, a
+	// phone's background sync, a few users behind one tunnel — waited in the
+	// queue until it timed out. 64 makes it 2048.
+	//
+	// It is a ceiling, not a target: streams go to whichever session has been
+	// waiting longest, so load spreads across the pool first and only fills a
+	// session when the pool is already full, and a new session is still asked
+	// for as soon as the live ones are full. The memory a session may hold does
+	// not depend on it — unread data is capped per session by the receive
+	// buffer, not per stream — and only the per-connection cost of the relay
+	// itself (goroutines and copy buffers, tens of KiB) scales with the number
+	// of connections, as it would without a mux.
+	defaultMuxCon = 64
 )
 
 func applyDefaults(cfg *config.Config) {
@@ -154,20 +173,12 @@ func applyDefaults(cfg *config.Config) {
 	if cfg.Client.MaxFrameSize <= 0 {
 		cfg.Client.MaxFrameSize = defaultMaxFrameSize
 	}
-	// MaxReceiveBuffer
-	if cfg.Server.MaxReceiveBuffer <= 0 {
-		cfg.Server.MaxReceiveBuffer = defaultMaxReceiveBuffer
-	}
-	if cfg.Client.MaxReceiveBuffer <= 0 {
-		cfg.Client.MaxReceiveBuffer = defaultMaxReceiveBuffer
-	}
-	// MaxStreamBuffer
-	if cfg.Server.MaxStreamBuffer <= 0 {
-		cfg.Server.MaxStreamBuffer = defaultMaxStreamBuffer
-	}
-	if cfg.Client.MaxStreamBuffer <= 0 {
-		cfg.Client.MaxStreamBuffer = defaultMaxStreamBuffer
-	}
+	// MaxReceiveBuffer and MaxStreamBuffer. The stream window is what caps one
+	// connection's throughput at window per round trip, so its default is 1 MiB
+	// and not smux's 64 KiB; see network.ResolveMuxBuffers for why that is safe
+	// and how an explicit value is kept.
+	cfg.Server.MaxReceiveBuffer, cfg.Server.MaxStreamBuffer = network.ResolveMuxBuffers(cfg.Server.MaxReceiveBuffer, cfg.Server.MaxStreamBuffer)
+	cfg.Client.MaxReceiveBuffer, cfg.Client.MaxStreamBuffer = network.ResolveMuxBuffers(cfg.Client.MaxReceiveBuffer, cfg.Client.MaxStreamBuffer)
 	// WebPort returns 0 if not exists
 
 	// SnifferLog

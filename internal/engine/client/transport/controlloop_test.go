@@ -139,12 +139,22 @@ func startClientLoop(t *testing.T, ctx context.Context, echoBeats bool) *loopPro
 
 func startClientLoopOver(t *testing.T, ctx context.Context, cli, srv controlwire.Link, echoBeats bool) *loopProbe {
 	t.Helper()
+	return startClientLoopWith(t, ctx, cli, srv, func(loop *controlLoop) {
+		loop.echoBeats = echoBeats
+		// These tests are about what a loop does on its own account; the answer
+		// to a server that has shown its warm-up has its own tests.
+		loop.echoWarm = false
+	})
+}
+
+func startClientLoopWith(t *testing.T, ctx context.Context, cli, srv controlwire.Link, tweak func(*controlLoop)) *loopProbe {
+	t.Helper()
 	p := &loopProbe{server: srv, finished: make(chan struct{})}
 	p.life = &lifecycle{}
 	p.life.firstGeneration(ctx, silentLogger(), usageSpec{})
 	loop := p.life.control(cli, time.Minute,
 		func() { p.dials.Add(1) }, func() { p.restarts.Add(1) })
-	loop.echoBeats = echoBeats
+	tweak(&loop)
 	go func() { loop.run(); close(p.finished) }()
 	return p
 }
@@ -287,4 +297,36 @@ func (p *loopProbe) waitFinished(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the control loop did not return")
 	}
+}
+
+// A server that opens with the warm-up — a first beat a tenth of a second in,
+// which no server that stops listening ever sent — is answered on every
+// carrier, not only the websocket ones. The answer is what lets the server tell
+// a vanished client from a quiet one.
+func TestAHeartbeatIsAnsweredOnAnyCarrierOnceTheServerHasWarmedUp(t *testing.T) {
+	cli, srv := loopTCPPair(t)
+	p := startClientLoopWith(t, context.Background(), controlwire.Net(cli), controlwire.Net(srv), func(*controlLoop) {})
+	p.send(t, utils.SG_HB) // straight away: the warm-up's first beat
+	if got := p.next(t); got != utils.SG_HB {
+		t.Fatalf("answered %d, want a heartbeat", got)
+	}
+	// And the next ones, whenever they come.
+	time.Sleep(50 * time.Millisecond)
+	p.send(t, utils.SG_HB)
+	if got := p.next(t); got != utils.SG_HB {
+		t.Fatalf("answered %d, want a heartbeat", got)
+	}
+}
+
+// A server whose first beat is not a warm-up one is of a release that may read a
+// single byte from the client and stop, so it is sent nothing: exactly what a
+// client has always sent it.
+func TestAHeartbeatIsNotAnsweredToAServerThatDidNotWarmUp(t *testing.T) {
+	cli, srv := loopTCPPair(t)
+	p := startClientLoopWith(t, context.Background(), controlwire.Net(cli), controlwire.Net(srv), func(*controlLoop) {})
+	time.Sleep(warmupEvidence + 100*time.Millisecond)
+	p.send(t, utils.SG_HB)
+	p.silent(t)
+	p.send(t, utils.SG_HB)
+	p.silent(t)
 }

@@ -126,11 +126,7 @@ func Probe(ctx context.Context, configPath string, carriers []string, opts Probe
 // does not set. The engine applies them when it starts a tunnel, and the
 // probe has to use the same ones: a smux session with a frame size of zero
 // is refused outright.
-const (
-	defaultMaxFrameSize     = 32768   // 32KB
-	defaultMaxReceiveBuffer = 4194304 // 4MB
-	defaultMaxStreamBuffer  = 65536   // 64KB
-)
+const defaultMaxFrameSize = 32768 // 32KB
 
 // muxSettingsFor returns the smux settings of the probe.
 func muxSettingsFor(c *config.ClientConfig) network.MuxSettings {
@@ -142,12 +138,8 @@ func muxSettingsFor(c *config.ClientConfig) network.MuxSettings {
 	if s.MaxFrameSize <= 0 {
 		s.MaxFrameSize = defaultMaxFrameSize
 	}
-	if s.MaxReceiveBuffer <= 0 {
-		s.MaxReceiveBuffer = defaultMaxReceiveBuffer
-	}
-	if s.MaxStreamBuffer <= 0 {
-		s.MaxStreamBuffer = defaultMaxStreamBuffer
-	}
+	// The buffers' defaults are the engine's too, from one place.
+	s.MaxReceiveBuffer, s.MaxStreamBuffer = network.ResolveMuxBuffers(s.MaxReceiveBuffer, s.MaxStreamBuffer)
 	return s
 }
 

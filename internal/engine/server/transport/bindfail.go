@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"syscall"
 	"time"
@@ -138,6 +139,55 @@ func bindTunnelPort[T any](ctx context.Context, log *logrus.Logger, addr string,
 			return l, true
 		}
 		log.Error(bindFailure("tunnel port", addr, err))
+		if !backoff.wait(ctx) {
+			var zero T
+			return zero, false
+		}
+	}
+}
+
+// bindForwardedPort binds one of the tunnel's forwarded (user-facing) ports,
+// waiting on the listen backoff and trying again for as long as it cannot be
+// had; ok is false when ctx ended first or the address is one that no waiting
+// will fix.
+//
+// A forwarded port that failed to bind used to stay down for the life of the
+// process: the goroutine logged the error and returned, and nothing ever tried
+// again. The usual cause is the one that clears by itself — the previous copy
+// of the tunnel still closing its listeners, a port in TIME_WAIT, a service
+// that held the port for a minute and let go — so the tunnel came up, the
+// control channel was healthy, and that one port stayed dead until somebody
+// restarted the whole thing. The direct tunnel's keepForwarder already retried
+// its ports; this gives the reverse transports the same.
+//
+// One port waiting does not hold up any other: each mapping has its own
+// goroutine. The full explanation is logged on the first failure, since it is
+// long and does not change, and the retries after it stay at debug so a port
+// that is taken for good costs one error line rather than one every half
+// minute. The success is logged by the caller, as it always was.
+func bindForwardedPort[T any](ctx context.Context, log *logrus.Logger, what, addr string, bind func() (T, error)) (T, bool) {
+	var backoff listenBackoff
+	for first := true; ; first = false {
+		l, err := bind()
+		if err == nil {
+			if !first {
+				log.Infof("%s %s is free now and has been bound", what, addr)
+			}
+			return l, true
+		}
+		var opErr *net.OpError
+		if !errors.As(err, &opErr) {
+			// An address that does not parse: only an edit can fix it, and
+			// waiting would be retrying the same typo forever.
+			log.Error(bindFailure(what, addr, err))
+			var zero T
+			return zero, false
+		}
+		if first {
+			log.Error(bindFailure(what, addr, err) + "\n  The tunnel keeps trying and will take the port as soon as it is free.")
+		} else {
+			log.Debugf("%s %s is still not available: %v", what, addr, err)
+		}
 		if !backoff.wait(ctx) {
 			var zero T
 			return zero, false

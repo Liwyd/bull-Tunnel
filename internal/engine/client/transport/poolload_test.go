@@ -67,3 +67,24 @@ func TestUnconfiguredPoolDoesNotGrow(t *testing.T) {
 		t.Fatal("an unconfigured pool size must not grow")
 	}
 }
+
+// The pool ceiling on the defaults is 32 sessions, a memory bound of 128 MiB of
+// session receive buffers, and the capacity that matters — connections carried
+// at once — is that times the server's mux_con. At 8 streams a session that was
+// 256 and the 257th simultaneous connection was refused; the default mux_con of
+// 64 makes it 2048 without touching the memory bound.
+func TestTheDefaultPoolCarriesMoreThan256Connections(t *testing.T) {
+	const defaultPool, defaultReceive, defaultMuxCon = 8, 4 << 20, 64
+
+	sessions := muxPoolLimit(defaultPool, defaultReceive)
+	if sessions != 32 {
+		t.Fatalf("the default pool ceiling is %d sessions, want 32 (128 MiB of 4 MiB buffers)", sessions)
+	}
+	if sessions*defaultMuxCon <= 256 {
+		t.Errorf("%d sessions x %d streams = %d, which still refuses the 257th connection",
+			sessions, defaultMuxCon, sessions*defaultMuxCon)
+	}
+	if got := sessions * defaultReceive; got > 128<<20 {
+		t.Errorf("the pool's receive buffers add up to %d bytes, over the 128 MiB bound", got)
+	}
+}

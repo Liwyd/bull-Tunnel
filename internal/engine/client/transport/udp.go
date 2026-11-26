@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net"
@@ -20,6 +21,9 @@ type UdpTransport struct {
 	lifecycle
 
 	config *UdpConfig
+	// acks is set while the server this control channel is with acknowledges
+	// pooled sockets and drops a repeated token; see udpPoolAckSignal.
+	acks atomic.Bool
 }
 type UdpConfig struct {
 	RemoteAddr string
@@ -109,7 +113,7 @@ func (c *UdpTransport) channelDialer() {
 			}
 
 			// Receive response
-			message, _, err := utils.ReceiveBinaryTransportString(tunnelTCPConn)
+			message, answerSignal, err := utils.ReceiveBinaryTransportString(tunnelTCPConn)
 			if err != nil {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					c.logger.Warn("timeout while waiting for control channel response")
@@ -127,6 +131,10 @@ func (c *UdpTransport) channelDialer() {
 				// See metrics.Snapshot.Connected.
 				metrics.ReportPeer(tunnelTCPConn.RemoteAddr().String())
 				c.state.SetConn(tunnelTCPConn)
+				// A server of this release answers with SG_ChanV2 where an older
+				// one says SG_Chan, which is how the pooled sockets learn whether
+				// the token may be sent again. See handleTunnelConnReady.
+				c.acks.Store(answerSignal == udpPoolAckSignal)
 				c.logger.Info("control channel established successfully")
 
 				c.status.set("Connected (UDP)")
@@ -210,6 +218,52 @@ func (c *UdpTransport) tunnelDialer() {
 	}
 }
 
+// udpPoolAckSignal is the signal a server of this release answers the control
+// claim with, in place of SG_Chan. The token beside it is what has always been
+// compared; the signal is read and discarded by a client of any older release.
+const udpPoolAckSignal = utils.SG_ChanV2
+
+// What a pooled socket waits for, and how long.
+//
+// The token that registers a socket with the server is one datagram, and the
+// socket was counted open the moment it was sent. When that datagram was lost
+// nothing ever said so: the socket sat in a read with no deadline, counted
+// against the pool (open plus pending is capped at four times its size) and
+// registered nowhere, and each one lost this way was a slot gone for the life of
+// the process.
+//
+// A server of this release acknowledges the registration at once (see the
+// server's sendPoolAck), so against one the token is sent again a few times
+// while the acknowledgement is missing, and the slot is given up if it never
+// comes. Against an older server nothing can be told from silence for up to a
+// heartbeat, since its first datagram to an idle socket is its first ping; the
+// token is never repeated there, because its server would forward a repeat to
+// the user as data, and the slot is given up only after a time no heartbeat
+// comes close to.
+var udpTokenResends = []time.Duration{time.Second, 2500 * time.Millisecond, 4500 * time.Millisecond}
+
+const (
+	// udpHandshakeBuf holds a target address datagram: a port, or host:port, or a
+	// '|' list of them with hostnames, none of which fit the 47 bytes an
+	// IPv6:port needs.
+	udpHandshakeBuf = 2048
+	// udpRepeatWindow is how long after pairing a datagram identical to the
+	// target address is taken to be the server repeating it and not user data.
+	udpRepeatWindow = 15 * time.Second
+)
+
+// The waits below are variables only so that a test can shorten them.
+var (
+	// udpAckGiveUp is how long, against a server that acknowledges, a socket
+	// waits for the acknowledgement before it is released.
+	udpAckGiveUp = 7 * time.Second
+	// udpFirstContactGiveUp is the same for a server that does not.
+	udpFirstContactGiveUp = 5 * time.Minute
+	// udpStrayWait is how long a socket that has been sent something other than
+	// a ping or a target keeps waiting for the target before it is released.
+	udpStrayWait = 10 * time.Second
+)
+
 func (c *UdpTransport) handleTunnelConnReady(tunConn *net.UDPConn, ready func()) {
 	// Send token message to the server
 	_, err := tunConn.Write([]byte(c.config.Token))
@@ -221,19 +275,70 @@ func (c *UdpTransport) handleTunnelConnReady(tunConn *net.UDPConn, ready func())
 	// Increment active connections counter
 	atomic.AddInt32(&c.poolConnections, 1)
 	ready()
+	// The slot is given back exactly once, on whichever way out.
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			atomic.AddInt32(&c.poolConnections, -1)
+		}
+	}
+	defer release()
 
-	// Prepare a buffer to receive the server's response
-	buffer := make([]byte, 47) // maximum buffer requried for store in IPv6:Port format
+	// Prepare a buffer to receive the server's response. It was 47 bytes, "the
+	// most an IPv6:port needs", which truncated every hostname and every '|'
+	// list of backends the server could send: the address then failed to
+	// parse and the socket was closed.
+	buffer := make([]byte, udpHandshakeBuf)
+
+	acks := c.acks.Load()
+	opened := time.Now()
+	resends := 0
+	heard := false // the server has said something on this socket
+	var strayBy time.Time
 
 	for {
-		n, _, err := tunConn.ReadFromUDP(buffer)
-		if err != nil {
-			c.logger.Error("failed to receive response from server:", err)
-
-			atomic.AddInt32(&c.poolConnections, -1)
-
+		// What this read may wait for. Before the server has said anything, the
+		// next repeat of the token or the moment to give up; after a stray
+		// datagram, the end of the wait for a real target; otherwise nothing —
+		// an idle pooled socket is meant to wait, however long no user comes.
+		var deadline time.Time
+		switch {
+		case !heard && acks && resends < len(udpTokenResends):
+			deadline = opened.Add(udpTokenResends[resends])
+		case !heard && acks:
+			deadline = opened.Add(udpAckGiveUp)
+		case !heard:
+			deadline = opened.Add(udpFirstContactGiveUp)
+		case !strayBy.IsZero():
+			deadline = strayBy
+		}
+		if err := tunConn.SetReadDeadline(deadline); err != nil {
+			c.logger.Error("failed to set a read deadline on the pooled socket:", err)
 			return
 		}
+
+		n, _, err := tunConn.ReadFromUDP(buffer)
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() && ctxAlive(c.state.Ctx()) {
+				if !heard && acks && resends < len(udpTokenResends) {
+					// Not acknowledged yet: say it again. A write error here is
+					// the read's to report.
+					_, _ = tunConn.Write([]byte(c.config.Token))
+					resends++
+					continue
+				}
+				if !heard {
+					c.logger.Warnf("the server never answered the registration of a pooled socket %s — releasing the slot", tunConn.LocalAddr())
+				} else {
+					c.logger.Debugf("no target address followed a stray datagram on %s — releasing the slot", tunConn.LocalAddr())
+				}
+				return
+			}
+			c.logger.Error("failed to receive response from server:", err)
+			return
+		}
+		heard = true
 
 		// Compare the received bytes with the expected SG_Ping message
 		if n == 1 && buffer[0] == utils.SG_Ping {
@@ -242,23 +347,43 @@ func (c *UdpTransport) handleTunnelConnReady(tunConn *net.UDPConn, ready func())
 		}
 
 		port, remoteAddr, err := network.ResolveRemoteAddr(string(buffer[:n]))
-
-		// Decrement active connections after successful or failed connection
-		atomic.AddInt32(&c.poolConnections, -1)
-
 		if err != nil {
-			c.logger.Error("failed to find remote address:", err)
-			return
+			// Not a target: something else reached this socket, or the target
+			// arrived damaged. It used to end the socket on the spot, which left
+			// the server's flow to wait for a client that had gone — and since a
+			// connected socket only hears from the server's address, a stray
+			// datagram was in practice the target itself arriving wrong. The real
+			// one may still come (the server repeats it), so wait a bounded
+			// time for it.
+			c.logger.Debugf("ignoring a datagram that is not a target address (%d bytes): %v", n, err)
+			if strayBy.IsZero() {
+				strayBy = time.Now().Add(udpStrayWait)
+			}
+			continue
 		}
 
-		c.localDialer(remoteAddr, port, tunConn)
+		// Decrement active connections after a successful connection
+		release()
 
-		break
+		c.localDialerRepeat(remoteAddr, port, tunConn, append([]byte(nil), buffer[:n]...))
+
+		return
 	}
-
 }
 
+// ctxAlive reports whether the generation is still running.
+func ctxAlive(ctx context.Context) bool { return ctx.Err() == nil }
+
 func (c *UdpTransport) localDialer(remoteAddr string, port int, tunConn *net.UDPConn) {
+	c.localDialerRepeat(remoteAddr, port, tunConn, nil)
+}
+
+// localDialerRepeat carries a paired socket's traffic. announced is the datagram
+// the target arrived in: for a short while after pairing, a datagram identical
+// to it is the server repeating the target in case the first was lost, not data
+// for the backend, and is dropped — an older client forwarded everything after
+// the first datagram, but it is also never sent a repeat. Nil drops nothing.
+func (c *UdpTransport) localDialerRepeat(remoteAddr string, port int, tunConn *net.UDPConn, announced []byte) {
 	ctx := c.state.Ctx()
 	// UDP backends cannot be health-checked with a TCP probe, so the pool does
 	// not load-balance them; a configured list just uses the first entry.
@@ -289,7 +414,7 @@ func (c *UdpTransport) localDialer(remoteAddr string, port int, tunConn *net.UDP
 		done <- struct{}{}
 	}()
 
-	c.udpCopy(tunConn, remoteConn, port, false, started, &activity)
+	c.udpCopyDropping(tunConn, remoteConn, port, false, started, &activity, announced)
 	// Ending either direction must release the other reader before joining it.
 	tunConn.Close()
 	remoteConn.Close()
@@ -306,6 +431,12 @@ func (c *UdpTransport) localDialer(remoteAddr string, port int, tunConn *net.UDP
 // transport counted neither, so however much it carried the panel, the CLI, the
 // Telegram report and the traffic history all read it as an idle tunnel.
 func (c *UdpTransport) udpCopy(srcConn, dstConn *net.UDPConn, port int, dstIsTunnel bool, started time.Time, activity *atomic.Int64) {
+	c.udpCopyDropping(srcConn, dstConn, port, dstIsTunnel, started, activity, nil)
+}
+
+// udpCopyDropping is udpCopy that discards, for udpRepeatWindow after started,
+// a datagram identical to repeat. See localDialerRepeat.
+func (c *UdpTransport) udpCopyDropping(srcConn, dstConn *net.UDPConn, port int, dstIsTunnel bool, started time.Time, activity *atomic.Int64, repeat []byte) {
 	buf := make([]byte, network.MaxDatagram)
 	readTimeout := 60 * time.Second
 
@@ -334,6 +465,11 @@ func (c *UdpTransport) udpCopy(srcConn, dstConn *net.UDPConn, port int, dstIsTun
 			}
 			c.logger.Errorf("failed to read from UDP: %v", err)
 			return
+		}
+
+		if len(repeat) > 0 && n == len(repeat) && time.Since(started) < udpRepeatWindow && bytes.Equal(buf[:n], repeat) {
+			c.logger.Trace("dropping a repeat of the target address")
+			continue
 		}
 
 		if !dstIsTunnel {

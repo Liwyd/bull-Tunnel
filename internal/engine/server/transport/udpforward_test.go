@@ -181,7 +181,10 @@ func TestFlowFramesBothDirections(t *testing.T) {
 
 // A forwarded port whose UDP side cannot be bound must leave the tunnel
 // running. It used to be fatal, so one busy datagram port took down the whole
-// server — every other forwarded port with it.
+// server — every other forwarded port with it. It is not abandoned either: it
+// keeps trying until the port is free or the run ends (see bindForwardedPort and
+// TestATakenForwardedUDPPortIsBoundOnceItIsFree), and the end of the run is what
+// returns it.
 func TestABusyUDPPortIsNotFatal(t *testing.T) {
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
@@ -200,9 +203,15 @@ func TestABusyUDPPortIsNotFatal(t *testing.T) {
 	}()
 
 	select {
-	case <-done: // returned instead of killing the process
+	case <-done:
+		t.Fatal("a busy UDP port was given up on instead of being retried")
+	case <-time.After(300 * time.Millisecond): // still waiting for the port, alive
+	}
+	cancel()
+	select {
+	case <-done: // the end of the run ends the wait
 	case <-time.After(2 * time.Second):
-		t.Fatal("binding a busy UDP port neither failed nor returned")
+		t.Fatal("the end of the run did not end the wait for a busy UDP port")
 	}
 }
 

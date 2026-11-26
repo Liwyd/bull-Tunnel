@@ -53,7 +53,9 @@ func TestASilentConnectionDoesNotDelayTheGenuineClaim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the genuine claim waited behind a silent connection: %v", err)
 	}
-	if signal != utils.SG_Chan || answer != token {
+	// The signal is SG_ChanV2 from this release on, which a client of any release
+	// reads and discards: only the token is compared.
+	if signal != udpPoolAckSignal || answer != token {
 		t.Fatalf("answered %q/%d", answer, signal)
 	}
 }

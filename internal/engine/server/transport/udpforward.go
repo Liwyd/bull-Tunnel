@@ -100,9 +100,13 @@ func newUDPForwarder(logger *logrus.Logger, localAddr, remoteAddr string) (*udpF
 func startUDPForward(ctx context.Context, logger *logrus.Logger, localAddr, remoteAddr string,
 	admit func(conn net.Conn, target string) bool) {
 
-	fw, err := newUDPForwarder(logger, localAddr, remoteAddr)
-	if err != nil {
-		logger.Warnf("forwarded port %s carries TCP only — its UDP side could not be opened: %v", localAddr, err)
+	// Retried until the port is free or the run ends, like the TCP side: a UDP
+	// socket that could not be bound once used to leave this port carrying TCP
+	// only until the whole tunnel was restarted. See bindForwardedPort.
+	fw, ok := bindForwardedPort(ctx, logger, "forwarded UDP port", localAddr, func() (*udpForwarder, error) {
+		return newUDPForwarder(logger, localAddr, remoteAddr)
+	})
+	if !ok {
 		return
 	}
 	logger.Infof("UDP listener started successfully, listening on address: %s", fw.conn.LocalAddr())

@@ -94,10 +94,20 @@ func (f portForwarder) listen(localAddr, remoteAddr string) {
 	f.listeners.hold()
 	defer f.listeners.release()
 
-	listener, err := net.Listen("tcp", localAddr)
-	if err != nil {
-		// Not fatal: one port being taken must not stop the others.
-		f.log.Error(bindFailure("forwarded port", localAddr, err))
+	// The same port number, over UDP, when the tunnel forwards UDP. Its flows
+	// travel through the tunnel exactly like TCP connections do. Started before
+	// the TCP bind and on its own retry, so a TCP port that is taken does not
+	// hold the UDP one back, and the other way round.
+	if f.acceptUDP {
+		go startUDPForward(f.ctx, f.log, localAddr, remoteAddr, f.admitUDP)
+	}
+
+	// Not fatal, and not final: one port being taken must not stop the others,
+	// and when it is free again it is taken. See bindForwardedPort.
+	listener, ok := bindForwardedPort(f.ctx, f.log, "forwarded port", localAddr, func() (net.Listener, error) {
+		return net.Listen("tcp", localAddr)
+	})
+	if !ok {
 		return
 	}
 	defer listener.Close()
@@ -105,12 +115,6 @@ func (f portForwarder) listen(localAddr, remoteAddr string) {
 	f.log.Infof("listener started successfully, listening on address: %s", listener.Addr().String())
 
 	go f.accept(listener, remoteAddr)
-
-	// The same port number, over UDP, when the tunnel forwards UDP. Its flows
-	// travel through the tunnel exactly like TCP connections do.
-	if f.acceptUDP {
-		go startUDPForward(f.ctx, f.log, localAddr, remoteAddr, f.admitUDP)
-	}
 
 	<-f.ctx.Done()
 }

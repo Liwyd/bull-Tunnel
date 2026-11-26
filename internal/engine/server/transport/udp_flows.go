@@ -36,10 +36,13 @@ func (s *UdpTransport) localListener(g *udpGen, localAddr, remoteAddr string) {
 		return
 	}
 
-	listener, err := net.ListenUDP("udp", localUDPAddr)
-	if err != nil {
-		// One forwarded port, not the tunnel. See bindfail.go.
-		s.logger.Error(bindFailure("forwarded port", localAddr, err))
+	// One forwarded port, not the tunnel, and retried until the port is free or
+	// the run ends: it used to stay down until the whole transport restarted.
+	// See bindfail.go.
+	listener, ok := bindForwardedPort(g.ctx, s.logger, "forwarded port", localAddr, func() (*net.UDPConn, error) {
+		return net.ListenUDP("udp", localUDPAddr)
+	})
+	if !ok {
 		return
 	}
 
@@ -264,9 +267,56 @@ func (s *UdpTransport) handleLoop(g *udpGen, udpChan chan *LocalUDPConn, activeC
 	}
 }
 
+// udpRepeats is when, after a flow is paired, the target address is sent to the
+// client again if nothing has come back from it. Four times over the first few
+// seconds is more than enough to ride out a lost datagram on a path that loses
+// them, and few enough that a flow whose backend never answers costs four small
+// datagrams rather than a stream of them.
+//
+// The address is one datagram with no answer. When it was lost the client sat
+// waiting for it and the flow was black-holed for good: everything the user sent
+// was queued for a socket that had never been told where to forward it.
+//
+// Only a client known to ignore a repeat is sent one. An older client forwards
+// every datagram after the first as the user's data, so a repeated address would
+// reach its backend as a stray packet. What tells the two apart is that a client
+// of this release answers heartbeats on the control channel and one of an older
+// release does not (UdpTransport.clientAnswers); an older client keeps the
+// single address it always had.
+var udpRepeats = []time.Duration{300 * time.Millisecond, 700 * time.Millisecond, 1500 * time.Millisecond, 3 * time.Second}
+
+// udpClientSilence is how long a paired flow may go without a single datagram
+// from the client's socket before it is torn down.
+//
+// Activity in either direction used to keep a flow alive, so a flow whose
+// client never heard the target address — or whose client had gone — was kept
+// alive for as long as the user went on sending: the upload refreshed the idle
+// timer, nothing ever came back, the pooled connection was spent on it for good,
+// and the user's traffic went nowhere. The user's next datagram starts a fresh
+// flow on a fresh connection, so tearing this one down is what lets it recover.
+// A flow in which the client has sent anything at all is never touched by this.
+//
+// It costs a flow in which the backend truly never answers — a one-way feed —
+// one new flow a minute, which a datagram protocol survives by construction.
+//
+// A variable only so that a test can wait for it.
+var udpClientSilence = 60 * time.Second
+
 func (s *UdpTransport) udpCopy(g *udpGen, udpLocal *LocalUDPConn, udpTunnel *TunnelUDPConn, activeConnections *map[string]*LocalUDPConn, mu *sync.Mutex) {
 	ctx, cancel := context.WithCancel(g.ctx)
 	defer cancel()
+
+	// See udpClientSilence.
+	silence := time.AfterFunc(udpClientSilence, func() {
+		if !udpTunnel.heard.Load() {
+			s.logger.Debugf("nothing came back from the client in %s, closing the flow for %s", udpClientSilence, udpLocal.addr.String())
+			cancel()
+		}
+	})
+	defer silence.Stop()
+	// See udpRepeats.
+	go s.repeatAddress(ctx, udpTunnel, udpLocal.remoteAddr)
+
 	flow := &udpGen{ctx: ctx, usageMonitor: g.usageMonitor}
 	started := time.Now()
 	var activity atomic.Int64
@@ -306,6 +356,35 @@ func (s *UdpTransport) udpCopy(g *udpGen, udpLocal *LocalUDPConn, udpTunnel *Tun
 
 	// Remove tunnel connection from active connections and close the channel.
 	s.dropTunnelConn(udpTunnel)
+}
+
+// repeatAddress sends the target address again, on the udpRepeats schedule,
+// until the client's socket has said something or the flow ends. Nothing is sent
+// to a client that is not known to ignore a repeat.
+func (s *UdpTransport) repeatAddress(ctx context.Context, conn *TunnelUDPConn, address string) {
+	if !s.clientAnswers.Load() {
+		return
+	}
+	timer := time.NewTimer(0)
+	<-timer.C
+	defer timer.Stop()
+	for _, wait := range udpRepeats {
+		timer.Reset(wait)
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+		if conn.heard.Load() {
+			return
+		}
+		// Not under conn.mu: pairing took it and keeps it, which is what stops
+		// the pinger; a datagram write needs no lock of its own.
+		if _, err := conn.listener.WriteTo([]byte(address), conn.addr); err != nil {
+			return
+		}
+		s.logger.Tracef("repeated the target address to %s", conn.addr)
+	}
 }
 
 // drainFlowsOnEnd releases every flow still queued in udpChan once the
@@ -447,6 +526,9 @@ func (s *UdpTransport) udpTunnelCopy(g *udpGen, from *TunnelUDPConn, to *LocalUD
 			if !ok {
 				return
 			}
+			// The client has answered: it has the target and its backend is
+			// talking. See repeatAddress and udpClientSilence.
+			from.heard.Store(true)
 
 			packetSize := len(data)
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/Liwyd/bull-Tunnel/internal/engine/config"
 	"github.com/Liwyd/bull-Tunnel/internal/engine/tunnel/portmap"
+	"github.com/Liwyd/bull-Tunnel/internal/engine/utils/network"
 )
 
 // Which end this is. The names are geographic because that is what stays
@@ -48,8 +49,6 @@ const (
 	defaultRetryDelay   = 3 * time.Second
 	defaultBackendDial  = 10 * time.Second
 	defaultMaxFrameSize = 32768
-	defaultMaxReceive   = 4194304
-	defaultMaxStream    = 65536
 
 	// defaultACMECacheDir must survive restarts: re-issuing works, but doing
 	// it repeatedly runs into Let's Encrypt's rate limits, and then the tunnel
@@ -214,12 +213,9 @@ func (c *Config) Validate() error {
 	if c.MaxFrameSize <= 0 {
 		c.MaxFrameSize = defaultMaxFrameSize
 	}
-	if c.MaxReceiveBuffer <= 0 {
-		c.MaxReceiveBuffer = defaultMaxReceive
-	}
-	if c.MaxStreamBuffer <= 0 {
-		c.MaxStreamBuffer = defaultMaxStream
-	}
+	// The per-stream window defaults to 1 MiB, not 64 KiB, which would cap each
+	// forwarded connection at 64 KiB per round trip; see network.ResolveMuxBuffers.
+	c.MaxReceiveBuffer, c.MaxStreamBuffer = network.ResolveMuxBuffers(c.MaxReceiveBuffer, c.MaxStreamBuffer)
 	return nil
 }
 

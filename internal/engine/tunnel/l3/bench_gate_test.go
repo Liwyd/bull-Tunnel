@@ -1,6 +1,7 @@
 package l3
 
 import (
+	"os"
 	"testing"
 	"time"
 )
@@ -67,6 +68,17 @@ func hotPaths() []hotPath {
 }
 
 func TestThePacketPathStaysWithinBudget(t *testing.T) {
+	// Run on request, not on every `go test`. The ceilings are wall-clock, and
+	// however generous they are a machine that is busy with something else — a
+	// developer's laptop running the rest of the suite in parallel, a shared CI
+	// runner, a test host with other tests' goroutines still spinning — can miss
+	// them by an order of magnitude, which is a failure that says nothing about
+	// the code. The gate belongs to a job that runs it alone on a quiet machine
+	// with BT_PERF_GATE=1; the deterministic half of it, the allocation counts,
+	// is also checked by the alloc tests on every run.
+	if os.Getenv("BT_PERF_GATE") != "1" {
+		t.Skip("a wall-clock measurement: set BT_PERF_GATE=1 to run it on a quiet machine")
+	}
 	if testing.Short() {
 		t.Skip("a measurement")
 	}

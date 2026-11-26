@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -44,11 +45,12 @@ func TestNoTransportEndsTheProcessOnAFailedListen(t *testing.T) {
 
 // The two halves of the fix, which are not interchangeable.
 //
-// A forwarded port that cannot be bound is skipped: the tunnel and its other
-// ports are unaffected, and waiting would not help because the port belongs to
-// something else. The tunnel's own port cannot be skipped — without it there is
-// no tunnel — so that one is retried, because the two things that hold it (a
-// previous instance shutting down, and TIME_WAIT) both clear on their own.
+// A forwarded port that cannot be bound does not stop the tunnel or its other
+// ports, and is retried in the background until it is free
+// (TestATakenForwardedPortIsBoundOnceItIsFree). The tunnel's own port cannot be
+// skipped — without it there is no tunnel — so that one is retried in the
+// foreground, because the two things that hold it (a previous instance shutting
+// down, and TIME_WAIT) both clear on their own.
 func TestAForwardedPortIsSkippedAndTheTunnelPortIsRetried(t *testing.T) {
 	// The forwarded-port half lives in forward.go, shared by every stream
 	// transport, and is run rather than read: see
@@ -69,7 +71,7 @@ func TestAForwardedPortIsSkippedAndTheTunnelPortIsRetried(t *testing.T) {
 }
 
 // A forwarded port that is taken is reported the way bindfail.go words it and
-// skipped; the other ports of the same tunnel still serve.
+// retried; the other ports of the same tunnel serve meanwhile.
 func TestATakenForwardedPortIsReportedAndTheOthersStillServe(t *testing.T) {
 	taken, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -175,5 +177,124 @@ func TestATakenTunnelPortIsRetriedUntilItIsFree(t *testing.T) {
 	case <-admitted:
 	case <-time.After(2 * time.Second):
 		t.Fatal("a connection on the bound port was never admitted")
+	}
+}
+
+// A forwarded port that could not be bound is taken as soon as it is free.
+//
+// It used to be reported and abandoned: the goroutine for that mapping returned,
+// nothing ever came back to it, and the port stayed dead until the whole tunnel
+// was restarted — usually because the previous instance had still been closing
+// its listeners the moment the new one tried.
+func TestATakenForwardedPortIsBoundOnceItIsFree(t *testing.T) {
+	holder, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := holder.Addr().String()
+
+	var logged syncBuffer
+	log := quietLogger()
+	log.SetOutput(&logged)
+	f, stop := newTestForwarder(t, []string{addr}, 0, log)
+	defer stop()
+	f.run()
+
+	eventually(t, 3*time.Second, func() bool { return strings.Contains(logged.String(), "forwarded port "+addr) },
+		"the taken forwarded port was not reported")
+	holder.Close() // whoever had it lets go
+
+	deadline := time.Now().Add(listenRetryFirst + 3*time.Second)
+	for {
+		c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+		if err == nil {
+			c.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the forwarded port was never bound once it was free")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	// And it carries users: the accepted connection reaches the queue.
+	c := dialRetry(t, addr)
+	defer c.Close()
+	select {
+	case <-f.queue:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a user of the recovered port was never queued")
+	}
+}
+
+// The UDP side of a forwarded port has its own retry: a datagram socket that
+// was taken left the port carrying TCP only until the next restart, and a TCP
+// bind that failed held the UDP one back with it.
+func TestATakenForwardedUDPPortIsBoundOnceItIsFree(t *testing.T) {
+	holder, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := holder.LocalAddr().String()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	admitted := make(chan string, 4)
+	go startUDPForward(ctx, quietLogger(), addr, "9", func(conn net.Conn, target string) bool {
+		admitted <- target
+		return true
+	})
+
+	time.Sleep(200 * time.Millisecond) // the first attempt has failed by now
+	holder.Close()
+
+	client, err := net.Dial("udp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	deadline := time.Now().Add(listenRetryFirst + 3*time.Second)
+	for {
+		_, _ = client.Write([]byte("hello"))
+		select {
+		case <-admitted:
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the UDP side of the forwarded port was never bound once it was free")
+		}
+	}
+}
+
+// An address that no waiting can fix is reported once and not retried, and the
+// end of the run ends the wait.
+func TestBindForwardedPortStopsOnABadAddressAndOnTheEndOfTheRun(t *testing.T) {
+	calls := 0
+	_, ok := bindForwardedPort(context.Background(), quietLogger(), "forwarded port", "x", func() (net.Listener, error) {
+		calls++
+		_, err := net.ResolveUDPAddr("udp", "not an address")
+		return nil, err
+	})
+	if ok || calls != 1 {
+		t.Fatalf("a bad address gave ok=%v after %d attempts, want one attempt and false", ok, calls)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan bool, 1)
+	go func() {
+		_, ok := bindForwardedPort(ctx, quietLogger(), "forwarded port", "127.0.0.1:1", func() (net.Listener, error) {
+			return nil, &net.OpError{Op: "listen", Err: syscall.EADDRINUSE}
+		})
+		done <- ok
+	}()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("a port that never came free reported success")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the end of the run did not end the wait for the port")
 	}
 }

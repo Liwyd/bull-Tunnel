@@ -72,3 +72,32 @@ func TestResolveStaticMuxVersion(t *testing.T) {
 		}
 	}
 }
+
+// The buffer defaults are the ones that lift the per-stream throughput cap, and
+// they always form a pair smux accepts.
+func TestResolveMuxBuffers(t *testing.T) {
+	const kib, mib = 1 << 10, 1 << 20
+	for _, tc := range []struct {
+		name                 string
+		receive, stream      int
+		wantRecv, wantStream int
+	}{
+		{"nothing set", 0, 0, 4 * mib, 1 * mib},
+		{"negative is unset", -1, -5, 4 * mib, 1 * mib},
+		{"both explicit are untouched", 8 * mib, 2 * mib, 8 * mib, 2 * mib},
+		{"explicit stream, default receive", 0, 64 * kib, 4 * mib, 64 * kib},
+		{"explicit stream above the default receive raises it", 0, 8 * mib, 8 * mib, 8 * mib},
+		{"explicit receive, default stream", 16 * mib, 0, 16 * mib, 1 * mib},
+		{"explicit small receive holds the default stream down", 256 * kib, 0, 256 * kib, 256 * kib},
+		{"an explicit conflict is left for smux to report", 64 * kib, 128 * kib, 64 * kib, 128 * kib},
+	} {
+		r, s := ResolveMuxBuffers(tc.receive, tc.stream)
+		if r != tc.wantRecv || s != tc.wantStream {
+			t.Errorf("%s: ResolveMuxBuffers(%d, %d) = (%d, %d), want (%d, %d)",
+				tc.name, tc.receive, tc.stream, r, s, tc.wantRecv, tc.wantStream)
+		}
+	}
+	if DefaultMaxStreamBuffer != 1<<20 || DefaultMaxReceiveBuffer != 4<<20 {
+		t.Errorf("the defaults moved: stream %d receive %d", DefaultMaxStreamBuffer, DefaultMaxReceiveBuffer)
+	}
+}

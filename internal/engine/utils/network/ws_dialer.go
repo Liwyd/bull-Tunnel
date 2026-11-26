@@ -204,7 +204,10 @@ func attemptDialWebSocket(ctx context.Context, out *Outbound, addr string, edgeI
 					return nil, err
 				}
 				own(conn)
-				return conn, nil
+				// See upgradeConn: the mux modes read the stream behind gorilla's
+				// back, and must not have its first bytes read ahead into gorilla's
+				// buffer along with the upgrade response.
+				return newUpgradeConn(conn), nil
 			},
 		}
 	case config.WSS, config.WSSMUX:
@@ -281,7 +284,8 @@ func attemptDialWebSocket(ctx context.Context, out *Outbound, addr string, edgeI
 			WriteBufferSize: wsWriteBufferSize,
 			WriteBufferPool: wsWriteBuffers,
 			NetDialTLSContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return uconn, nil
+				// See upgradeConn.
+				return newUpgradeConn(uconn), nil
 			},
 		}
 	}

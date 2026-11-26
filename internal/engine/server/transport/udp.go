@@ -5,9 +5,11 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Liwyd/bull-Tunnel/internal/engine/metrics"
+	"github.com/Liwyd/bull-Tunnel/internal/engine/utils"
 	"github.com/Liwyd/bull-Tunnel/internal/engine/utils/network"
 	"github.com/Liwyd/bull-Tunnel/internal/engine/web"
 	"github.com/sirupsen/logrus"
@@ -69,6 +71,9 @@ type UdpTransport struct {
 	activeMu          sync.Mutex
 	controlChannel    netControl
 	limits            *limiter
+	// clientAnswers is set while the seated client has answered a heartbeat,
+	// which only a client of this release does. See udpRepeats.
+	clientAnswers atomic.Bool
 }
 
 type UdpConfig struct {
@@ -237,6 +242,19 @@ func (s *UdpTransport) acceptTunnelConn(g *udpGen, listener *net.UDPConn) {
 			s.activeMu.Lock()
 			// Check if the connection is already active
 			if existingConn, exists := s.activeConnections[key]; exists {
+				// The token again, on a socket that is already registered: a
+				// client that did not hear the acknowledgement (see ackPooled)
+				// asking once more. It is not the user's data and must never
+				// reach the user — without this a repeated token was queued as
+				// payload and later written to the user's socket, handing the
+				// tunnel's secret to whoever was on the other end of the flow.
+				// An unpaired connection is acknowledged again; a paired one
+				// is simply dropped.
+				if n == len(s.config.Token) && tokenMatches(string(buf[:n]), s.config.Token) {
+					s.activeMu.Unlock()
+					s.ackPooled(existingConn)
+					continue
+				}
 				// These bytes crossed the tunnel, so they are counted here —
 				// before the queue, which may not have room for them. A packet
 				// dropped below was still carried and still paid for, and a
@@ -292,12 +310,20 @@ func (s *UdpTransport) acceptTunnelConn(g *udpGen, listener *net.UDPConn) {
 			s.activeConnections[key] = &tunnelConn
 			s.activeMu.Unlock()
 
-			// Send the new tunnel connection to the tunnel channel
+			// Send the new tunnel connection to the tunnel channel. The mutex is
+			// held across the publish and the acknowledgement so that a flow
+			// paired with this connection the instant it is queued cannot get
+			// its target address in ahead of the acknowledgement: pairing takes
+			// the same mutex before it writes.
+			tunnelConn.mu.Lock()
 			select {
 			case g.tunnelChannel <- &tunnelConn:
+				s.sendPoolAck(&tunnelConn)
+				tunnelConn.mu.Unlock()
 				go s.keepAlive(g, &tunnelConn)
 				s.logger.Debugf("accepted tunnel connection from %s", addr.String())
 			default:
+				tunnelConn.mu.Unlock()
 				s.logger.Warn("UDP tunnel channel is full")
 				// Close the newly created connection as it couldn't be added.
 				// Under the lock: this map is read and written by every other
@@ -312,6 +338,37 @@ func (s *UdpTransport) acceptTunnelConn(g *udpGen, listener *net.UDPConn) {
 			}
 		}
 	}
+}
+
+// sendPoolAck tells a client its pooled socket has been registered.
+//
+// The registration is one datagram with no answer, so a client whose token was
+// lost could not tell it from a socket that was merely idle: it counted the slot
+// open and waited on it forever, and the slots lost this way counted against its
+// pool until it could dial no more. The acknowledgement is a ping, the one
+// datagram every client already ignores before it has been given a target, so a
+// client of any release takes it for the ping it is and a new one takes it as
+// the answer it is. The caller holds the connection's mutex.
+func (s *UdpTransport) sendPoolAck(conn *TunnelUDPConn) {
+	_, _ = conn.listener.WriteTo([]byte{utils.SG_Ping}, conn.addr)
+}
+
+// ackPooled answers a repeated token on a connection that is still waiting in
+// the pool. A connection already paired has been handed its target, and a ping
+// written after that would be forwarded to the backend as data by a client of an
+// older release — the mutex, which pairing takes and never gives back, is what
+// says which it is.
+func (s *UdpTransport) ackPooled(conn *TunnelUDPConn) {
+	if !conn.mu.TryLock() {
+		return
+	}
+	defer conn.mu.Unlock()
+	select {
+	case <-conn.ping: // pairing has begun
+		return
+	default:
+	}
+	s.sendPoolAck(conn)
 }
 
 // applyBuffers sizes a datagram socket to the configured SO_RCVBUF/SO_SNDBUF;

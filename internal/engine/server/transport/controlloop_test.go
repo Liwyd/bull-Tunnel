@@ -209,3 +209,87 @@ func TestTheReaderEndsWithTheLoop(t *testing.T) {
 	}
 	eventually(t, 3*time.Second, func() bool { return runtime.NumGoroutine() <= before+2 }, "timed out waiting for the readers to end")
 }
+
+// A client that has shown it answers heartbeats and then goes quiet — the
+// machine lost power, the path blackholes, nothing sends a FIN — is presumed
+// gone after the silence, and the seat is released. Before, the read blocked
+// until the kernel gave up on the socket (about fifteen minutes on TCP, never
+// on KCP or QUIC) and the tunnel said "Connected" the whole time.
+func TestAClientThatAnsweredAHeartbeatAndWentQuietIsPresumedGone(t *testing.T) {
+	client, restarts, _ := startLoop(t, context.Background(), func(l *controlLoop) {
+		l.silence = 400 * time.Millisecond
+	})
+	if got := readSignal(t, client, time.Second); got != utils.SG_HB {
+		t.Fatalf("first signal = %d, want a heartbeat", got)
+	}
+	if err := utils.SendBinaryByte(client, utils.SG_HB); err != nil { // the answer
+		t.Fatal(err)
+	}
+	// Nothing more from the client. The connection stays open, as a vanished
+	// peer's does.
+	deadline := time.Now().Add(3 * time.Second)
+	for restarts.Load() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("a client that answered and then fell silent kept the seat")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := restarts.Load(); n != 1 {
+		t.Fatalf("restarts = %d, want 1", n)
+	}
+}
+
+// A client that keeps answering is never presumed gone, however long it lives.
+func TestAClientThatKeepsAnsweringKeepsItsSeat(t *testing.T) {
+	client, restarts, _ := startLoop(t, context.Background(), func(l *controlLoop) {
+		// A beat well inside the silence, as the real ones are (10 s against 30).
+		l.beat = 50 * time.Millisecond
+		l.silence = 400 * time.Millisecond
+	})
+	stop := time.Now().Add(1500 * time.Millisecond) // several silences
+	for time.Now().Before(stop) {
+		_ = client.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		if b, err := utils.ReceiveBinaryByte(client); err == nil && b == utils.SG_HB {
+			if err := utils.SendBinaryByte(client, utils.SG_HB); err != nil {
+				t.Fatal(err)
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if n := restarts.Load(); n != 0 {
+		t.Fatalf("a client that answers every heartbeat was dropped %d times", n)
+	}
+}
+
+// A client of an older release never answers a heartbeat on the stream and
+// datagram carriers, so its silence means nothing and it is left alone, exactly
+// as before. The deadline exists only for a client that has shown it answers.
+func TestAClientThatNeverAnswersIsNotGivenADeadline(t *testing.T) {
+	client, restarts, _ := startLoop(t, context.Background(), func(l *controlLoop) {
+		l.silence = 200 * time.Millisecond
+	})
+	// Take its heartbeats and say nothing back, for many silences.
+	stop := time.Now().Add(1200 * time.Millisecond)
+	for time.Now().Before(stop) {
+		_ = client.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		_, _ = utils.ReceiveBinaryByte(client)
+	}
+	if n := restarts.Load(); n != 0 {
+		t.Fatalf("a client that never answers was dropped %d times; it has no deadline to miss", n)
+	}
+}
+
+// Three beats, never under thirty seconds.
+func TestTheServersSilenceIsThreeBeatsWithAFloor(t *testing.T) {
+	for beat, want := range map[time.Duration]time.Duration{
+		40 * time.Second: 30 * time.Second, // capped at 10 s by livenessBeat
+		10 * time.Second: 30 * time.Second,
+		5 * time.Second:  30 * time.Second, // 15 s is under the floor
+		time.Second:      30 * time.Second,
+		0:                30 * time.Second,
+	} {
+		if got := controlSilence(beat); got != want {
+			t.Errorf("controlSilence(%s) = %s, want %s", beat, got, want)
+		}
+	}
+}

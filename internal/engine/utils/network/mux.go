@@ -71,6 +71,60 @@ func ResolveStaticMuxVersion(configured int) int {
 	return 1
 }
 
+// The mux buffer defaults, written once for every place that builds a session.
+//
+// smux version 2 gives every stream a receive window of MaxStreamBuffer, and a
+// sender may have no more than that many bytes unacknowledged on the stream.
+// So one stream's throughput is capped at window / round-trip time whatever the
+// link can carry: with the 64 KiB that used to be the default, a 150 ms path
+// gave about 3.5 Mbit/s per connection, and a single download or speed test
+// through the tunnel never got near the bandwidth the machines have. 1 MiB
+// lifts that to about 56 Mbit/s per stream on the same path, which is what a
+// user expects from one connection.
+//
+// What it costs: the window is a ceiling on how much one stream may have
+// buffered unread, not memory held up front, and the session's receive buffer
+// (DefaultMaxReceiveBuffer) caps the unread data of the whole session whatever
+// the streams' windows add up to. So the worst case for a session stays
+// DefaultMaxReceiveBuffer, and the stream window changes only how many bytes
+// of that one stream may take. Four streams that are all backed up fill a
+// session; a session with more of them simply stops reading until they drain.
+// 4 MiB per session is kept (not raised) because a small VPS holds pool-size
+// sessions of it, and 4 MiB is already four times the largest window.
+//
+// Wire compatibility: each end announces its own window to the peer, and each
+// sender obeys the window its receiver announced, so an upgraded end opens a
+// larger window to an old peer without the old peer having to understand
+// anything; only the direction an old receiver is on stays at 64 KiB.
+const (
+	// DefaultMaxReceiveBuffer is the per-session receive budget.
+	DefaultMaxReceiveBuffer = 4 << 20
+	// DefaultMaxStreamBuffer is the per-stream receive window.
+	DefaultMaxStreamBuffer = 1 << 20
+)
+
+// ResolveMuxBuffers fills in whichever of the two buffers a configuration left
+// unset (zero or less) and returns the pair to use. A value that is set is
+// never touched.
+//
+// smux refuses a session whose stream window is larger than its receive
+// buffer, so the defaults are derived to always satisfy that: a stream window
+// that was only defaulted is held to the session buffer, and a session buffer
+// that was only defaulted is raised to a stream window the operator chose
+// explicitly. A pair the operator set in conflict is returned as is, and smux
+// reports it when the session is built, exactly as it did before.
+func ResolveMuxBuffers(receive, stream int) (int, int) {
+	switch {
+	case receive <= 0 && stream <= 0:
+		return DefaultMaxReceiveBuffer, DefaultMaxStreamBuffer
+	case receive <= 0:
+		return max(DefaultMaxReceiveBuffer, stream), stream
+	case stream <= 0:
+		return receive, min(DefaultMaxStreamBuffer, receive)
+	}
+	return receive, stream
+}
+
 // MuxSettings is the tuning both ends apply once they agree on a version.
 type MuxSettings struct {
 	MaxFrameSize     int
